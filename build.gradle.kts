@@ -8,15 +8,24 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven("https://jitpack.io")
+        maven("https://jitpack.io") // This MUST be present
     }
 
     dependencies {
-        // Update AGP to a stable version compatible with the plugin system
-        classpath("com.android.tools.build:gradle:8.1.0") 
-        // Use a generic snapshot reference that JitPack can resolve correctly
+        // Use the generic snapshot version to ensure resolution
         classpath("com.github.recloudstream:gradle:-SNAPSHOT")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.20")
+        
+        // Ensure you have these essential plugins
+        classpath("com.android.tools.build:gradle:8.2.2")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
     }
 }
 
