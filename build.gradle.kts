@@ -8,16 +8,24 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven("https://jitpack.io") // This MUST be present
+        maven("https://jitpack.io") // This is required for CloudStream plugins
     }
 
     dependencies {
-        // Use the generic snapshot version to ensure resolution
+        // Use the snapshot version as shown below
         classpath("com.github.recloudstream:gradle:-SNAPSHOT")
         
         // Ensure you have these essential plugins
         classpath("com.android.tools.build:gradle:8.2.2")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
     }
 }
 
