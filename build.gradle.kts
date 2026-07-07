@@ -17,7 +17,7 @@ buildscript {
         
         // Ensure you have these essential plugins
         classpath("com.android.tools.build:gradle:8.2.2")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
     }
 }
 
@@ -64,7 +64,7 @@ subprojects {
     }
 
     android {
-        namespace = "com.lagradost.${project.name.toLowerCase()}"
+        namespace = "com.example"
         compileSdkVersion(35) // Ensure this is a valid SDK version
 
         defaultConfig {
@@ -84,7 +84,8 @@ subprojects {
                 freeCompilerArgs = freeCompilerArgs + listOf(
                     "-Xno-call-assertions",
                     "-Xno-param-assertions",
-                    "-Xno-receiver-assertions"
+                    "-Xno-receiver-assertions",
+                    "-Xskip-metadata-version-check"
                 )
             }
         }
