@@ -64,6 +64,7 @@ subprojects {
     }
 
     android {
+        namespace = "com.lagradost.${project.name.toLowerCase()}"
         compileSdkVersion(35) // Ensure this is a valid SDK version
 
         defaultConfig {
