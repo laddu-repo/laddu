@@ -1,0 +1,27 @@
+package com.unity3d.ads.core.data.datasource;
+
+import gatewayprotocol.v1.AllowedPiiOuterClass;
+import gatewayprotocol.v1.PiiOuterClass;
+import kotlin.jvm.internal.k;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public interface PrivacyDeviceInfoDataSource {
+
+    /* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+    /* loaded from: classes.dex */
+    public static final class DefaultImpls {
+        public static /* synthetic */ PiiOuterClass.Pii fetch$default(PrivacyDeviceInfoDataSource privacyDeviceInfoDataSource, AllowedPiiOuterClass.AllowedPii allowedPii, int i6, Object obj) {
+            if (obj == null) {
+                if ((i6 & 1) != 0) {
+                    allowedPii = AllowedPiiOuterClass.AllowedPii.getDefaultInstance();
+                    k.d(allowedPii, "getDefaultInstance()");
+                }
+                return privacyDeviceInfoDataSource.fetch(allowedPii);
+            }
+            throw new UnsupportedOperationException("Super calls with default arguments not supported in this target, function: fetch");
+        }
+    }
+
+    PiiOuterClass.Pii fetch(AllowedPiiOuterClass.AllowedPii allowedPii);
+}

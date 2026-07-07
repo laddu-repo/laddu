@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:id="@+id/root_lay"
+    android:background="@drawable/bg_stream_item"
+    android:paddingLeft="@dimen/_12sdp"
+    android:paddingRight="@dimen/_12sdp"
+    android:focusable="true"
+    android:clickable="true"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/_35sdp"
+    android:layout_marginTop="@dimen/_8sdp">
+    <ImageView
+        android:id="@+id/iconTv"
+        android:layout_width="@dimen/_14sdp"
+        android:layout_height="@dimen/_14sdp"
+        android:src="@drawable/ic_list"
+        app:tint="@color/app_color"/>
+    <TextView
+        android:textSize="@dimen/_11ssp"
+        android:textColor="@color/white"
+        android:ellipsize="end"
+        android:id="@+id/streamTitle"
+        android:paddingBottom="3dp"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Stream Name"
+        android:maxLines="1"
+        android:layout_weight="1"
+        android:layout_marginStart="16dp"/>
+    <TextView
+        android:textSize="@dimen/_8ssp"
+        android:textStyle="bold"
+        android:textColor="@color/app_color"
+        android:id="@+id/badgeText"
+        android:background="@drawable/bg_stream_badge"
+        android:paddingLeft="@dimen/_4sdp"
+        android:paddingTop="@dimen/_2sdp"
+        android:paddingRight="@dimen/_4sdp"
+        android:paddingBottom="@dimen/_2sdp"
+        android:visibility="visible"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="HD"
+        android:textAllCaps="true"
+        android:layout_marginEnd="@dimen/_8sdp"/>
+</LinearLayout>

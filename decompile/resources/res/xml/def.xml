@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<defaultsMap>
+    <entry>
+        <key>baseUrl
+        </key>
+        <value>https://playfytv.store/
+        </value>
+    </entry>
+    <entry>
+        <key>userAgent
+        </key>
+        <value>Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36
+        </value>
+    </entry>
+    <entry>
+        <key>lora
+        </key>
+        <value/>
+    </entry>
+</defaultsMap>

@@ -1,0 +1,15 @@
+package l7;
+
+import com.unity3d.services.core.device.reader.JsonStorageKeyNames;
+import j1.f0;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public abstract class j {
+
+    /* renamed from: a, reason: collision with root package name */
+    public static final f0 f8280a = f0.V("ch", "size", "w", "style", "fFamily", JsonStorageKeyNames.DATA_KEY);
+
+    /* renamed from: b, reason: collision with root package name */
+    public static final f0 f8281b = f0.V("shapes");
+}

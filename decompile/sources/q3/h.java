@@ -1,0 +1,21 @@
+package q3;
+
+/* JADX INFO: compiled from: r8-map-id-df6c63c9abd8cd3f2454576be9f63d7764d15ce3d0d0a3ef71355d72d759804e */
+/* JADX INFO: loaded from: classes.dex */
+public final class h {
+
+    /* JADX INFO: renamed from: a, reason: collision with root package name */
+    public final long f10688a;
+
+    /* JADX INFO: renamed from: b, reason: collision with root package name */
+    public final boolean f10689b;
+
+    /* JADX INFO: renamed from: c, reason: collision with root package name */
+    public final int f10690c;
+
+    public h(int i, long j8, boolean z2) {
+        this.f10688a = j8;
+        this.f10689b = z2;
+        this.f10690c = i;
+    }
+}

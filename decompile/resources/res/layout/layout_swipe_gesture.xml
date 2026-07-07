@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/swipeIndicatorCardView"
+    android:visibility="gone"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_centerInParent="true"
+    app:cardBackgroundColor="@color/indicatorBackgroundColor"
+    app:cardCornerRadius="10dp">
+    <LinearLayout
+        android:gravity="bottom|center_horizontal"
+        android:orientation="vertical"
+        android:layout_width="90dp"
+        android:layout_height="100dp">
+        <ImageView
+            android:id="@+id/swipeImageView"
+            android:layout_width="35dp"
+            android:layout_height="35dp"
+            android:src="@drawable/ic_brightness_medium"/>
+        <TextView
+            android:textSize="18sp"
+            android:textColor="@color/white"
+            android:id="@+id/swipeTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:layout_marginBottom="10dp"
+            android:text="20:35"/>
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

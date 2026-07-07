@@ -1,0 +1,67 @@
+package com.unity3d.services.core.device.reader.pii;
+
+import com.unity3d.services.core.device.reader.JsonStorageKeyNames;
+import com.unity3d.services.core.misc.IJsonStorageReader;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public class PiiTrackingStatusReader {
+    private final IJsonStorageReader _jsonStorageReader;
+    private final NonBehavioralFlagReader _nonBehavioralFlagReader;
+
+    public PiiTrackingStatusReader(IJsonStorageReader iJsonStorageReader) {
+        this._jsonStorageReader = iJsonStorageReader;
+        this._nonBehavioralFlagReader = new NonBehavioralFlagReader(iJsonStorageReader);
+    }
+
+    private PiiPrivacyMode getSpmPrivacyMode() {
+        return getPrivacyMode(JsonStorageKeyNames.PRIVACY_SPM_KEY);
+    }
+
+    private PiiPrivacyMode getUserPrivacyMode() {
+        return getPrivacyMode(JsonStorageKeyNames.PRIVACY_MODE_KEY);
+    }
+
+    public PiiPrivacyMode getPrivacyMode() {
+        PiiPrivacyMode userPrivacyMode = getUserPrivacyMode();
+        PiiPrivacyMode piiPrivacyMode = PiiPrivacyMode.NULL;
+        if (userPrivacyMode == piiPrivacyMode && getSpmPrivacyMode() == piiPrivacyMode) {
+            return piiPrivacyMode;
+        }
+        PiiPrivacyMode userPrivacyMode2 = getUserPrivacyMode();
+        PiiPrivacyMode piiPrivacyMode2 = PiiPrivacyMode.APP;
+        if (userPrivacyMode2 != piiPrivacyMode2 && getSpmPrivacyMode() != piiPrivacyMode2) {
+            PiiPrivacyMode userPrivacyMode3 = getUserPrivacyMode();
+            piiPrivacyMode2 = PiiPrivacyMode.MIXED;
+            if (userPrivacyMode3 != piiPrivacyMode2 && getSpmPrivacyMode() != piiPrivacyMode2) {
+                PiiPrivacyMode userPrivacyMode4 = getUserPrivacyMode();
+                piiPrivacyMode2 = PiiPrivacyMode.NONE;
+                if (userPrivacyMode4 != piiPrivacyMode2 && getSpmPrivacyMode() != piiPrivacyMode2) {
+                    return PiiPrivacyMode.UNDEFINED;
+                }
+            }
+        }
+        return piiPrivacyMode2;
+    }
+
+    public boolean getUserNonBehavioralFlag() {
+        if (this._nonBehavioralFlagReader.getUserNonBehavioralFlag() == NonBehavioralFlag.TRUE) {
+            return true;
+        }
+        return false;
+    }
+
+    private PiiPrivacyMode getPrivacyMode(String str) {
+        String str2;
+        IJsonStorageReader iJsonStorageReader = this._jsonStorageReader;
+        if (iJsonStorageReader != null) {
+            Object obj = iJsonStorageReader.get(str);
+            if (obj instanceof String) {
+                str2 = (String) obj;
+                return PiiPrivacyMode.getPiiPrivacyMode(str2);
+            }
+        }
+        str2 = null;
+        return PiiPrivacyMode.getPiiPrivacyMode(str2);
+    }
+}

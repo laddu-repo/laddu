@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:startColor="@color/glass_nav_start"
+                android:endColor="@color/glass_nav_end"
+                android:angle="270"
+                android:type="linear"
+                android:centerColor="@color/glass_nav_center"/>
+            <solid android:color="@color/glass_nav_solid"/>
+        </shape>
+    </item>
+</layer-list>

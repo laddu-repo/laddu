@@ -1,0 +1,23 @@
+package org.chromium.net;
+
+import java.util.concurrent.Executor;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public abstract class NetworkQualityRttListener {
+    private final Executor mExecutor;
+
+    public NetworkQualityRttListener(Executor executor) {
+        if (executor != null) {
+            this.mExecutor = executor;
+            return;
+        }
+        throw new IllegalStateException("Executor must not be null");
+    }
+
+    public Executor getExecutor() {
+        return this.mExecutor;
+    }
+
+    public abstract void onRttObservation(int i6, long j, int i10);
+}

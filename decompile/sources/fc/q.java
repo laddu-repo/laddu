@@ -1,0 +1,56 @@
+package fc;
+
+/* JADX INFO: loaded from: classes.dex */
+public abstract class q {
+    public static int ad_choice = 2131951643;
+    public static int app_name = 2131951645;
+    public static int clear_data = 2131951662;
+    public static int close_drawer = 2131951664;
+    public static int com_google_firebase_crashlytics_mapping_file_id = 2131951665;
+    public static int com_google_firebase_crashlytics_version_control_info = 2131951666;
+    public static int conatact_us = 2131951685;
+    public static int copyright = 2131951687;
+    public static int cric_score = 2131951688;
+    public static int empty_error = 2131951690;
+    public static int enable_low_quality = 2131951691;
+    public static int exit_app = 2131951711;
+    public static int exo_track_selection_title_audio = 2131951757;
+    public static int exo_track_selection_title_text = 2131951758;
+    public static int exo_track_selection_title_video = 2131951759;
+    public static int floating_player = 2131951786;
+    public static int foot_score = 2131951787;
+    public static int gcm_defaultSenderId = 2131951788;
+    public static int google_api_key = 2131951789;
+    public static int google_app_id = 2131951790;
+    public static int google_crash_reporting_api_key = 2131951791;
+    public static int google_storage_bucket = 2131951792;
+    public static int hours = 2131951794;
+    public static int http_failure = 2131951795;
+    public static int join_telegram = 2131951798;
+    public static int network_stream = 2131951912;
+    public static int open_drawer = 2131951913;
+    public static int playlists = 2131951919;
+    public static int project_id = 2131951920;
+    public static int retry_txt = 2131951921;
+    public static int server_connection_error = 2131951926;
+    public static int server_unreachable_error = 2131951927;
+    public static int settings = 2131951928;
+    public static int share_app = 2131951929;
+    public static int splash_tagline = 2131951932;
+    public static int splash_tagline_two = 2131951933;
+    public static int telegram = 2131951935;
+    public static int title_categories = 2131951936;
+    public static int title_fav = 2131951937;
+    public static int title_highlights = 2131951938;
+    public static int title_live_events = 2131951939;
+    public static int title_sports = 2131951940;
+    public static int track_selection_title = 2131951941;
+    public static int update_app = 2131951942;
+    public static int update_item = 2131951943;
+    public static int update_later = 2131951944;
+    public static int update_tx = 2131951945;
+    public static int update_txt = 2131951946;
+    public static int update_txt_message = 2131951947;
+    public static int version_str = 2131951948;
+    public static int website = 2131951949;
+}

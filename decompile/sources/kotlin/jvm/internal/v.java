@@ -1,0 +1,15 @@
+package kotlin.jvm.internal;
+
+import java.io.Serializable;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public final class v implements Serializable {
+
+    /* renamed from: x, reason: collision with root package name */
+    public long f8054x;
+
+    public final String toString() {
+        return String.valueOf(this.f8054x);
+    }
+}

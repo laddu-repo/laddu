@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/sliding_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="@dimen/_5sdp"
+    app:cardBackgroundColor="@color/card_back"
+    app:cardCornerRadius="5dp"
+    app:strokeColor="@color/item_stroke"
+    app:strokeWidth="1dp">
+    <LinearLayout
+        android:gravity="center_vertical"
+        android:paddingLeft="@dimen/_8sdp"
+        android:paddingTop="@dimen/_4sdp"
+        android:paddingRight="@dimen/_8sdp"
+        android:paddingBottom="@dimen/_4sdp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_notice"
+            android:layout_marginEnd="@dimen/_6sdp"
+            app:tint="@color/gradient_end"/>
+        <TextView
+            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+            android:textSize="15sp"
+            android:ellipsize="marquee"
+            android:gravity="top"
+            android:id="@+id/message_txt"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="This is test sliding text container. Here you can show a test message to users of app"
+            android:scrollHorizontally="true"
+            android:singleLine="true"
+            android:layout_weight="1"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:fontFamily="sans-serif-medium"/>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

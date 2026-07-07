@@ -1,0 +1,15 @@
+package ie;
+
+import java.util.AbstractSet;
+import java.util.Set;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public abstract class f extends AbstractSet implements Set, we.b {
+    public abstract int a();
+
+    @Override // java.util.AbstractCollection, java.util.Collection, java.util.Set
+    public final /* bridge */ int size() {
+        return a();
+    }
+}

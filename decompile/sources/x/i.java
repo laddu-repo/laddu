@@ -1,0 +1,20 @@
+package x;
+
+/* compiled from: r8-map-id-7bd85f1e2f7c008961cee9e44e2adc91279c207f1e1906d6942eb2d5ada0c5e8 */
+/* loaded from: classes.dex */
+public final class i extends g {
+    public final /* synthetic */ j E;
+
+    public i(j jVar) {
+        this.E = jVar;
+    }
+
+    @Override // x.g
+    public final String h() {
+        h hVar = (h) this.E.f14452x.get();
+        if (hVar == null) {
+            return "Completer object has been garbage collected, future will fail soon";
+        }
+        return "tag=[" + hVar.f14448a + "]";
+    }
+}

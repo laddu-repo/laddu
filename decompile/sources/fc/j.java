@@ -1,0 +1,57 @@
+package fc;
+
+/* JADX INFO: loaded from: classes.dex */
+public abstract class j {
+    public static int app_color = 2131099677;
+    public static int aresnic = 2131099678;
+    public static int bg_main = 2131099683;
+    public static int bg_surface = 2131099684;
+    public static int black = 2131099685;
+    public static int black_90 = 2131099686;
+    public static int card_back = 2131099701;
+    public static int card_stroke = 2131099702;
+    public static int charcoal = 2131099707;
+    public static int chip_background_link = 2131099708;
+    public static int chip_stroke = 2131099709;
+    public static int chip_stroke_event = 2131099710;
+    public static int chip_stroke_link = 2131099711;
+    public static int dark = 2131099723;
+    public static int deep_aqua = 2131099724;
+    public static int event_background = 2131099769;
+    public static int foreground = 2131099778;
+    public static int full_black = 2131099781;
+    public static int glass_nav_center = 2131099782;
+    public static int glass_nav_end = 2131099783;
+    public static int glass_nav_solid = 2131099784;
+    public static int glass_nav_start = 2131099785;
+    public static int gray_10 = 2131099786;
+    public static int gray_40 = 2131099787;
+    public static int gray_60 = 2131099788;
+    public static int gray_77 = 2131099789;
+    public static int gray_95 = 2131099790;
+    public static int gull_gray = 2131099791;
+    public static int ic_launcher_background = 2131099794;
+    public static int indicatorBackgroundColor = 2131099795;
+    public static int jet_black = 2131099796;
+    public static int launcher_color = 2131099797;
+    public static int light_white = 2131099798;
+    public static int nav_active = 2131100624;
+    public static int nav_inactive = 2131100625;
+    public static int red = 2131100637;
+    public static int sandstrom = 2131100640;
+    public static int secondary_color = 2131100641;
+    public static int status_bar_glass = 2131100646;
+    public static int stroke_color = 2131100647;
+    public static int tab_active_color = 2131100654;
+    public static int tag_round_bg = 2131100655;
+    public static int tag_round_border = 2131100656;
+    public static int text_muted = 2131100657;
+    public static int text_primary = 2131100658;
+    public static int text_secondary = 2131100659;
+    public static int toolbar_color = 2131100660;
+    public static int track_tint_selector = 2131100663;
+    public static int tv_btn_back = 2131100664;
+    public static int tv_btn_stroke = 2131100665;
+    public static int white = 2131100666;
+    public static int white_smoke = 2131100667;
+}
