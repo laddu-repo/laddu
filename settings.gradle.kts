@@ -1,9 +1,11 @@
 rootProject.name = "CloudstreamPlugins"
 
-// This file sets what projects are included.
-// All new projects should get automatically included unless specified in the "disabled" variable.
+// Toolchain auto-provisioning: lets Gradle download Java 17 if not installed locally
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
 
-val disabled = listOf<String>()
+val disabled = listOf<String>("Anizen", "Reanime", "LivXow", "AniDoorPlugin", "Ppv", "OneTube", "PrimeShows", "Themoviesboss", "SSRmovies", "TwoMoviesFD", "KMMovies", "UniqueStream", "AnimeShrineDownloader")
 
 File(rootDir, ".").eachDir { dir ->
     if (!disabled.contains(dir.name) && File(dir, "build.gradle.kts").exists()) {
@@ -14,6 +16,4 @@ File(rootDir, ".").eachDir { dir ->
 fun File.eachDir(block: (File) -> Unit) {
     listFiles()?.filter { it.isDirectory }?.forEach { block(it) }
 }
-
-// To only include a single project, comment out the previous lines (except the first one), and include your plugin like so:
-// include("PluginName")
+  
