@@ -5,7 +5,7 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-val disabled = listOf<String>("Anizen", "Reanime", "LivXow", "AniDoorPlugin", "Ppv", "OneTube", "PrimeShows", "Themoviesboss", "SSRmovies", "TwoMoviesFD", "KMMovies", "UniqueStream", "AnimeShrineDownloader")
+val disabled = listOf<String>()
 
 File(rootDir, ".").eachDir { dir ->
     if (!disabled.contains(dir.name) && File(dir, "build.gradle.kts").exists()) {
