@@ -369,7 +369,7 @@ class UniqueStream : MainAPI() {
         // For yte.mediacache.cc URLs, playback works perfectly.
         suspend fun emitStreams(m3u8Url: String, label: String, isHardsub: Boolean = false) {
             val fullLabel = if (isHardsub) "$label (Hardsub)" else label
-            val isEncrypted = m3u8Url.contains("get.mediacache.cc")
+            val isEncrypted = m3u8Url.contains("mediacache.cc") && !m3u8Url.contains("yte.mediacache.cc")
             
             val customPlayHeaders = if (isEncrypted) {
                 playHeaders + mapOf(
