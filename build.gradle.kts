@@ -45,6 +45,7 @@ subprojects {
     cloudstream {
         setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/KSHITIJ8473/raghav")
         authors = listOf("KSHITIJ8473")
+        requiresResources = false
     }
 
     android {

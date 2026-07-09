@@ -369,6 +369,26 @@ class UniqueStream : MainAPI() {
         // For yte.mediacache.cc URLs, playback works perfectly.
         suspend fun emitStreams(m3u8Url: String, label: String, isHardsub: Boolean = false) {
             val fullLabel = if (isHardsub) "$label (Hardsub)" else label
+            val isEncrypted = m3u8Url.contains("get.mediacache.cc")
+            
+            var customPlayHeaders = playHeaders
+            if (isEncrypted) {
+                val keyUrl = m3u8Url.substringBeforeLast("/") + "/key.bin"
+                val base64Key = try {
+                    app.get(keyUrl, headers = playHeaders).text.trim()
+                } catch (e: Exception) {
+                    println("UniqueStream: Failed to fetch key from $keyUrl - ${e.message}")
+                    null
+                }
+                if (base64Key != null) {
+                    customPlayHeaders = playHeaders + mapOf(
+                        "X-Decrypt-Key" to base64Key,
+                        "X-Decrypt-Mode" to "CTR-LE"
+                    )
+                    println("UniqueStream: Found decryption key for $fullLabel: $base64Key")
+                }
+            }
+
             try {
                 // Use positional args (name, url, referer, headers) — same pattern
                 // as AnimetsuProvider and AniWavesExtractor.
@@ -376,10 +396,15 @@ class UniqueStream : MainAPI() {
                     "UniqueStream • $fullLabel",
                     m3u8Url,
                     "$mainUrl/",
-                    headers = playHeaders
+                    headers = customPlayHeaders
                 )
                 if (streams.isNotEmpty()) {
-                    streams.forEach(callback)
+                    streams.forEach { stream ->
+                        if (isEncrypted) {
+                            stream.headers = stream.headers + customPlayHeaders
+                        }
+                        callback(stream)
+                    }
                     found = true
                     println("UniqueStream: emitted ${streams.size} streams for '$fullLabel' from ${m3u8Url.take(60)}...")
                 } else {
@@ -392,7 +417,7 @@ class UniqueStream : MainAPI() {
                             type = ExtractorLinkType.M3U8
                         ) {
                             this.referer = "$mainUrl/"
-                            this.headers = playHeaders
+                            this.headers = customPlayHeaders
                         }
                     )
                     found = true
@@ -409,7 +434,7 @@ class UniqueStream : MainAPI() {
                         type = ExtractorLinkType.M3U8
                     ) {
                         this.referer = "$mainUrl/"
-                        this.headers = playHeaders
+                        this.headers = customPlayHeaders
                     }
                 )
                 found = true
