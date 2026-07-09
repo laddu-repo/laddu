@@ -13,6 +13,8 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.net.URLEncoder
 
 /**
@@ -174,7 +176,7 @@ class UniqueStream : MainAPI() {
         if (query.isBlank()) return emptyList()
         return try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val text = app.get("$mainUrl/api/v1/search?q=$encoded", headers = headers).text
+            val text = app.get("$mainUrl/api/v1/search?query=$encoded", headers = headers).text
             val resp = parseJson<SearchResponseData>(text)
             val results = mutableListOf<SearchResponse>()
             resp.series?.forEach { it.toSearchResponse()?.let { r -> results.add(r) } }
@@ -264,30 +266,60 @@ class UniqueStream : MainAPI() {
         val result = mutableListOf<Episode>()
 
         try {
-            // API has max limit of 20 per page — fetch all pages
             val allEps = mutableListOf<EpisodeItem>()
-            var pageNum = 1
-            while (true) {
-                val epsText = try {
-                    app.get(
-                        "$mainUrl/api/v1/season/$seasonId/episodes?page=$pageNum&limit=20&order_by=asc",
-                        headers = headers
-                    ).text
-                } catch (e: Exception) {
-                    println("UniqueStream: episodes page $pageNum failed for season $seasonId - ${e.message}")
-                    break
+            val episodeCount = season.episodeCount ?: 0
+            
+            if (episodeCount > 0) {
+                // Fetch all pages in parallel!
+                val totalPages = (episodeCount + 19) / 20
+                val semaphore = Semaphore(15) // limit to max 15 concurrent HTTP requests
+                val pagesData = coroutineScope {
+                    (1..totalPages).map { page ->
+                        async {
+                            semaphore.withPermit {
+                                val epsText = try {
+                                    app.get(
+                                        "$mainUrl/api/v1/season/$seasonId/episodes?page=$page&limit=20&order_by=asc",
+                                        headers = headers
+                                    ).text
+                                } catch (e: Exception) {
+                                    println("UniqueStream: episodes page $page failed for season $seasonId - ${e.message}")
+                                    return@withPermit emptyList<EpisodeItem>()
+                                }
+                                try {
+                                    parseJson<List<EpisodeItem>>(epsText)
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }
+                    }.awaitAll()
                 }
-                val episodes = try {
-                    parseJson<List<EpisodeItem>>(epsText)
-                } catch (_: Exception) {
-                    break
+                pagesData.forEach { allEps.addAll(it) }
+            } else {
+                // Fallback to sequential if episodeCount is missing/0
+                var pageNum = 1
+                while (true) {
+                    val epsText = try {
+                        app.get(
+                            "$mainUrl/api/v1/season/$seasonId/episodes?page=$pageNum&limit=20&order_by=asc",
+                            headers = headers
+                        ).text
+                    } catch (e: Exception) {
+                        println("UniqueStream: episodes page $pageNum failed for season $seasonId - ${e.message}")
+                        break
+                    }
+                    val episodes = try {
+                        parseJson<List<EpisodeItem>>(epsText)
+                    } catch (_: Exception) {
+                        break
+                    }
+                    if (episodes.isEmpty()) break
+                    allEps.addAll(episodes)
+                    if (episodes.size < 20) break
+                    pageNum++
+                    if (pageNum > 50) break
                 }
-                if (episodes.isEmpty()) break
-                allEps.addAll(episodes)
-                if (episodes.size < 20) break
-                pageNum++
-                // Safety limit
-                if (pageNum > 50) break
             }
 
             // Build Episode objects — store ALL available audio locales in the data
@@ -299,7 +331,6 @@ class UniqueStream : MainAPI() {
                 val epPoster = ep.image
 
                 // Determine which audio locales are available for THIS episode
-                // (from the episode's own audio_locales field if present, else from series)
                 val epAudioLocales = ep.audioLocales?.takeIf { it.isNotEmpty() }
                     ?: availableAudioLocales.takeIf { it.isNotEmpty() }
                     ?: listOf("ja-JP") // fallback
@@ -313,7 +344,7 @@ class UniqueStream : MainAPI() {
                 })
             }
         } catch (e: Exception) {
-            println("UniqueStream: season $seasonId fetch failed - ${e.message}")
+            println("UniqueStream: fetchSeasonEpisodes failed - ${e.message}")
         }
 
         return result
