@@ -16,8 +16,6 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 @CloudstreamPlugin
 class UniqueStreamPlugin : BasePlugin() {
     override fun load() {
-        // Intentionally not registering — plugin disabled.
-        // To re-enable: set status = 1 in build.gradle.kts and uncomment the line below.
-        // registerMainAPI(UniqueStream())
+        registerMainAPI(UniqueStream())
     }
 }
