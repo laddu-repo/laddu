@@ -30,7 +30,7 @@ cloudstream {
     tvTypes = listOf(
         "Live",
     )
-    requiresResources = true
+    requiresResources = false
 
     iconUrl = "https://www.google.com/s2/favicons?domain=globalmediapoint.online&sz=%size%"
 }
