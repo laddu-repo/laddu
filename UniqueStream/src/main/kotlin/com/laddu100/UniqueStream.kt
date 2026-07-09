@@ -373,7 +373,10 @@ class UniqueStream : MainAPI() {
             
             var customPlayHeaders = playHeaders
             if (isEncrypted) {
-                val keyUrl = m3u8Url.substringBeforeLast("/") + "/key.bin"
+                val query = m3u8Url.substringAfter("?", "")
+                val path = m3u8Url.substringBefore("?")
+                val keyPath = path.substringBeforeLast("/") + "/key.bin"
+                val keyUrl = if (query.isNotEmpty()) "$keyPath?$query" else keyPath
                 val base64Key = try {
                     app.get(keyUrl, headers = playHeaders).text.trim()
                 } catch (e: Exception) {
