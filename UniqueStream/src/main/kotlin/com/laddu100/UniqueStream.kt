@@ -371,25 +371,12 @@ class UniqueStream : MainAPI() {
             val fullLabel = if (isHardsub) "$label (Hardsub)" else label
             val isEncrypted = m3u8Url.contains("get.mediacache.cc")
             
-            var customPlayHeaders = playHeaders
-            if (isEncrypted) {
-                val query = m3u8Url.substringAfter("?", "")
-                val path = m3u8Url.substringBefore("?")
-                val keyPath = path.substringBeforeLast("/") + "/key.bin"
-                val keyUrl = if (query.isNotEmpty()) "$keyPath?$query" else keyPath
-                val base64Key = try {
-                    app.get(keyUrl, headers = playHeaders).text.trim()
-                } catch (e: Exception) {
-                    println("UniqueStream: Failed to fetch key from $keyUrl - ${e.message}")
-                    null
-                }
-                if (base64Key != null) {
-                    customPlayHeaders = playHeaders + mapOf(
-                        "X-Decrypt-Key" to base64Key,
-                        "X-Decrypt-Mode" to "CTR-LE"
-                    )
-                    println("UniqueStream: Found decryption key for $fullLabel: $base64Key")
-                }
+            val customPlayHeaders = if (isEncrypted) {
+                playHeaders + mapOf(
+                    "X-Decrypt-Mode" to "CTR-LE"
+                )
+            } else {
+                playHeaders
             }
 
             try {
