@@ -32,7 +32,9 @@ class TimStreamsProvider : MainAPI() {
     data class TimStream(
         @JsonProperty("name") val name: String,
         @JsonProperty("url") val url: String,
-        @JsonProperty("vip") val vip: Boolean? = null
+        @JsonProperty("vip") val vip: Boolean? = null,
+        @JsonProperty("logo") val logo: String? = null,
+        @JsonProperty("type") val type: String? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
