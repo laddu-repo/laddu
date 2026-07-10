@@ -102,11 +102,11 @@ class YupFlixProvider : MainAPI() {
         @JsonProperty("seasonNumber") val seasonNumber: Int? = null,
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("overview") val overview: String? = null,
-        @JsonProperty("episodes") val episodes: List<Episode>? = null
+        @JsonProperty("episodes") val episodes: List<EpisodeData>? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    data class Episode(
+    data class EpisodeData(
         @JsonProperty("episodeNumber") val episodeNumber: Int? = null,
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("overview") val overview: String? = null,
@@ -339,7 +339,7 @@ class YupFlixProvider : MainAPI() {
         val year = series.firstAirDate?.take(4)?.toIntOrNull()
         val genres = series.genres?.mapNotNull { it.name }?.filter { it.isNotBlank() }
 
-        val episodes = mutableListOf<Episode>()
+        val episodes = mutableListOf<com.lagradost.cloudstream3.Episode>()
         series.seasons?.forEach { season ->
             val seasonNum = season.seasonNumber ?: 1
             season.episodes?.forEach { ep ->
