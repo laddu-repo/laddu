@@ -3,6 +3,7 @@ package com.laddu100.timstreams
 import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.ValueCallback
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
@@ -12,7 +13,9 @@ import com.lagradost.api.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class StreamItem(
@@ -61,7 +64,7 @@ class TimStreamsProvider : MainAPI() {
     override var lang = "en"
     override val hasMainPage = true
     override val hasDownloadSupport = false
-    override val supportedTypes = setOf(TvType.Live, TvType.Movie, TvType.TVSeries)
+    override val supportedTypes = setOf(TvType.Live, TvType.Movie, TvType.TvSeries)
 
     companion object {
         var context: Context? = null
@@ -348,25 +351,27 @@ class TimStreamsProvider : MainAPI() {
                                             return null;
                                         })();
                                         """.trimIndent(),
-                                        null
-                                    ) { value ->
-                                        if (value != "null" && value != null) {
-                                            val url = value.trim('"')
-                                            if (url.isNotBlank() && (url.contains(".m3u8") || url.contains(".mp4"))) {
-                                                foundUrl = url
-                                                Log.d(TAG, "WebView JS found: $url")
-                                                if (cont.isActive) {
-                                                    cont.resume(createExtractorLink(
-                                                        name = "TimStreams",
-                                                        url = url,
-                                                        mainUrl = mainUrl,
-                                                        quality = Qualities.Unknown.value,
-                                                        type = if (url.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.MP4
-                                                    ))
+                                        object : ValueCallback<String> {
+                                            override fun onReceiveValue(value: String?) {
+                                                if (value != "null" && value != null) {
+                                                    val url = value.trim('"')
+                                                    if (url.isNotBlank() && (url.contains(".m3u8") || url.contains(".mp4"))) {
+                                                        foundUrl = url
+                                                        Log.d(TAG, "WebView JS found: $url")
+                                                        if (cont.isActive) {
+                                                            cont.resume(createExtractorLink(
+                                                                name = "TimStreams",
+                                                                url = url,
+                                                                mainUrl = mainUrl,
+                                                                quality = Qualities.Unknown.value,
+                                                                type = if (url.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.MP4
+                                                            ))
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
+                                    )
                                 }
                             }
                         }
