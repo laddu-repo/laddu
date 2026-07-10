@@ -441,15 +441,68 @@ class TimStreamsProvider : MainAPI() {
                         }
                     }
 
-                    // timstreams.upn.one → has its own API (encrypted) — try loadExtractor as fallback
+                    // timstreams.upn.one → custom player with encrypted API
+                    // Use WebViewResolver to load the page, let the JS player init,
+                    // and intercept the .m3u8 or .mp4 URL it requests
                     streamUrl.contains("upn.one") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is upn.one — trying loadExtractor")
-                        val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
-                        if (loaded) {
-                            found = true
-                            Log.d(TAG, "loadLinks: '$streamName' upn.one resolved via loadExtractor")
-                        } else {
-                            Log.e(TAG, "loadLinks: '$streamName' upn.one loadExtractor failed (may need custom extractor)")
+                        Log.d(TAG, "loadLinks: '$streamName' is upn.one — using WebViewResolver to intercept stream")
+                        try {
+                            val resolver = WebViewResolver(
+                                interceptUrl = Regex("""(?i)\.(m3u8|mp4)(?:\?|$)"""),
+                                additionalUrls = listOf(Regex("""(?i)\.(m3u8|mp4)(?:\?|$)""")),
+                                script = """document.querySelector('video,[role="button"],.vds-play-button,button')?.click();""",
+                                useOkhttp = false,
+                                timeout = 30_000L
+                            )
+                            val resolvedUrl = app.get(streamUrl, referer = "$mainUrl/", interceptor = resolver).url
+                            Log.d(TAG, "loadLinks: '$streamName' upn.one WebViewResolver resolved: $resolvedUrl")
+
+                            if (resolvedUrl.contains(".m3u8", ignoreCase = true) || resolvedUrl.contains(".mp4", ignoreCase = true)) {
+                                // Extract cookies from the upn.one domain
+                                val upnCookies = try {
+                                    android.webkit.CookieManager.getInstance().getCookie("https://timstreams.upn.one") ?: ""
+                                } catch (e: Exception) { "" }
+
+                                val headers = mutableMapOf(
+                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+                                    "Referer" to "https://timstreams.upn.one/"
+                                )
+                                if (upnCookies.isNotBlank()) {
+                                    headers["Cookie"] = upnCookies
+                                }
+                                Log.d(TAG, "loadLinks: '$streamName' upn.one cookies: ${upnCookies.take(80)}")
+
+                                val isM3u8 = resolvedUrl.contains(".m3u8", ignoreCase = true)
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = "$name - $streamName",
+                                        name = "$name - $streamName",
+                                        url = resolvedUrl,
+                                        type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.quality = Qualities.Unknown.value
+                                        this.headers = headers
+                                    }
+                                )
+                                found = true
+                                Log.d(TAG, "loadLinks: '$streamName' upn.one stream intercepted successfully")
+                            } else {
+                                Log.e(TAG, "loadLinks: '$streamName' upn.one WebViewResolver did not intercept stream URL (got: $resolvedUrl)")
+                                // Fallback: try loadExtractor
+                                val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
+                                if (loaded) {
+                                    found = true
+                                    Log.d(TAG, "loadLinks: '$streamName' upn.one resolved via loadExtractor fallback")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "loadLinks: '$streamName' upn.one WebViewResolver failed: ${e.message}")
+                            // Fallback: try loadExtractor
+                            val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
+                            if (loaded) {
+                                found = true
+                                Log.d(TAG, "loadLinks: '$streamName' upn.one resolved via loadExtractor fallback")
+                            }
                         }
                     }
 
