@@ -323,18 +323,32 @@ class AnidapProvider : MainAPI() {
 
             Log.d(TAG, "load: title='$title' slug=$slug episodes=$totalEps format=${detail.format}")
 
-            // 2. Fetch servers for episode 1 to get available providers
+            // 2. Try fetching servers — but ALWAYS use all 8 providers as fallback
+            val allProviders = listOf("beep", "mimi", "vee", "yuki", "loli", "uwu", "kiwi", "sora")
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
             Log.d(TAG, "load: fetching servers -> $serversUrl")
-            val serversRes = app.get(serversUrl, headers = mapOf("Referer" to "$mainUrl/"), timeout = 30_000L)
-            val servers = parseJson<ServersResponse>(serversRes.text)
-
-            val subProviders = servers.subProviders ?: emptyList()
-            val dubProviders = servers.dubProviders ?: emptyList()
-
-            Log.d(TAG, "load: subProviders=${subProviders.size} dubProviders=${dubProviders.size}")
-            subProviders.forEach { Log.d(TAG, "  sub: ${it.id} (${it.tip})") }
-            dubProviders.forEach { Log.d(TAG, "  dub: ${it.id} (${it.tip})") }
+            val serversRes = app.get(serversUrl, headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json"), timeout = 30_000L)
+            Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
+            Log.d(TAG, "load: servers response preview: ${serversRes.text.take(300)}")
+            
+            val servers = try { parseJson<ServersResponse>(serversRes.text) } catch (e: Exception) {
+                Log.e(TAG, "load: servers parse failed: ${e.message}")
+                ServersResponse()
+            }
+            
+            // Use servers response if it has providers, otherwise use all 8
+            val subProviders = servers.subProviders?.takeIf { it.isNotEmpty() } 
+                ?: allProviders.map { Provider(id = it, tip = "") }
+            val dubProviders = servers.dubProviders?.takeIf { it.isNotEmpty() } 
+                ?: allProviders.map { Provider(id = it, tip = "") }
+            
+            // Always include ALL 8 providers (servers may not list all)
+            val subAllIds = (subProviders.map { it.id } + allProviders).distinct()
+            val dubAllIds = (dubProviders.map { it.id } + allProviders).distinct()
+            
+            Log.d(TAG, "load: subProviders=${subAllIds.size} dubProviders=${dubAllIds.size}")
+            Log.d(TAG, "load: sub ids=$subAllIds")
+            Log.d(TAG, "load: dub ids=$dubAllIds")
 
             // 3. Determine sub/dub availability
             val hasSub = subProviders.isNotEmpty()
@@ -348,31 +362,53 @@ class AnidapProvider : MainAPI() {
             }
 
             // 5. Build episode lists
-            // Data format: "$slug|$epNum|$type|${providerIds.joinToString(",")}"
+            // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}"
+            // Prefix with $mainUrl| so CloudStream doesn't prepend it
             val subEpisodes = if (hasSub) (1..totalEps).map { epNum ->
-                newEpisode("$slug|$epNum|sub|${subProviders.joinToString(",") { it.id }}") {
+                newEpisode("$mainUrl|$slug|$epNum|sub|${subAllIds.joinToString(",")}") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
 
             val dubEpisodes = if (hasDub) (1..totalEps).map { epNum ->
-                newEpisode("$slug|$epNum|dub|${dubProviders.joinToString(",") { it.id }}") {
+                newEpisode("$mainUrl|$slug|$epNum|dub|${dubAllIds.joinToString(",")}") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
+            
+            // If both sub and dub are empty, force sub with all providers
+            if (subEpisodes.isEmpty() && dubEpisodes.isEmpty() && totalEps > 0) {
+                Log.d(TAG, "load: no providers from servers API, forcing all 8 for sub")
+                val forcedEps = (1..totalEps).map { epNum ->
+                    newEpisode("$mainUrl|$slug|$epNum|sub|${allProviders.joinToString(",")}") {
+                        this.episode = epNum
+                        this.name = "Episode $epNum"
+                    }
+                }
+                Log.d(TAG, "load: forced ${forcedEps.size} sub episodes with all providers")
+                newAnimeLoadResponse(title, url, TvType.Anime) {
+                    this.posterUrl = poster
+                    this.backgroundPosterUrl = banner
+                    this.plot = plot
+                    this.tags = genres
+                    this.year = year
+                    addEpisodes(DubStatus.Subbed, forcedEps)
+                }
+            } else {
 
-            Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
+                Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
 
-            newAnimeLoadResponse(title, url, tvType) {
-                this.posterUrl = poster
-                this.backgroundPosterUrl = banner
-                this.plot = plot
-                this.tags = genres
-                this.year = year
-                if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
-                if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
+                newAnimeLoadResponse(title, url, tvType) {
+                    this.posterUrl = poster
+                    this.backgroundPosterUrl = banner
+                    this.plot = plot
+                    this.tags = genres
+                    this.year = year
+                    if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
+                    if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "load FAILED: ${e.message}")
@@ -390,7 +426,10 @@ class AnidapProvider : MainAPI() {
     ): Boolean {
         Log.d(TAG, "loadLinks START: data='$data'")
 
-        val parts = data.split("|")
+        // Strip mainUrl prefix if present (CloudStream prepends it)
+        val cleanData = data.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
+        val parts = cleanData.split("|")
+        Log.d(TAG, "loadLinks: parts count=${parts.size} parts=$parts")
         if (parts.size < 4) {
             Log.e(TAG, "loadLinks: invalid data format")
             return false
@@ -411,8 +450,12 @@ class AnidapProvider : MainAPI() {
             Log.d(TAG, "loadLinks: fetching sources for provider=$providerId type=$type")
             try {
                 val sourcesUrl = "$chadUrl/sources?id=$slug&epNum=$epNum&type=$type&providerId=$providerId"
-                val sourcesRes = app.get(sourcesUrl, headers = mapOf("Referer" to "$mainUrl/"), timeout = 30_000L)
-                val sourcesData = parseJson<SourcesResponse>(sourcesRes.text)
+                val sourcesRes = app.get(sourcesUrl, headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json"), timeout = 30_000L)
+                Log.d(TAG, "loadLinks: provider=$providerId response code=${sourcesRes.code} size=${sourcesRes.text.length}")
+                val sourcesData = try { parseJson<SourcesResponse>(sourcesRes.text) } catch (e: Exception) {
+                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesRes.text.take(200)}")
+                    continue
+                }
 
                 val sources = sourcesData.sources ?: emptyList()
                 val tracks = sourcesData.tracks ?: emptyList()
