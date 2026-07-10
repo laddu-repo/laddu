@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.network.WebViewResolver
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -340,26 +341,39 @@ class TimStreamsProvider : MainAPI() {
             try {
                 // Determine the embed domain to route to the right resolver
                 when {
-                    // ritzembeds.pages.dev or vileembeds.pages.dev → CDN m3u8
+                    // ritzembeds.pages.dev or vileembeds.pages.dev → use WebViewResolver to intercept m3u8
+                    // The CDN URL is now obfuscated in the JS — can't extract statically
                     streamUrl.contains("ritzembeds.pages.dev") || streamUrl.contains("vileembeds.pages.dev") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is ritz/vile embed — extracting CDN m3u8")
-                        val embedId = extractEmbedId(streamUrl)
-                        if (embedId != null) {
-                            val m3u8Url = cdnBase + embedId + ".m3u8"
-                            Log.d(TAG, "loadLinks: '$streamName' -> CDN m3u8: $m3u8Url")
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = "$name - $streamName",
-                                    name = "$name - $streamName",
-                                    url = m3u8Url,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.quality = Qualities.Unknown.value
-                                }
+                        Log.d(TAG, "loadLinks: '$streamName' is ritz/vile embed — using WebViewResolver to intercept m3u8")
+                        try {
+                            val resolver = WebViewResolver(
+                                interceptUrl = Regex("""(?i)\.m3u8(?:\?|$)"""),
+                                additionalUrls = listOf(Regex("""(?i)\.m3u8(?:\?|$)""")),
+                                script = """document.querySelector('.vjs-big-play-button,.play-button,button,[role=button]')?.click();""",
+                                useOkhttp = false,
+                                timeout = 30_000L
                             )
-                            found = true
-                        } else {
-                            Log.e(TAG, "loadLinks: failed to extract embed ID from '$streamUrl'")
+                            val resolvedUrl = app.get(streamUrl, referer = "$mainUrl/", interceptor = resolver).url
+                            Log.d(TAG, "loadLinks: '$streamName' WebViewResolver resolved: $resolvedUrl")
+
+                            if (resolvedUrl.contains(".m3u8", ignoreCase = true)) {
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = "$name - $streamName",
+                                        name = "$name - $streamName",
+                                        url = resolvedUrl,
+                                        type = ExtractorLinkType.M3U8
+                                    ) {
+                                        this.quality = Qualities.Unknown.value
+                                    }
+                                )
+                                found = true
+                                Log.d(TAG, "loadLinks: '$streamName' m3u8 intercepted successfully")
+                            } else {
+                                Log.e(TAG, "loadLinks: '$streamName' WebViewResolver did not intercept .m3u8 (got: $resolvedUrl)")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "loadLinks: '$streamName' WebViewResolver failed: ${e.message}")
                         }
                     }
 
