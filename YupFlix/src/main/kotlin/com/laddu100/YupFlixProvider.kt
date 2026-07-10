@@ -339,7 +339,7 @@ class YupFlixProvider : MainAPI() {
         val year = series.firstAirDate?.take(4)?.toIntOrNull()
         val genres = series.genres?.mapNotNull { it.name }?.filter { it.isNotBlank() }
 
-        val episodes = mutableListOf<Episode2>()
+        val episodes = mutableListOf<Episode>()
         series.seasons?.forEach { season ->
             val seasonNum = season.seasonNumber ?: 1
             season.episodes?.forEach { ep ->
@@ -354,13 +354,12 @@ class YupFlixProvider : MainAPI() {
                     posterUrl = ep.stillPath ?: poster,
                     isSeries = true
                 )
-                episodes.add(newEpisode(
-                    data = loadData.toJson(),
-                    name = epTitle,
-                    season = seasonNum,
-                    episode = epNum,
-                    posterUrl = ep.stillPath
-                ))
+                episodes.add(newEpisode(loadData.toJson()) {
+                    this.name = epTitle
+                    this.season = seasonNum
+                    this.episode = epNum
+                    this.posterUrl = ep.stillPath
+                })
                 Log.d(TAG, "loadSeries: S${seasonNum}E$epNum '$epTitle' streams=${streamLinks.size}")
             }
         }
