@@ -3,6 +3,7 @@ package com.laddu100
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -197,7 +198,7 @@ class ReplayZoneProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         Log.d(TAG, "load START: url='$url'")
         return try {
-            val loadData = AppUtils.parseJson<LoadData>(url)
+            val loadData = parseJson<LoadData>(url)
             Log.d(TAG, "load: title='${loadData.title}' embeds=${loadData.embeds.size}")
 
             newLiveStreamLoadResponse(loadData.title, url, this.name) {
@@ -222,7 +223,7 @@ class ReplayZoneProvider : MainAPI() {
         Log.d(TAG, "loadLinks START")
 
         val loadData = try {
-            AppUtils.parseJson<LoadData>(data)
+            parseJson<LoadData>(data)
         } catch (e: Exception) {
             Log.e(TAG, "loadLinks: parse error: ${e.message}")
             return false
