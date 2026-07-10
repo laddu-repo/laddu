@@ -35,7 +35,7 @@ class YupFlixProvider : MainAPI() {
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    data class SearchResponse(
+    data class SearchApiResponse(
         @JsonProperty("movies") val movies: List<ContentItem>? = null,
         @JsonProperty("series") val series: List<ContentItem>? = null,
         @JsonProperty("total") val total: Int? = null
@@ -216,7 +216,7 @@ class YupFlixProvider : MainAPI() {
         "$apiUrl/api/movies/public" to "All"
     )
 
-    private suspend fun fetchMovies(params: String, limit: Int): List<SearchResponse2> {
+    private suspend fun fetchMovies(params: String, limit: Int): List<SearchResponse> {
         return try {
             val url = "$apiUrl/api/movies/public?$params&page=1&limit=$limit"
             Log.d(TAG, "fetchMovies: $url")
@@ -232,7 +232,7 @@ class YupFlixProvider : MainAPI() {
     }
 
     // Use CloudStream's SearchResponse via typealias to avoid conflict with our data class
-    private typealias SearchResponse2 = SearchResponse
+    
 
     private fun ContentItem.toSearchResponse(): SearchResponse? {
         val title = title ?: return null
@@ -257,7 +257,7 @@ class YupFlixProvider : MainAPI() {
             val url = "$apiUrl/api/search?q=$encoded&limit=20"
             Log.d(TAG, "search: $url")
             val res = app.get(url, timeout = 30_000L)
-            val parsed = parseJson<SearchResponse>(res.text)
+            val parsed = parseJson<SearchApiResponse>(res.text)
             Log.d(TAG, "search: movies=${parsed.movies?.size ?: 0} series=${parsed.series?.size ?: 0}")
 
             val results = mutableListOf<SearchResponse>()
