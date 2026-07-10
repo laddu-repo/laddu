@@ -154,10 +154,10 @@ class AnidapProvider : MainAPI() {
             when (request.name) {
                 "All" -> {
                     coroutineScope {
-                        // Use search with popular queries for homepage (browse APIs are unstable)
-                        val trendingDeferred = async { fetchSearch("trending") }
-                        val popularDeferred = async { fetchSearch("popular anime") }
-                        val recentDeferred = async { fetchTrendingFromAPI() }
+                        // Use trending API + real anime searches for homepage
+                        val trendingDeferred = async { fetchTrendingFromAPI() }
+                        val popularDeferred = async { fetchSearch("naruto") }
+                        val recentDeferred = async { fetchSearch("one piece") }
 
                         val trending = trendingDeferred.await()
                         if (trending.isNotEmpty()) {
@@ -177,11 +177,11 @@ class AnidapProvider : MainAPI() {
                             Log.d(TAG, "getMainPage: Recently Added -> ${recent.size}")
                         }
 
-                        // Genre-based sections
-                        kotlinx.coroutines.delay(300)
-                        val actionDeferred = async { fetchSearch("action anime") }
-                        val comedyDeferred = async { fetchSearch("comedy anime") }
-                        val fantasyDeferred = async { fetchSearch("fantasy anime") }
+                        // Genre-based sections using real anime titles
+                        kotlinx.coroutines.delay(500)
+                        val actionDeferred = async { fetchSearch("demon slayer") }
+                        val comedyDeferred = async { fetchSearch("my hero academia") }
+                        val fantasyDeferred = async { fetchSearch("jujutsu kaisen") }
 
                         val action = actionDeferred.await()
                         if (action.isNotEmpty()) {
@@ -243,7 +243,7 @@ class AnidapProvider : MainAPI() {
                     val title = node.path("title").path("userPreferred").asText()
                     val image = node.path("image").asText()
                     if (id.isNotBlank() && title.isNotBlank()) {
-                        results.add(newAnimeSearchResponse(title, id, TvType.Anime) {
+                        results.add(newAnimeSearchResponse(title, "$mainUrl|$id", TvType.Anime) {
                             this.posterUrl = image.ifBlank { null }
                             addDubStatus(dubExist = true, subExist = true)
                         })
@@ -263,8 +263,10 @@ class AnidapProvider : MainAPI() {
     private fun AnimeItem.toSearchResponse(): SearchResponse? {
         val title = getTitle()
         if (title == "Unknown") return null
+        // Use $mainUrl| prefix so CloudStream doesn't prepend it
+        val data = "$mainUrl|$id"
         Log.d(TAG, "toSearchResponse: '$title' id=$id")
-        return newAnimeSearchResponse(title, id, TvType.Anime) {
+        return newAnimeSearchResponse(title, data, TvType.Anime) {
             this.posterUrl = getPoster()
             addDubStatus(dubExist = true, subExist = true)
         }
@@ -294,7 +296,9 @@ class AnidapProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         Log.d(TAG, "load START: url='$url'")
-        val animeId = url
+        // Parse: CloudStream may prepend mainUrl → "https://anidap.se|<id>" or just "<id>"
+        val animeId = url.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
+        Log.d(TAG, "load: animeId=$animeId")
 
         return try {
             // 1. Fetch anime detail
