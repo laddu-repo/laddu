@@ -1,3 +1,8 @@
+plugins {
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
+}
+
 version = 1
 
 android {
