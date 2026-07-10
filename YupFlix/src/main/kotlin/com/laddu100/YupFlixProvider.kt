@@ -420,8 +420,8 @@ class YupFlixProvider : MainAPI() {
                             source = name,
                             streamUrl = url,
                             referer = mainUrl
-                        ).forEach {
-                            callback.invoke(it.copy(quality = quality))
+                        ).forEach { el ->
+                            callback.invoke(el)
                         }
                         found = true
                         Log.d(TAG, "loadLinks: $qualityStr m3u8 added")
