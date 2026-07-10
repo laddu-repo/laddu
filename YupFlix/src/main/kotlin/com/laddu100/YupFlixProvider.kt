@@ -354,7 +354,7 @@ class YupFlixProvider : MainAPI() {
                     posterUrl = ep.stillPath ?: poster,
                     isSeries = true
                 )
-                episodes.add(Episode2(
+                episodes.add(newEpisode(
                     data = loadData.toJson(),
                     name = epTitle,
                     season = seasonNum,
@@ -447,4 +447,4 @@ class YupFlixProvider : MainAPI() {
 }
 
 // Episode class (CloudStream's Episode has different constructor)
-private typealias Episode2 = com.lagradost.cloudstream3.Episode
+
