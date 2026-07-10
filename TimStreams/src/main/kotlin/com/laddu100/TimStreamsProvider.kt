@@ -342,7 +342,9 @@ class TimStreamsProvider : MainAPI() {
                 // Determine the embed domain to route to the right resolver
                 when {
                     // ritzembeds.pages.dev or vileembeds.pages.dev → use WebViewResolver to intercept m3u8
-                    // The CDN URL is now obfuscated in the JS — can't extract statically
+                    // The CDN URL is obfuscated in JS + the CDN is behind Cloudflare WAF
+                    // WebViewResolver solves CF + intercepts the m3u8 URL
+                    // We then extract CF cookies from CookieManager and pass them to ExoPlayer
                     streamUrl.contains("ritzembeds.pages.dev") || streamUrl.contains("vileembeds.pages.dev") -> {
                         Log.d(TAG, "loadLinks: '$streamName' is ritz/vile embed — using WebViewResolver to intercept m3u8")
                         try {
@@ -357,6 +359,42 @@ class TimStreamsProvider : MainAPI() {
                             Log.d(TAG, "loadLinks: '$streamName' WebViewResolver resolved: $resolvedUrl")
 
                             if (resolvedUrl.contains(".m3u8", ignoreCase = true)) {
+                                // Extract CF cookies from CookieManager for the CDN domain
+                                // The WebView already solved the CF challenge, cookies are in CookieManager
+                                val cdnHost = try {
+                                    val uri = android.net.Uri.parse(resolvedUrl)
+                                    "${uri.scheme}://${uri.host}"
+                                } catch (e: Exception) { null }
+
+                                val cookieStr = if (cdnHost != null) {
+                                    try {
+                                        android.webkit.CookieManager.getInstance().getCookie(cdnHost) ?: ""
+                                    } catch (e: Exception) { "" }
+                                } else { "" }
+
+                                // Also extract cookies from the ritzembeds domain
+                                val ritzCookies = try {
+                                    android.webkit.CookieManager.getInstance().getCookie("https://ritzembeds.pages.dev") ?: ""
+                                } catch (e: Exception) { "" }
+
+                                // Combine all cookies (cdn + ritzembeds)
+                                val allCookies = listOf(cookieStr, ritzCookies)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString("; ")
+
+                                Log.d(TAG, "loadLinks: '$streamName' CDN cookies: ${cookieStr.take(80)}")
+                                Log.d(TAG, "loadLinks: '$streamName' ritz cookies: ${ritzCookies.take(80)}")
+
+                                // Build headers with cookies + Referer (matching what the WebView sent)
+                                val headers = mutableMapOf(
+                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+                                    "Referer" to streamUrl,
+                                    "Origin" to "https://ritzembeds.pages.dev"
+                                )
+                                if (allCookies.isNotBlank()) {
+                                    headers["Cookie"] = allCookies
+                                }
+
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "$name - $streamName",
@@ -365,10 +403,11 @@ class TimStreamsProvider : MainAPI() {
                                         type = ExtractorLinkType.M3U8
                                     ) {
                                         this.quality = Qualities.Unknown.value
+                                        this.headers = headers
                                     }
                                 )
                                 found = true
-                                Log.d(TAG, "loadLinks: '$streamName' m3u8 intercepted successfully")
+                                Log.d(TAG, "loadLinks: '$streamName' m3u8 intercepted with cookies successfully")
                             } else {
                                 Log.e(TAG, "loadLinks: '$streamName' WebViewResolver did not intercept .m3u8 (got: $resolvedUrl)")
                             }
