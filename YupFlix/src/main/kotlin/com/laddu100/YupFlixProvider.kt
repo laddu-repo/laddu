@@ -158,13 +158,10 @@ class YupFlixProvider : MainAPI() {
             when (request.name) {
                 "All" -> {
                     coroutineScope {
-                        // Fetch all sections in parallel
+                        // Batch 1: fetch 3 sections in parallel (avoids CF rate limit)
                         val latestDeferred = async { fetchMovies("sort=latest", 30) }
                         val bollywoodDeferred = async { fetchMovies("category=Bollywood", 30) }
                         val hollywoodDeferred = async { fetchMovies("category=Hollywood", 30) }
-                        val actionDeferred = async { fetchMovies("genre=Action", 30) }
-                        val comedyDeferred = async { fetchMovies("genre=Comedy", 30) }
-                        val dramaDeferred = async { fetchMovies("genre=Drama", 30) }
 
                         val latest = latestDeferred.await()
                         if (latest.isNotEmpty()) {
@@ -183,6 +180,12 @@ class YupFlixProvider : MainAPI() {
                             lists.add(HomePageList("🎥 Hollywood", hollywood, isHorizontalImages = true))
                             Log.d(TAG, "getMainPage: Hollywood -> ${hollywood.size}")
                         }
+
+                        // Batch 2: fetch remaining 3 sections (avoids CF rate limit)
+                        kotlinx.coroutines.delay(500)
+                        val actionDeferred = async { fetchMovies("genre=Action", 30) }
+                        val comedyDeferred = async { fetchMovies("genre=Comedy", 30) }
+                        val dramaDeferred = async { fetchMovies("genre=Drama", 30) }
 
                         val action = actionDeferred.await()
                         if (action.isNotEmpty()) {
@@ -217,14 +220,28 @@ class YupFlixProvider : MainAPI() {
     )
 
     private suspend fun fetchMovies(params: String, limit: Int): List<SearchResponse> {
+        val url = "$apiUrl/api/movies/public?$params&page=1&limit=$limit"
         return try {
-            val url = "$apiUrl/api/movies/public?$params&page=1&limit=$limit"
             Log.d(TAG, "fetchMovies: $url")
             val res = app.get(url, timeout = 30_000L)
-            val parsed = parseJson<MovieListResponse>(res.text)
-            val data = parsed.data ?: emptyList()
-            Log.d(TAG, "fetchMovies: got ${data.size} items (total: ${parsed.total})")
-            data.mapNotNull { it.toSearchResponse() }
+            if (res.code == 429 || res.text.contains("error code")) {
+                Log.d(TAG, "fetchMovies: rate limited, retrying after 2s...")
+                kotlinx.coroutines.delay(2000)
+                val retryRes = app.get(url, timeout = 30_000L)
+                if (retryRes.text.contains("error code")) {
+                    Log.e(TAG, "fetchMovies: still rate limited after retry")
+                    return emptyList()
+                }
+                val parsed = parseJson<MovieListResponse>(retryRes.text)
+                val data = parsed.data ?: emptyList()
+                Log.d(TAG, "fetchMovies: got ${data.size} items after retry")
+                data.mapNotNull { it.toSearchResponse() }
+            } else {
+                val parsed = parseJson<MovieListResponse>(res.text)
+                val data = parsed.data ?: emptyList()
+                Log.d(TAG, "fetchMovies: got ${data.size} items (total: ${parsed.total})")
+                data.mapNotNull { it.toSearchResponse() }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "fetchMovies FAILED: ${e.message}")
             emptyList()
