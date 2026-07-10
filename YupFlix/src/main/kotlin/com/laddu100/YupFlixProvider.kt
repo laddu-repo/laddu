@@ -397,46 +397,51 @@ class YupFlixProvider : MainAPI() {
         }
 
         var found = false
-        for (link in loadData.streamLinks) {
-            val url = link.url ?: continue
-            val qualityStr = link.quality ?: "Unknown"
-            val quality = when {
-                qualityStr.contains("1080") -> Qualities.P1080.value
-                qualityStr.contains("720") -> Qualities.P720.value
-                qualityStr.contains("480") -> Qualities.P480.value
-                qualityStr.contains("360") -> Qualities.P360.value
-                else -> Qualities.Unknown.value
-            }
-            val sourceName = "$name - $qualityStr"
-            Log.d(TAG, "loadLinks: '$sourceName' quality=$quality url=${url.take(80)}")
-
-            try {
-                // All streams are HLS (m3u8) — use M3u8Helper for proper handling
-                if (url.contains(".m3u8") || link.type == "hls") {
-                    M3u8Helper.generateM3u8(
-                        source = sourceName,
-                        streamUrl = url,
-                        referer = mainUrl
-                    ).forEach(callback)
-                    found = true
-                    Log.d(TAG, "loadLinks: '$sourceName' m3u8 generated successfully")
-                } else {
-                    // Direct URL fallback
-                    callback.invoke(
-                        com.lagradost.cloudstream3.utils.newExtractorLink(
-                            source = sourceName,
-                            name = sourceName,
-                            url = url,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = quality
-                        }
-                    )
-                    found = true
-                    Log.d(TAG, "loadLinks: '$sourceName' direct link added")
+        // Group all streams under a single source name with different qualities
+        // ExoPlayer will show them in the quality selector (tracks section)
+        val bestUrl = loadData.streamLinks.firstNotNullOfOrNull { it.url }
+        if (bestUrl != null) {
+            Log.d(TAG, "loadLinks: single source with ${loadData.streamLinks.size} qualities")
+            for (link in loadData.streamLinks) {
+                val url = link.url ?: continue
+                val qualityStr = link.quality ?: "Unknown"
+                val quality = when {
+                    qualityStr.contains("1080") -> Qualities.P1080.value
+                    qualityStr.contains("720") -> Qualities.P720.value
+                    qualityStr.contains("480") -> Qualities.P480.value
+                    qualityStr.contains("360") -> Qualities.P360.value
+                    else -> Qualities.Unknown.value
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "loadLinks: '$sourceName' FAILED: ${e.message}")
+                Log.d(TAG, "loadLinks: quality=$qualityStr url=${url.take(80)}")
+
+                try {
+                    if (url.contains(".m3u8") || link.type == "hls") {
+                        M3u8Helper.generateM3u8(
+                            source = name,
+                            streamUrl = url,
+                            referer = mainUrl
+                        ).forEach {
+                            callback.invoke(it.copy(quality = quality))
+                        }
+                        found = true
+                        Log.d(TAG, "loadLinks: $qualityStr m3u8 added")
+                    } else {
+                        callback.invoke(
+                            com.lagradost.cloudstream3.utils.newExtractorLink(
+                                source = name,
+                                name = name,
+                                url = url,
+                                type = ExtractorLinkType.VIDEO
+                            ) {
+                                this.quality = quality
+                            }
+                        )
+                        found = true
+                        Log.d(TAG, "loadLinks: $qualityStr direct link added")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadLinks: $qualityStr FAILED: ${e.message}")
+                }
             }
         }
 
