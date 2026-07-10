@@ -421,7 +421,7 @@ class YupFlixFastProvider : MainAPI() {
                             streamUrl = url,
                             referer = mainUrl
                         ).forEach {
-                            callback.invoke(it.copy(quality = quality))
+                            callback.invoke(it)
                         }
                         found = true
                         Log.d(TAG, "loadLinks: $qualityStr m3u8 added")
