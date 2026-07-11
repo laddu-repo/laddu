@@ -7,7 +7,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
@@ -607,8 +606,11 @@ class AnidapProvider : MainAPI() {
 
                 // 2. Pass subtitles to subtitleCallback
                 for (track in tracks) {
-                    val trackUrl = track.url ?: continue
+                    var trackUrl = track.url ?: continue
                     if (trackUrl.isBlank()) continue
+                    // Fix malformed URLs from the API (e.g. "https:///subbl.krussdomi.com/..."
+                    // has an empty host — replace triple slash with double slash)
+                    trackUrl = trackUrl.replace("https:///", "https://").replace("http:///", "http://")
                     val label = track.label ?: track.lang ?: "Subtitle"
                     // Accept captions, subtitles, and metadata tracks
                     if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
@@ -640,49 +642,22 @@ class AnidapProvider : MainAPI() {
 
                     when {
                         // ── HLS m3u8 ──
-                        // Pass the FULL headers map from the API. ExoPlayer will use
-                        // these headers for the m3u8 download AND all segment downloads.
+                        // ALWAYS use a direct ExtractorLink with ExtractorLinkType.M3U8 and
+                        // the FULL headers map from the API. Do NOT use M3u8Helper — it
+                        // fetches/parses the m3u8 internally and can silently return an empty
+                        // list (causing the source to not appear). ExoPlayer handles m3u8
+                        // natively and applies the headers to ALL requests (master playlist,
+                        // sub-playlist, AND segments on cross-domain CDNs like yuki's
+                        // ik234.ovexa.buzz segment host).
                         isM3u8 -> {
-                            // For simple CDNs (Referer only), use M3u8Helper which
-                            // pre-parses the master playlist and exposes quality variants
-                            val hasOnlyReferer = apiHeaders.size == 1 &&
-                                (apiHeaders.containsKey("Referer") || apiHeaders.containsKey("referer"))
-                            val referer = apiHeaders["Referer"] ?: apiHeaders["referer"] ?: "$mainUrl/"
-
-                            if (hasOnlyReferer) {
-                                // Simple CDN — use M3u8Helper for quality variant extraction
-                                try {
-                                    M3u8Helper.generateM3u8(
-                                        source = label,
-                                        streamUrl = sourceUrl,
-                                        referer = referer
-                                    ).forEach(callback)
-                                    found = true
-                                    Log.d(TAG, "loadLinks: $providerId m3u8 (M3u8Helper) added")
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "loadLinks: $providerId M3u8Helper failed: ${e.message}")
-                                    // Fallback to direct link with full headers
-                                    callback.invoke(
-                                        newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.M3U8) {
-                                            this.headers = apiHeaders
-                                            this.quality = qualityInt
-                                        }
-                                    )
-                                    found = true
-                                    Log.d(TAG, "loadLinks: $providerId m3u8 (direct fallback) added")
+                            callback.invoke(
+                                newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.M3U8) {
+                                    this.headers = apiHeaders
+                                    this.quality = qualityInt
                                 }
-                            } else {
-                                // Complex CDN (needs Origin, User-Agent, etc.) — use direct
-                                // ExtractorLink with the FULL headers map
-                                callback.invoke(
-                                    newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.M3U8) {
-                                        this.headers = apiHeaders
-                                        this.quality = qualityInt
-                                    }
-                                )
-                                found = true
-                                Log.d(TAG, "loadLinks: $providerId m3u8 (direct, headers=${apiHeaders.keys}) added")
-                            }
+                            )
+                            found = true
+                            Log.d(TAG, "loadLinks: $providerId m3u8 (direct, headers=${apiHeaders.keys}) added")
                         }
 
                         // ── DASH mpd ── (ExoPlayer supports DASH but CloudStream's
