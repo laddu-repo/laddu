@@ -357,19 +357,39 @@ class AnidapProvider : MainAPI() {
                 ServersResponse()
             }
             
-            // Get actual provider IDs from servers response
-            val serverSubIds = servers.subProviders?.map { it.id }?.distinct() ?: emptyList()
-            val serverDubIds = servers.dubProviders?.map { it.id }?.distinct() ?: emptyList()
+            // Use ONLY the providers from servers response (they're dynamic per anime)
+            // If servers failed, fall back to all 8
+            val serverSubProviders = servers.subProviders?.takeIf { it.isNotEmpty() }
+                ?: allProviders.map { Provider(id = it, tip = "") }
+            val serverDubProviders = servers.dubProviders?.takeIf { it.isNotEmpty() }
+                ?.filter { it.id !in hardsubProviders }  // Remove hardsub from dub
+                ?: allProviders.filter { it !in hardsubProviders }.map { Provider(id = it, tip = "") }
             
-            // Always include ALL 8 providers (servers may not list all — they're dynamic)
-            val subAllIds = (serverSubIds + allProviders).distinct()
-            // For dub: include all from servers EXCEPT hardsub providers, then add all non-hardsub
-            val dubAllIds = (serverDubIds.filter { it !in hardsubProviders } + 
-                             allProviders.filter { it !in hardsubProviders }).distinct()
+            // If dub is empty after filtering hardsub, fall back to non-hardsub providers
+            val dubProvidersFinal = if (serverDubProviders.isEmpty()) {
+                allProviders.filter { it !in hardsubProviders }.map { Provider(id = it, tip = "") }
+            } else serverDubProviders
+            
+            val subAllIds = serverSubProviders.map { it.id }.distinct()
+            val dubAllIds = dubProvidersFinal.map { it.id }.distinct()
+            
+            // Build provider→tip map for source labeling
+            val providerTips = mutableMapOf<String, String>()
+            serverSubProviders.forEach { p ->
+                val tip = p.tip ?: ""
+                val isHardsub = tip.contains("Hard", ignoreCase = true) || p.id in hardsubProviders
+                providerTips[p.id] = if (isHardsub) "Hardsub" else "Soft sub"
+            }
+            dubProvidersFinal.forEach { p ->
+                if (!providerTips.containsKey(p.id)) {
+                    providerTips[p.id] = p.tip ?: "Soft sub"
+                }
+            }
             
             Log.d(TAG, "load: subProviders=${subAllIds.size} dubProviders=${dubAllIds.size}")
             Log.d(TAG, "load: sub ids=$subAllIds")
             Log.d(TAG, "load: dub ids=$dubAllIds")
+            Log.d(TAG, "load: providerTips=$providerTips")
 
             // 3. Determine sub/dub availability — always true since we force all providers
             val hasSub = subAllIds.isNotEmpty()
@@ -384,22 +404,39 @@ class AnidapProvider : MainAPI() {
 
             // 5. Build episode lists
             // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}"
-            val subEpisodes = if (hasSub) (1..totalEps).map { epNum ->
+            val subEpisodes = if (subAllIds.isNotEmpty()) (1..totalEps).map { epNum ->
                 newEpisode("$mainUrl|$slug|$epNum|sub|${subAllIds.joinToString(",")}") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
 
-            val dubEpisodes = if (hasDub) (1..totalEps).map { epNum ->
+            val dubEpisodes = if (dubAllIds.isNotEmpty()) (1..totalEps).map { epNum ->
                 newEpisode("$mainUrl|$slug|$epNum|dub|${dubAllIds.joinToString(",")}") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
             
-            // If both sub and dub are empty, force sub with all providers
+            // If both sub and dub are empty, force sub with all 8 providers
             if (subEpisodes.isEmpty() && dubEpisodes.isEmpty() && totalEps > 0) {
+                Log.d(TAG, "load: no providers from servers API, forcing all 8 for sub")
+                val forcedEps = (1..totalEps).map { epNum ->
+                    newEpisode("$mainUrl|$slug|$epNum|sub|${allProviders.joinToString(",")}") {
+                        this.episode = epNum
+                        this.name = "Episode $epNum"
+                    }
+                }
+                Log.d(TAG, "load: forced ${forcedEps.size} sub episodes with all providers")
+                newAnimeLoadResponse(title, url, TvType.Anime) {
+                    this.posterUrl = poster
+                    this.backgroundPosterUrl = banner
+                    this.plot = plot
+                    this.tags = genres
+                    this.year = year
+                    addEpisodes(DubStatus.Subbed, forcedEps)
+                }
+            } else {
                 Log.d(TAG, "load: no providers from servers API, forcing all 8 for sub")
                 val forcedEps = (1..totalEps).map { epNum ->
                     newEpisode("$mainUrl|$slug|$epNum|sub|${allProviders.joinToString(",")}") {
@@ -502,9 +539,10 @@ class AnidapProvider : MainAPI() {
                     continue
                 }
 
-                // Determine provider label (with hardsub indicator)
+                // Determine provider label with type indicator
                 val providerLabel = when (providerId) {
                     "loli", "uwu", "kiwi" -> "$providerId (Hardsub)"
+                    "beep", "mimi", "vee", "yuki", "sora" -> providerId
                     else -> providerId
                 }
 
