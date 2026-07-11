@@ -212,21 +212,14 @@ class AnidapProvider : MainAPI() {
     }
 
     /**
-     * Build a simple, consistent source label.
+     * Build a minimal source label — just the provider name (+ quality for multi-quality).
      *
-     * The site's `tip` field is inconsistent (says "Soft Sub" for dubs, etc.),
-     * so we do NOT include tip details in the label. Instead we use a clean
-     * format with just the provider name + a simple type bracket:
+     *   "Anidap - beep"
+     *   "Anidap - uwu 800p"
+     *   "Anidap - uwu 360p"
+     *   "Anidap - mimi"
      *
-     *   Sub tab, soft sub:  "Anidap - beep (Sub)"
-     *   Sub tab, hardsub:   "Anidap - uwu (Hardsubs) 800p"
-     *   Dub tab (all):      "Anidap - mimi (Dub)"
-     *   Dub tab (all):      "Anidap - uwu (Dub) 800p"
-     *
-     * Rules:
-     *   - Dub tab  → always "(Dub)" — ignore tip entirely (user selected dub)
-     *   - Sub tab  → "(Hardsubs)" if tip contains "Hard", else "(Sub)"
-     *   - Quality suffix appended for non-auto qualities (e.g. " 800p")
+     * The user already picked Sub or Dub tab, so no type/hardsub marker is needed.
      */
     private fun buildSourceLabel(
         providerId: String,
@@ -234,17 +227,11 @@ class AnidapProvider : MainAPI() {
         quality: String?,
         type: String
     ): String {
-        val bracketLabel = when {
-            type.equals("dub", ignoreCase = true) -> "Dub"
-            isHardsubProvider(tip) -> "Hardsubs"
-            else -> "Sub"
-        }
-
         val qualitySuffix = if (!quality.isNullOrBlank() && !quality.equals("auto", ignoreCase = true)) {
             " $quality"
         } else ""
 
-        return "$name - $providerId ($bracketLabel)$qualitySuffix"
+        return "$name - $providerId$qualitySuffix"
     }
 
     // ==================== getMainPage ====================
