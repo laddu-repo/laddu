@@ -26,6 +26,15 @@ class AnidapProvider : MainAPI() {
     private val chadUrl = "https://chad.anidap.se/rest/api"
     private val TAG = "Anidap"
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
+    private val chadHeaders = mapOf(
+        "Referer" to "$mainUrl/",
+        "Accept" to "application/json",
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    )
+    // Hardsub providers — only show in Sub tab, never in Dub
+    private val hardsubProviders = setOf("loli", "uwu", "kiwi")
+    // All known providers for fallback
+    private val allProviders = listOf("beep", "mimi", "vee", "yuki", "loli", "uwu", "kiwi", "sora")
 
     // ==================== DATA MODELS ====================
 
@@ -323,36 +332,48 @@ class AnidapProvider : MainAPI() {
 
             Log.d(TAG, "load: title='$title' slug=$slug episodes=$totalEps format=${detail.format}")
 
-            // 2. Try fetching servers — but ALWAYS use all 8 providers as fallback
-            val allProviders = listOf("beep", "mimi", "vee", "yuki", "loli", "uwu", "kiwi", "sora")
+            // 2. Fetch servers with retry for bot_detected
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
-            Log.d(TAG, "load: fetching servers -> $serversUrl")
-            val serversRes = app.get(serversUrl, headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json"), timeout = 30_000L)
-            Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
-            Log.d(TAG, "load: servers response preview: ${serversRes.text.take(300)}")
+            var serversJson: String? = null
+            for (attempt in 1..3) {
+                Log.d(TAG, "load: fetching servers (attempt $attempt) -> $serversUrl")
+                val serversRes = app.get(serversUrl, headers = chadHeaders, timeout = 30_000L)
+                Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
+                if (serversRes.code == 200 && !serversRes.text.contains("bot_detected") && !serversRes.text.contains("error")) {
+                    serversJson = serversRes.text
+                    break
+                }
+                Log.e(TAG, "load: servers attempt $attempt failed (code=${serversRes.code})")
+                if (attempt < 3) kotlinx.coroutines.delay(2000)
+            }
             
-            val servers = try { parseJson<ServersResponse>(serversRes.text) } catch (e: Exception) {
-                Log.e(TAG, "load: servers parse failed: ${e.message}")
+            val servers = if (serversJson != null) {
+                try { parseJson<ServersResponse>(serversJson) } catch (e: Exception) {
+                    Log.e(TAG, "load: servers parse failed: ${e.message}")
+                    ServersResponse()
+                }
+            } else {
+                Log.e(TAG, "load: all server attempts failed, using all 8 providers")
                 ServersResponse()
             }
             
-            // Use servers response if it has providers, otherwise use all 8
-            val subProviders = servers.subProviders?.takeIf { it.isNotEmpty() } 
-                ?: allProviders.map { Provider(id = it, tip = "") }
-            val dubProviders = servers.dubProviders?.takeIf { it.isNotEmpty() } 
-                ?: allProviders.map { Provider(id = it, tip = "") }
+            // Get actual provider IDs from servers response
+            val serverSubIds = servers.subProviders?.map { it.id }?.distinct() ?: emptyList()
+            val serverDubIds = servers.dubProviders?.map { it.id }?.distinct() ?: emptyList()
             
-            // Always include ALL 8 providers (servers may not list all)
-            val subAllIds = (subProviders.map { it.id } + allProviders).distinct()
-            val dubAllIds = (dubProviders.map { it.id } + allProviders).distinct()
+            // Always include ALL 8 providers (servers may not list all — they're dynamic)
+            val subAllIds = (serverSubIds + allProviders).distinct()
+            // For dub: include all from servers EXCEPT hardsub providers, then add all non-hardsub
+            val dubAllIds = (serverDubIds.filter { it !in hardsubProviders } + 
+                             allProviders.filter { it !in hardsubProviders }).distinct()
             
             Log.d(TAG, "load: subProviders=${subAllIds.size} dubProviders=${dubAllIds.size}")
             Log.d(TAG, "load: sub ids=$subAllIds")
             Log.d(TAG, "load: dub ids=$dubAllIds")
 
-            // 3. Determine sub/dub availability
-            val hasSub = subProviders.isNotEmpty()
-            val hasDub = dubProviders.isNotEmpty()
+            // 3. Determine sub/dub availability — always true since we force all providers
+            val hasSub = subAllIds.isNotEmpty()
+            val hasDub = dubAllIds.isNotEmpty()
 
             // 4. Determine TvType
             val tvType = when {
@@ -363,7 +384,6 @@ class AnidapProvider : MainAPI() {
 
             // 5. Build episode lists
             // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}"
-            // Prefix with $mainUrl| so CloudStream doesn't prepend it
             val subEpisodes = if (hasSub) (1..totalEps).map { epNum ->
                 newEpisode("$mainUrl|$slug|$epNum|sub|${subAllIds.joinToString(",")}") {
                     this.episode = epNum
@@ -450,10 +470,23 @@ class AnidapProvider : MainAPI() {
             Log.d(TAG, "loadLinks: fetching sources for provider=$providerId type=$type")
             try {
                 val sourcesUrl = "$chadUrl/sources?id=$slug&epNum=$epNum&type=$type&providerId=$providerId"
-                val sourcesRes = app.get(sourcesUrl, headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json"), timeout = 30_000L)
-                Log.d(TAG, "loadLinks: provider=$providerId response code=${sourcesRes.code} size=${sourcesRes.text.length}")
-                val sourcesData = try { parseJson<SourcesResponse>(sourcesRes.text) } catch (e: Exception) {
-                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesRes.text.take(200)}")
+                // Retry on bot_detected
+                var sourcesText: String? = null
+                for (attempt in 1..2) {
+                    val sourcesRes = app.get(sourcesUrl, headers = chadHeaders, timeout = 30_000L)
+                    Log.d(TAG, "loadLinks: provider=$providerId attempt=$attempt code=${sourcesRes.code} size=${sourcesRes.text.length}")
+                    if (sourcesRes.code == 200 && !sourcesRes.text.contains("bot_detected") && !sourcesRes.text.contains("\"error\"")) {
+                        sourcesText = sourcesRes.text
+                        break
+                    }
+                    if (attempt < 2) kotlinx.coroutines.delay(1500)
+                }
+                if (sourcesText == null) {
+                    Log.e(TAG, "loadLinks: provider=$providerId all attempts failed (bot_detected or error)")
+                    continue
+                }
+                val sourcesData = try { parseJson<SourcesResponse>(sourcesText) } catch (e: Exception) {
+                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesText.take(200)}")
                     continue
                 }
 
