@@ -454,7 +454,6 @@ class AnidapProvider : MainAPI() {
                     addEpisodes(DubStatus.Subbed, forcedEps)
                 }
             } else {
-
                 Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
 
                 newAnimeLoadResponse(title, url, tvType) {
