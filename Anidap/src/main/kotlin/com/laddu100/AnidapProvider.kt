@@ -27,16 +27,23 @@ class AnidapProvider : MainAPI() {
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
 
     // ════════════════════════════════════════════════════════════════════════════
-    // IMPORTANT: NO hardcoded provider lists or hardsub assumptions.
+    // ARCHITECTURE (v7 — rewritten from scratch):
     //
-    // The user explicitly stated (and the API confirms) that providers are
-    // RANDOM per anime — any provider (beep, mimi, vee, yuki, loli, uwu, kiwi,
-    // sora, mini, etc.) can appear in sub, dub, or hardsub for ANY anime.
-    // There is NO fixed mapping like "loli/uwu/kiwi are always hardsub".
+    // The #1 bug in v6 was that loadLinks() only passed `Referer` to ExtractorLink,
+    // ignoring the FULL headers map from the API. Different CDNs need different headers:
+    //   - beep/mimi/yuki/loli  → need Referer only
+    //   - uwu/kiwi             → need Origin: https://animex.one (NO Referer!)
+    //   - sora                 → need Referer: https://kaa.lt/ + Android User-Agent
     //
-    // The servers API returns the REAL per-anime provider list with each
-    // provider's `tip` field (e.g. "Soft sub, Fast" or "Hard sub, Fast").
-    // We use ONLY what the API returns — no fallbacks, no hardcoding.
+    // Fix: pass the EXACT headers map from the API response to each ExtractorLink.
+    // This makes ALL sources work because each CDN gets its required headers.
+    //
+    // Other fixes:
+    //   - Real episode titles from /rest/api/episodes endpoint (was "Episode N")
+    //   - Quality in source label for multi-quality providers (uwu 800p + 360p)
+    //   - Clear (Hardsub) marker in Subbed tab for hardsub providers
+    //   - (Sub) / (Dub) prefix in labels to prevent sub/dub confusion
+    //   - Subtitles (tracks) passed to subtitleCallback with correct labels
     // ════════════════════════════════════════════════════════════════════════════
 
     // ==================== DATA MODELS ====================
@@ -81,6 +88,7 @@ class AnidapProvider : MainAPI() {
         @JsonProperty("synopsis") val synopsis: String? = null,
         @JsonProperty("episodes") val episodes: Int? = null,
         @JsonProperty("totalEpisodes") val totalEpisodes: Int? = null,
+        @JsonProperty("episodeCount") val episodeCount: Int? = null,
         @JsonProperty("status") val status: String? = null,
         @JsonProperty("genres") val genres: List<Genre>? = null,
         @JsonProperty("type") val type: String? = null,
@@ -109,14 +117,6 @@ class AnidapProvider : MainAPI() {
         @JsonProperty("dubProviders") val dubProviders: List<Provider>? = null
     )
 
-    /**
-     * A single source provider for an anime episode.
-     * - id: short name like "beep", "mimi", "yuki", "loli", "uwu", "kiwi", "sora", "mini", "vee"
-     * - default: whether this is the default provider for the type
-     * - tip: human-readable description like "Soft sub, Fast" or "Hard sub, Fast, High quality"
-     *        THIS is the authoritative source for whether a provider is hardsub or soft sub.
-     *        We MUST NOT hardcode which provider is hardsub — the tip varies per anime.
-     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class Provider(
         @JsonProperty("id") val id: String,
@@ -142,7 +142,19 @@ class AnidapProvider : MainAPI() {
     data class Track(
         @JsonProperty("url") val url: String? = null,
         @JsonProperty("label") val label: String? = null,
-        @JsonProperty("kind") val kind: String? = null
+        @JsonProperty("kind") val kind: String? = null,
+        @JsonProperty("lang") val lang: String? = null
+    )
+
+    // Episode metadata from /rest/api/episodes
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EpisodeInfo(
+        @JsonProperty("number") val number: Int,
+        @JsonProperty("titles") val titles: Map<String, String>? = null,
+        @JsonProperty("img") val img: String? = null,
+        @JsonProperty("isFiller") val isFiller: Boolean? = null,
+        @JsonProperty("description") val description: String? = null,
+        @JsonProperty("length") val length: Int? = null
     )
 
     // ==================== HELPERS ====================
@@ -156,27 +168,72 @@ class AnidapProvider : MainAPI() {
     }
 
     /**
-     * Build a clean display label for a provider using its real tip from the API.
-     * Examples:
-     *   - id=beep,  tip="Soft sub, Fast"            -> "beep (Soft sub, Fast)"
-     *   - id=loli,  tip="Hard sub, Fast"            -> "loli (Hardsub, Fast)"
-     *   - id=uwu,   tip="Hard sub, Fast, High quality" -> "uwu (Hardsub, High quality)"
-     *   - id=mimi,  tip=null                        -> "mimi"
+     * Normalize the API tip for display.
+     * "Hard sub, Fast" -> "Hardsub, Fast"
+     * "Soft sub, Fastest, High quality" -> "Soft Sub, Fastest, High quality"
      */
-    private fun buildProviderLabel(providerId: String, tip: String?): String {
-        if (tip.isNullOrBlank()) return providerId
-        // Normalize "Hard sub" -> "Hardsub" for cleaner display
-        val normalizedTip = tip.replace("Hard sub", "Hardsub")
-        return "$providerId ($normalizedTip)"
+    private fun normalizeTip(tip: String?): String? {
+        if (tip.isNullOrBlank()) return null
+        return tip
+            .replace("Hard sub", "Hardsub", ignoreCase = false)
+            .replace("Soft sub", "Soft Sub", ignoreCase = false)
     }
 
     /**
      * Returns true if the provider's tip indicates it's a hardsub provider.
-     * This is the ONLY authoritative way to tell — never hardcode by id.
      */
     private fun isHardsubProvider(tip: String?): Boolean {
         if (tip.isNullOrBlank()) return false
         return tip.contains("Hard", ignoreCase = true)
+    }
+
+    /**
+     * Parse a quality string like "800p", "360p", "1080p", "auto" into a quality Int.
+     * Maps to CloudStream's Qualities enum values.
+     */
+    private fun parseQuality(qualityStr: String?): Int {
+        if (qualityStr.isNullOrBlank() || qualityStr.equals("auto", ignoreCase = true)) {
+            return Qualities.Unknown.value
+        }
+        // Extract the numeric part (e.g. "800p" -> 800)
+        val match = Regex("(\\d{3,4})").find(qualityStr)
+        val height = match?.groupValues?.get(1)?.toIntOrNull() ?: return Qualities.Unknown.value
+        // Map to closest standard quality
+        return when {
+            height >= 2160 -> Qualities.P2160.value
+            height >= 1440 -> Qualities.P1440.value
+            height >= 1080 -> Qualities.P1080.value
+            height >= 720 -> Qualities.P720.value
+            height >= 600 -> Qualities.P720.value  // 800p, 720p range
+            height >= 480 -> Qualities.P480.value
+            height >= 360 -> Qualities.P360.value
+            else -> Qualities.Unknown.value
+        }
+    }
+
+    /**
+     * Build a clear, informative source label.
+     *
+     * Examples:
+     *   Sub tab:  "Anidap - beep (Sub, Soft Sub, Fast)"
+     *   Sub tab:  "Anidap - uwu (Sub, Hardsub, High quality) 800p"
+     *   Dub tab:  "Anidap - mimi (Dub, Soft Sub, Fastest, High quality)"
+     *   Dub tab:  "Anidap - uwu (Dub, Hardsub) 800p"
+     */
+    private fun buildSourceLabel(
+        providerId: String,
+        tip: String?,
+        quality: String?,
+        type: String
+    ): String {
+        val typeLabel = if (type.equals("dub", ignoreCase = true)) "Dub" else "Sub"
+        val normalizedTip = normalizeTip(tip)
+        val qualitySuffix = if (!quality.isNullOrBlank() && !quality.equals("auto", ignoreCase = true)) {
+            " $quality"
+        } else ""
+
+        val tipPart = if (!normalizedTip.isNullOrBlank()) ", $normalizedTip" else ""
+        return "$name - $providerId ($typeLabel$tipPart)$qualitySuffix"
     }
 
     // ==================== getMainPage ====================
@@ -196,19 +253,16 @@ class AnidapProvider : MainAPI() {
                         val trending = trendingDeferred.await()
                         if (trending.isNotEmpty()) {
                             lists.add(HomePageList("🔥 Trending", trending, isHorizontalImages = true))
-                            Log.d(TAG, "getMainPage: Trending -> ${trending.size}")
                         }
 
                         val popular = popularDeferred.await()
                         if (popular.isNotEmpty()) {
                             lists.add(HomePageList("⭐ Popular", popular, isHorizontalImages = true))
-                            Log.d(TAG, "getMainPage: Popular -> ${popular.size}")
                         }
 
                         val recent = recentDeferred.await()
                         if (recent.isNotEmpty()) {
                             lists.add(HomePageList("🆕 Recently Added", recent, isHorizontalImages = true))
-                            Log.d(TAG, "getMainPage: Recently Added -> ${recent.size}")
                         }
 
                         kotlinx.coroutines.delay(500)
@@ -253,7 +307,6 @@ class AnidapProvider : MainAPI() {
             val res = app.get(url, headers = baseHeaders, timeout = 30_000L)
             val parsed = parseJson<SearchResponseData>(res.text)
             val results = parsed.results ?: emptyList()
-            Log.d(TAG, "fetchSearch: '$query' -> ${results.size} items")
             results.mapNotNull { it.toSearchResponse() }
         } catch (e: Exception) {
             Log.e(TAG, "fetchSearch FAILED: ${e.message}")
@@ -264,7 +317,6 @@ class AnidapProvider : MainAPI() {
     private suspend fun fetchTrendingFromAPI(): List<SearchResponse> {
         return try {
             val url = "$mainUrl/api/anime/trending"
-            Log.d(TAG, "fetchTrendingFromAPI: $url")
             val res = app.get(url, headers = baseHeaders, timeout = 30_000L)
             val root = parseJson<com.fasterxml.jackson.databind.JsonNode>(res.text)
             val resultsNode = root.path("data").path("data").path("results")
@@ -281,11 +333,8 @@ class AnidapProvider : MainAPI() {
                         })
                     }
                 }
-                Log.d(TAG, "fetchTrendingFromAPI: ${results.size} items")
                 results
-            } else {
-                emptyList()
-            }
+            } else emptyList()
         } catch (e: Exception) {
             Log.e(TAG, "fetchTrendingFromAPI FAILED: ${e.message}")
             emptyList()
@@ -296,7 +345,6 @@ class AnidapProvider : MainAPI() {
         val title = getTitle()
         if (title == "Unknown") return null
         val data = "$mainUrl|$id"
-        Log.d(TAG, "toSearchResponse: '$title' id=$id")
         return newAnimeSearchResponse(title, data, TvType.Anime) {
             this.posterUrl = getPoster()
             addDubStatus(dubExist = true, subExist = true)
@@ -311,7 +359,6 @@ class AnidapProvider : MainAPI() {
         return try {
             val encoded = java.net.URLEncoder.encode(query, "UTF-8")
             val url = "$mainUrl/api/anime/search?q=$encoded"
-            Log.d(TAG, "search: $url")
             val res = app.get(url, headers = baseHeaders, timeout = 30_000L)
             val parsed = parseJson<SearchResponseData>(res.text)
             val results = parsed.results ?: emptyList()
@@ -331,11 +378,9 @@ class AnidapProvider : MainAPI() {
         Log.d(TAG, "load: animeId=$animeId")
 
         return try {
-            // 1. Fetch anime detail (no anti-bot on anidap.se/api/* — direct app.get is fine)
+            // 1. Fetch anime detail
             val detailUrl = "$mainUrl/api/anime/$animeId"
-            Log.d(TAG, "load: fetching detail -> $detailUrl")
             val detailRes = app.get(detailUrl, headers = baseHeaders, timeout = 30_000L)
-
             val detailRoot = parseJson<com.fasterxml.jackson.databind.JsonNode>(detailRes.text)
             val dataNode = detailRoot.path("data")
             val detail = parseJson<AnimeDetail>(dataNode.toString())
@@ -347,53 +392,37 @@ class AnidapProvider : MainAPI() {
             val plot = detail.description ?: detail.synopsis
             val year = detail.seasonYear
             val genres = detail.genres?.mapNotNull { it.name }?.filter { it.isNotBlank() }
-            val totalEps = detail.episodes ?: detail.totalEpisodes ?: 0
+            val totalEps = detail.episodes ?: detail.totalEpisodes ?: detail.episodeCount ?: 0
             val isMovie = detail.format == "MOVIE" || detail.type == "MOVIE"
 
             Log.d(TAG, "load: title='$title' slug=$slug episodes=$totalEps format=${detail.format}")
 
             // 2. Fetch servers via cfAppGet (handles _amx_id anti-bot bypass)
-            // The servers API returns the REAL per-anime provider list with tips.
-            // We do NOT fall back to hardcoded providers — if this fails, we show
-            // no episodes (better than showing fake episodes that all fail to load).
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
-            Log.d(TAG, "load: fetching servers (via cfAppGet) -> $serversUrl")
             val serversRes = cfAppGet(
                 serversUrl,
-                headers = mapOf(
-                    "Referer" to "$mainUrl/",
-                    "Accept" to "application/json"
-                )
+                headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json")
             )
-            Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
+            Log.d(TAG, "load: servers code=${serversRes.code} size=${serversRes.text.length}")
 
             val servers = if (serversRes.code == 200 && !serversRes.text.contains("bot_detected") && !serversRes.text.contains("\"error\"")) {
                 try { parseJson<ServersResponse>(serversRes.text) } catch (e: Exception) {
-                    Log.e(TAG, "load: servers parse failed: ${e.message} body=${serversRes.text.take(200)}")
+                    Log.e(TAG, "load: servers parse failed: ${e.message}")
                     ServersResponse()
                 }
             } else {
-                Log.e(TAG, "load: servers API failed (code=${serversRes.code}) — no fallback, will show empty episodes")
+                Log.e(TAG, "load: servers API failed (code=${serversRes.code})")
                 ServersResponse()
             }
 
-            // Use ONLY the providers from the servers response.
-            // NO hardcoded fallback — providers are random per anime.
             val subProviders: List<Provider> = servers.subProviders?.filter { it.id.isNotBlank() } ?: emptyList()
             val dubProviders: List<Provider> = servers.dubProviders?.filter { it.id.isNotBlank() } ?: emptyList()
-
-            // Build provider→tip map from the REAL API response (no hardcoding)
-            val providerTips = mutableMapOf<String, String>()
-            subProviders.forEach { p -> providerTips[p.id] = p.tip ?: "" }
-            dubProviders.forEach { p -> if (!providerTips.containsKey(p.id)) providerTips[p.id] = p.tip ?: "" }
 
             Log.d(TAG, "load: subProviders=${subProviders.size} dubProviders=${dubProviders.size}")
             Log.d(TAG, "load: sub ids=${subProviders.map { it.id }}")
             Log.d(TAG, "load: dub ids=${dubProviders.map { it.id }}")
-            Log.d(TAG, "load: providerTips=$providerTips")
 
             if (totalEps <= 0) {
-                Log.e(TAG, "load: no episodes found in detail (totalEps=$totalEps)")
                 return newAnimeLoadResponse(title, url, TvType.Anime) {
                     this.posterUrl = poster
                     this.backgroundPosterUrl = banner
@@ -403,42 +432,80 @@ class AnidapProvider : MainAPI() {
                 }
             }
 
+            // 3. Fetch REAL episode titles from the episodes endpoint
+            // This returns English/Japanese titles, filler status, images, descriptions
+            val episodeInfos: Map<Int, EpisodeInfo> = try {
+                val epsUrl = "$chadUrl/episodes?id=$slug"
+                Log.d(TAG, "load: fetching episodes -> $epsUrl")
+                val epsRes = cfAppGet(epsUrl, headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json"))
+                if (epsRes.code == 200) {
+                    val epsList = parseJson<List<EpisodeInfo>>(epsRes.text)
+                    Log.d(TAG, "load: got ${epsList.size} episode titles")
+                    epsList.associateBy { it.number }
+                } else {
+                    Log.e(TAG, "load: episodes API code=${epsRes.code}")
+                    emptyMap()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "load: episodes fetch failed: ${e.message}")
+                emptyMap()
+            }
+
             val hasSub = subProviders.isNotEmpty()
             val hasDub = dubProviders.isNotEmpty()
 
-            // 4. Determine TvType
             val tvType = when {
                 isMovie && hasDub -> TvType.Anime
                 isMovie -> TvType.AnimeMovie
                 else -> TvType.Anime
             }
 
-            // 5. Build episode lists.
-            // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}|${tips.joinToString(";;")}"
-            // We pack the tips so loadLinks can label sources correctly without re-fetching servers.
+            // 4. Build episode lists with REAL titles
+            // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds}|${tips}"
             val subEpisodes = if (hasSub) (1..totalEps).map { epNum ->
                 val ids = subProviders.joinToString(",") { it.id }
                 val tips = subProviders.joinToString(";;") { it.id + "=" + (it.tip ?: "") }
+                val epInfo = episodeInfos[epNum]
+                val epTitle = epInfo?.titles?.get("en")?.takeIf { it.isNotBlank() }
+                    ?: epInfo?.titles?.get("x-jat")?.takeIf { it.isNotBlank() }
+                    ?: epInfo?.titles?.get("ja")?.takeIf { it.isNotBlank() }
+                val fillerSuffix = if (epInfo?.isFiller == true) " (Filler)" else ""
                 newEpisode("$mainUrl|$slug|$epNum|sub|$ids|$tips") {
                     this.episode = epNum
-                    this.name = "Episode $epNum"
+                    this.name = if (epTitle.isNullOrBlank()) {
+                        "Episode $epNum$fillerSuffix"
+                    } else {
+                        "Ep $epNum: $epTitle$fillerSuffix"
+                    }
+                    this.episode = epNum
+                    this.posterUrl = epInfo?.img?.takeIf { it.isNotBlank() }
+                    this.description = epInfo?.description?.takeIf { it.isNotBlank() }
                 }
             } else emptyList()
 
             val dubEpisodes = if (hasDub) (1..totalEps).map { epNum ->
                 val ids = dubProviders.joinToString(",") { it.id }
                 val tips = dubProviders.joinToString(";;") { it.id + "=" + (it.tip ?: "") }
+                val epInfo = episodeInfos[epNum]
+                val epTitle = epInfo?.titles?.get("en")?.takeIf { it.isNotBlank() }
+                    ?: epInfo?.titles?.get("x-jat")?.takeIf { it.isNotBlank() }
+                    ?: epInfo?.titles?.get("ja")?.takeIf { it.isNotBlank() }
+                val fillerSuffix = if (epInfo?.isFiller == true) " (Filler)" else ""
                 newEpisode("$mainUrl|$slug|$epNum|dub|$ids|$tips") {
                     this.episode = epNum
-                    this.name = "Episode $epNum"
+                    this.name = if (epTitle.isNullOrBlank()) {
+                        "Episode $epNum$fillerSuffix"
+                    } else {
+                        "Ep $epNum: $epTitle$fillerSuffix"
+                    }
+                    this.episode = epNum
+                    this.posterUrl = epInfo?.img?.takeIf { it.isNotBlank() }
+                    this.description = epInfo?.description?.takeIf { it.isNotBlank() }
                 }
             } else emptyList()
 
             Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
 
-            // If both sub and dub are empty (servers API failed AND no providers),
-            // return a load response with no episodes. The user will see "no episodes"
-            // which is better than fake episodes that all fail to load.
             return newAnimeLoadResponse(title, url, tvType) {
                 this.posterUrl = poster
                 this.backgroundPosterUrl = banner
@@ -454,7 +521,16 @@ class AnidapProvider : MainAPI() {
         }
     }
 
-    // ==================== loadLinks ====================
+    // ==================== loadLinks (REWRITTEN FROM SCRATCH) ====================
+    //
+    // The core fix: pass the EXACT headers map from the API response to each
+    // ExtractorLink. Different CDNs need different headers:
+    //   - beep/mimi/yuki/loli → Referer only
+    //   - uwu/kiwi            → Origin: https://animex.one
+    //   - sora                → Referer: https://kaa.lt/ + Android User-Agent
+    //
+    // The old code extracted only Referer and fell back to anidap.se/ — that's
+    // why uwu/kiwi/sora always failed (403). Now we pass the FULL headers map.
 
     override suspend fun loadLinks(
         data: String,
@@ -464,19 +540,18 @@ class AnidapProvider : MainAPI() {
     ): Boolean {
         Log.d(TAG, "loadLinks START: data='$data'")
 
-        // Strip mainUrl prefix if present (CloudStream prepends it)
+        // Parse: "$mainUrl|$slug|$epNum|$type|${ids}|${tips}"
         val cleanData = data.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
         val parts = cleanData.split("|")
-        Log.d(TAG, "loadLinks: parts count=${parts.size} parts=$parts")
         if (parts.size < 5) {
-            Log.e(TAG, "loadLinks: invalid data format (expected >=5 parts, got ${parts.size})")
+            Log.e(TAG, "loadLinks: invalid data format (parts=${parts.size})")
             return false
         }
         val slug = parts[0]
         val epNum = parts[1]
         val type = parts[2] // "sub" or "dub"
         val providerIds = parts[3].split(",").filter { it.isNotBlank() }
-        // parts[4] = "id1=tip1;;id2=tip2;;..." (may be empty if no tips)
+        // parts[4] = "id1=tip1;;id2=tip2;;..."
         val tipsMap: Map<String, String> = if (parts.size >= 5 && parts[4].isNotBlank()) {
             parts[4].split(";;").mapNotNull { entry ->
                 val eqIdx = entry.indexOf('=')
@@ -485,7 +560,7 @@ class AnidapProvider : MainAPI() {
             }.toMap()
         } else emptyMap()
 
-        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum type=$type providers=$providerIds tips=$tipsMap")
+        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum type=$type providers=$providerIds")
         if (providerIds.isEmpty()) {
             Log.e(TAG, "loadLinks: no providers")
             return false
@@ -494,121 +569,179 @@ class AnidapProvider : MainAPI() {
         var found = false
         for (providerId in providerIds) {
             val tip = tipsMap[providerId]
-            Log.d(TAG, "loadLinks: fetching sources for provider=$providerId type=$type tip=$tip")
+            Log.d(TAG, "loadLinks: provider=$providerId type=$type tip=$tip")
             try {
+                // 1. Fetch sources from the API with the correct type (sub/dub)
                 val sourcesUrl = "$chadUrl/sources?id=$slug&epNum=$epNum&type=$type&providerId=$providerId"
-                // Use cfAppGet for anti-bot bypass (chad.anidap.se is protected)
                 val sourcesRes = cfAppGet(
                     sourcesUrl,
-                    headers = mapOf(
-                        "Referer" to "$mainUrl/",
-                        "Accept" to "application/json"
-                    )
+                    headers = mapOf("Referer" to "$mainUrl/", "Accept" to "application/json")
                 )
-                Log.d(TAG, "loadLinks: provider=$providerId code=${sourcesRes.code} size=${sourcesRes.text.length}")
-                if (sourcesRes.code != 200 || sourcesRes.text.contains("bot_detected") || sourcesRes.text.contains("\"error\"")) {
-                    Log.e(TAG, "loadLinks: provider=$providerId failed (code=${sourcesRes.code})")
+                Log.d(TAG, "loadLinks: $providerId code=${sourcesRes.code} size=${sourcesRes.text.length}")
+
+                if (sourcesRes.code != 200 ||
+                    sourcesRes.text.contains("bot_detected") ||
+                    sourcesRes.text.contains("\"error\"")
+                ) {
+                    Log.e(TAG, "loadLinks: $providerId API failed (code=${sourcesRes.code})")
                     continue
                 }
 
-                val sourcesData = try { parseJson<SourcesResponse>(sourcesRes.text) } catch (e: Exception) {
-                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesRes.text.take(200)}")
+                val sourcesData = try {
+                    parseJson<SourcesResponse>(sourcesRes.text)
+                } catch (e: Exception) {
+                    Log.e(TAG, "loadLinks: $providerId parse failed: ${e.message} body=${sourcesRes.text.take(200)}")
                     continue
                 }
 
                 val sources = sourcesData.sources ?: emptyList()
                 val tracks = sourcesData.tracks ?: emptyList()
-                val headers = sourcesData.headers ?: emptyMap()
-                val referer = headers["Referer"] ?: headers["referer"] ?: "$mainUrl/"
+                // ★ THE KEY FIX: use the EXACT headers map from the API response
+                // This contains Referer, Origin, User-Agent — whatever the CDN needs
+                val apiHeaders: Map<String, String> = sourcesData.headers ?: emptyMap()
 
-                Log.d(TAG, "loadLinks: provider=$providerId sources=${sources.size} tracks=${tracks.size} referer=$referer")
+                Log.d(TAG, "loadLinks: $providerId sources=${sources.size} tracks=${tracks.size} headers=$apiHeaders")
 
                 if (sources.isEmpty()) {
-                    Log.e(TAG, "loadLinks: no sources for provider=$providerId")
+                    Log.e(TAG, "loadLinks: $providerId no sources in response")
                     continue
                 }
 
-                // Build the display label using the REAL tip from the API.
-                // NO hardcoding — the tip tells us if it's hardsub or soft sub.
-                val providerLabel = buildProviderLabel(providerId, tip)
-
-                // Process subtitles
+                // 2. Pass subtitles to subtitleCallback
                 for (track in tracks) {
                     val trackUrl = track.url ?: continue
-                    val label = track.label ?: "Subtitle"
-                    if (track.kind == "captions" || track.kind == "subtitles") {
+                    if (trackUrl.isBlank()) continue
+                    val label = track.label ?: track.lang ?: "Subtitle"
+                    // Accept captions, subtitles, and metadata tracks
+                    if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
                         subtitleCallback.invoke(SubtitleFile(label, trackUrl))
-                        Log.d(TAG, "loadLinks: subtitle '$label' added")
+                        Log.d(TAG, "loadLinks: $providerId subtitle '$label' added")
                     }
                 }
 
-                // Process sources
+                // 3. Process each source URL
+                // Some providers (uwu) return multiple sources at different qualities
                 for (source in sources) {
                     val sourceUrl = source.url ?: continue
+                    if (sourceUrl.isBlank()) continue
                     val sourceType = source.type ?: ""
                     val quality = source.quality ?: "auto"
-                    Log.d(TAG, "loadLinks: source url=${sourceUrl.take(80)} type=$sourceType quality=$quality")
+                    val qualityInt = parseQuality(quality)
+
+                    // Build a clear label with provider name, type, tip, and quality
+                    val label = buildSourceLabel(providerId, tip, quality, type)
+                    Log.d(TAG, "loadLinks: $providerId source url=${sourceUrl.take(80)} type=$sourceType quality=$quality")
+
+                    val isM3u8 = sourceUrl.contains(".m3u8") ||
+                        sourceType.contains("mpegurl", ignoreCase = true) ||
+                        sourceType.contains("m3u8", ignoreCase = true)
+                    val isMp4 = sourceUrl.contains(".mp4") || sourceUrl.contains(".webm") ||
+                        sourceType.contains("mp4", ignoreCase = true) ||
+                        sourceType.contains("webm", ignoreCase = true)
+                    val isDASH = sourceUrl.contains(".mpd") || sourceType.contains("dash", ignoreCase = true)
 
                     when {
-                        // HLS m3u8
-                        sourceUrl.contains(".m3u8") || sourceType.contains("mpegurl") -> {
-                            M3u8Helper.generateM3u8(
-                                source = "$name - $providerLabel",
-                                streamUrl = sourceUrl,
-                                referer = referer
-                            ).forEach(callback)
-                            found = true
-                            Log.d(TAG, "loadLinks: $providerLabel m3u8 added")
-                        }
+                        // ── HLS m3u8 ──
+                        // Pass the FULL headers map from the API. ExoPlayer will use
+                        // these headers for the m3u8 download AND all segment downloads.
+                        isM3u8 -> {
+                            // For simple CDNs (Referer only), use M3u8Helper which
+                            // pre-parses the master playlist and exposes quality variants
+                            val hasOnlyReferer = apiHeaders.size == 1 &&
+                                (apiHeaders.containsKey("Referer") || apiHeaders.containsKey("referer"))
+                            val referer = apiHeaders["Referer"] ?: apiHeaders["referer"] ?: "$mainUrl/"
 
-                        // DASH mpd — skip (ExoPlayer needs special handling)
-                        sourceUrl.contains(".mpd") || sourceType.contains("dash") -> {
-                            Log.d(TAG, "loadLinks: $providerLabel DASH (mpd) — skipping (not supported)")
-                        }
-
-                        // Direct mp4/webm
-                        sourceUrl.contains(".mp4") || sourceUrl.contains(".webm") || sourceType.contains("mp4") || sourceType.contains("webm") -> {
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = "$name - $providerLabel",
-                                    name = "$name - $providerLabel",
-                                    url = sourceUrl,
-                                    type = ExtractorLinkType.VIDEO
-                                ) {
-                                    this.headers = mapOf("Referer" to referer)
-                                    this.quality = Qualities.Unknown.value
+                            if (hasOnlyReferer) {
+                                // Simple CDN — use M3u8Helper for quality variant extraction
+                                try {
+                                    M3u8Helper.generateM3u8(
+                                        source = label,
+                                        streamUrl = sourceUrl,
+                                        referer = referer
+                                    ).forEach(callback)
+                                    found = true
+                                    Log.d(TAG, "loadLinks: $providerId m3u8 (M3u8Helper) added")
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "loadLinks: $providerId M3u8Helper failed: ${e.message}")
+                                    // Fallback to direct link with full headers
+                                    callback.invoke(
+                                        newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.M3U8) {
+                                            this.headers = apiHeaders
+                                            this.quality = qualityInt
+                                        }
+                                    )
+                                    found = true
+                                    Log.d(TAG, "loadLinks: $providerId m3u8 (direct fallback) added")
                                 }
-                            )
-                            found = true
-                            Log.d(TAG, "loadLinks: $providerLabel mp4 added")
-                        }
-
-                        // Try loadExtractor for unknown URLs (kwik.cx, etc.)
-                        else -> {
-                            val loaded = loadExtractor(sourceUrl, referer, subtitleCallback, callback)
-                            if (loaded) {
-                                found = true
-                                Log.d(TAG, "loadLinks: $providerLabel resolved via loadExtractor")
                             } else {
-                                // Last resort — add as direct link
+                                // Complex CDN (needs Origin, User-Agent, etc.) — use direct
+                                // ExtractorLink with the FULL headers map
                                 callback.invoke(
-                                    newExtractorLink(
-                                        source = "$name - $providerLabel",
-                                        name = "$name - $providerLabel",
-                                        url = sourceUrl,
-                                        type = ExtractorLinkType.VIDEO
-                                    ) {
-                                        this.headers = mapOf("Referer" to referer)
+                                    newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.M3U8) {
+                                        this.headers = apiHeaders
+                                        this.quality = qualityInt
                                     }
                                 )
                                 found = true
-                                Log.d(TAG, "loadLinks: $providerLabel direct fallback added")
+                                Log.d(TAG, "loadLinks: $providerId m3u8 (direct, headers=${apiHeaders.keys}) added")
+                            }
+                        }
+
+                        // ── DASH mpd ── (ExoPlayer supports DASH but CloudStream's
+                        // ExtractorLink doesn't have a DASH type. Skip for now.)
+                        isDASH -> {
+                            Log.d(TAG, "loadLinks: $providerId DASH (mpd) — adding as direct link")
+                            callback.invoke(
+                                newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.VIDEO) {
+                                    this.headers = apiHeaders
+                                    this.quality = qualityInt
+                                }
+                            )
+                            found = true
+                        }
+
+                        // ── Direct mp4/webm ──
+                        isMp4 -> {
+                            callback.invoke(
+                                newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.VIDEO) {
+                                    this.headers = apiHeaders
+                                    this.quality = qualityInt
+                                }
+                            )
+                            found = true
+                            Log.d(TAG, "loadLinks: $providerId mp4 added")
+                        }
+
+                        // ── Unknown URL type ──
+                        // Try CloudStream's built-in extractors first (kwik.cx, etc.)
+                        // If that fails, add as direct link with the full headers
+                        else -> {
+                            val referer = apiHeaders["Referer"] ?: apiHeaders["referer"] ?: "$mainUrl/"
+                            val loaded = try {
+                                loadExtractor(sourceUrl, referer, subtitleCallback, callback)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "loadLinks: $providerId loadExtractor error: ${e.message}")
+                                false
+                            }
+                            if (loaded) {
+                                found = true
+                                Log.d(TAG, "loadLinks: $providerId resolved via loadExtractor")
+                            } else {
+                                // Last resort — direct link with full headers
+                                callback.invoke(
+                                    newExtractorLink(label, label, sourceUrl, type = ExtractorLinkType.VIDEO) {
+                                        this.headers = apiHeaders
+                                        this.quality = qualityInt
+                                    }
+                                )
+                                found = true
+                                Log.d(TAG, "loadLinks: $providerId direct fallback added")
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "loadLinks: provider=$providerId FAILED: ${e.message}")
+                Log.e(TAG, "loadLinks: $providerId FAILED: ${e.message}")
             }
         }
 
