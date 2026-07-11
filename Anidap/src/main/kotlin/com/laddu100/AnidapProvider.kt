@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.M3u8Helper
@@ -26,15 +25,19 @@ class AnidapProvider : MainAPI() {
     private val chadUrl = "https://chad.anidap.se/rest/api"
     private val TAG = "Anidap"
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
-    private val chadHeaders = mapOf(
-        "Referer" to "$mainUrl/",
-        "Accept" to "application/json",
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
-    )
-    // Hardsub providers — only show in Sub tab, never in Dub
-    private val hardsubProviders = setOf("loli", "uwu", "kiwi")
-    // All known providers for fallback
-    private val allProviders = listOf("beep", "mimi", "vee", "yuki", "loli", "uwu", "kiwi", "sora")
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // IMPORTANT: NO hardcoded provider lists or hardsub assumptions.
+    //
+    // The user explicitly stated (and the API confirms) that providers are
+    // RANDOM per anime — any provider (beep, mimi, vee, yuki, loli, uwu, kiwi,
+    // sora, mini, etc.) can appear in sub, dub, or hardsub for ANY anime.
+    // There is NO fixed mapping like "loli/uwu/kiwi are always hardsub".
+    //
+    // The servers API returns the REAL per-anime provider list with each
+    // provider's `tip` field (e.g. "Soft sub, Fast" or "Hard sub, Fast").
+    // We use ONLY what the API returns — no fallbacks, no hardcoding.
+    // ════════════════════════════════════════════════════════════════════════════
 
     // ==================== DATA MODELS ====================
 
@@ -106,6 +109,14 @@ class AnidapProvider : MainAPI() {
         @JsonProperty("dubProviders") val dubProviders: List<Provider>? = null
     )
 
+    /**
+     * A single source provider for an anime episode.
+     * - id: short name like "beep", "mimi", "yuki", "loli", "uwu", "kiwi", "sora", "mini", "vee"
+     * - default: whether this is the default provider for the type
+     * - tip: human-readable description like "Soft sub, Fast" or "Hard sub, Fast, High quality"
+     *        THIS is the authoritative source for whether a provider is hardsub or soft sub.
+     *        We MUST NOT hardcode which provider is hardsub — the tip varies per anime.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class Provider(
         @JsonProperty("id") val id: String,
@@ -134,15 +145,6 @@ class AnidapProvider : MainAPI() {
         @JsonProperty("kind") val kind: String? = null
     )
 
-    // Load data for loadLinks
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class LoadData(
-        val slug: String,
-        val epNum: String,
-        val providers: List<Provider>,
-        val type: String // "sub" or "dub"
-    )
-
     // ==================== HELPERS ====================
 
     private fun AnimeItem.getTitle(): String {
@@ -151,6 +153,30 @@ class AnidapProvider : MainAPI() {
 
     private fun AnimeItem.getPoster(): String? {
         return image ?: cover
+    }
+
+    /**
+     * Build a clean display label for a provider using its real tip from the API.
+     * Examples:
+     *   - id=beep,  tip="Soft sub, Fast"            -> "beep (Soft sub, Fast)"
+     *   - id=loli,  tip="Hard sub, Fast"            -> "loli (Hardsub, Fast)"
+     *   - id=uwu,   tip="Hard sub, Fast, High quality" -> "uwu (Hardsub, High quality)"
+     *   - id=mimi,  tip=null                        -> "mimi"
+     */
+    private fun buildProviderLabel(providerId: String, tip: String?): String {
+        if (tip.isNullOrBlank()) return providerId
+        // Normalize "Hard sub" -> "Hardsub" for cleaner display
+        val normalizedTip = tip.replace("Hard sub", "Hardsub")
+        return "$providerId ($normalizedTip)"
+    }
+
+    /**
+     * Returns true if the provider's tip indicates it's a hardsub provider.
+     * This is the ONLY authoritative way to tell — never hardcode by id.
+     */
+    private fun isHardsubProvider(tip: String?): Boolean {
+        if (tip.isNullOrBlank()) return false
+        return tip.contains("Hard", ignoreCase = true)
     }
 
     // ==================== getMainPage ====================
@@ -163,7 +189,6 @@ class AnidapProvider : MainAPI() {
             when (request.name) {
                 "All" -> {
                     coroutineScope {
-                        // Use trending API + real anime searches for homepage
                         val trendingDeferred = async { fetchTrendingFromAPI() }
                         val popularDeferred = async { fetchSearch("naruto") }
                         val recentDeferred = async { fetchSearch("one piece") }
@@ -186,7 +211,6 @@ class AnidapProvider : MainAPI() {
                             Log.d(TAG, "getMainPage: Recently Added -> ${recent.size}")
                         }
 
-                        // Genre-based sections using real anime titles
                         kotlinx.coroutines.delay(500)
                         val actionDeferred = async { fetchSearch("demon slayer") }
                         val comedyDeferred = async { fetchSearch("my hero academia") }
@@ -242,7 +266,6 @@ class AnidapProvider : MainAPI() {
             val url = "$mainUrl/api/anime/trending"
             Log.d(TAG, "fetchTrendingFromAPI: $url")
             val res = app.get(url, headers = baseHeaders, timeout = 30_000L)
-            // Response is nested: { success, data: { success, data: { results: [...] } } }
             val root = parseJson<com.fasterxml.jackson.databind.JsonNode>(res.text)
             val resultsNode = root.path("data").path("data").path("results")
             if (resultsNode.isArray) {
@@ -272,7 +295,6 @@ class AnidapProvider : MainAPI() {
     private fun AnimeItem.toSearchResponse(): SearchResponse? {
         val title = getTitle()
         if (title == "Unknown") return null
-        // Use $mainUrl| prefix so CloudStream doesn't prepend it
         val data = "$mainUrl|$id"
         Log.d(TAG, "toSearchResponse: '$title' id=$id")
         return newAnimeSearchResponse(title, data, TvType.Anime) {
@@ -305,17 +327,15 @@ class AnidapProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         Log.d(TAG, "load START: url='$url'")
-        // Parse: CloudStream may prepend mainUrl → "https://anidap.se|<id>" or just "<id>"
         val animeId = url.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
         Log.d(TAG, "load: animeId=$animeId")
 
         return try {
-            // 1. Fetch anime detail
+            // 1. Fetch anime detail (no anti-bot on anidap.se/api/* — direct app.get is fine)
             val detailUrl = "$mainUrl/api/anime/$animeId"
             Log.d(TAG, "load: fetching detail -> $detailUrl")
             val detailRes = app.get(detailUrl, headers = baseHeaders, timeout = 30_000L)
 
-            // Parse detail — response is { success, data: {...} }
             val detailRoot = parseJson<com.fasterxml.jackson.databind.JsonNode>(detailRes.text)
             val dataNode = detailRoot.path("data")
             val detail = parseJson<AnimeDetail>(dataNode.toString())
@@ -332,68 +352,59 @@ class AnidapProvider : MainAPI() {
 
             Log.d(TAG, "load: title='$title' slug=$slug episodes=$totalEps format=${detail.format}")
 
-            // 2. Fetch servers with retry for bot_detected
+            // 2. Fetch servers via cfAppGet (handles _amx_id anti-bot bypass)
+            // The servers API returns the REAL per-anime provider list with tips.
+            // We do NOT fall back to hardcoded providers — if this fails, we show
+            // no episodes (better than showing fake episodes that all fail to load).
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
-            var serversJson: String? = null
-            for (attempt in 1..3) {
-                Log.d(TAG, "load: fetching servers (attempt $attempt) -> $serversUrl")
-                val serversRes = app.get(serversUrl, headers = chadHeaders, timeout = 30_000L)
-                Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
-                if (serversRes.code == 200 && !serversRes.text.contains("bot_detected") && !serversRes.text.contains("error")) {
-                    serversJson = serversRes.text
-                    break
-                }
-                Log.e(TAG, "load: servers attempt $attempt failed (code=${serversRes.code})")
-                if (attempt < 3) kotlinx.coroutines.delay(2000)
-            }
-            
-            val servers = if (serversJson != null) {
-                try { parseJson<ServersResponse>(serversJson) } catch (e: Exception) {
-                    Log.e(TAG, "load: servers parse failed: ${e.message}")
+            Log.d(TAG, "load: fetching servers (via cfAppGet) -> $serversUrl")
+            val serversRes = cfAppGet(
+                serversUrl,
+                headers = mapOf(
+                    "Referer" to "$mainUrl/",
+                    "Accept" to "application/json"
+                )
+            )
+            Log.d(TAG, "load: servers response code=${serversRes.code} size=${serversRes.text.length}")
+
+            val servers = if (serversRes.code == 200 && !serversRes.text.contains("bot_detected") && !serversRes.text.contains("\"error\"")) {
+                try { parseJson<ServersResponse>(serversRes.text) } catch (e: Exception) {
+                    Log.e(TAG, "load: servers parse failed: ${e.message} body=${serversRes.text.take(200)}")
                     ServersResponse()
                 }
             } else {
-                Log.e(TAG, "load: all server attempts failed, using all 8 providers")
+                Log.e(TAG, "load: servers API failed (code=${serversRes.code}) — no fallback, will show empty episodes")
                 ServersResponse()
             }
-            
-            // Use ONLY the providers from servers response (they're dynamic per anime)
-            // If servers failed, fall back to all 8
-            val serverSubProviders = servers.subProviders?.takeIf { it.isNotEmpty() }
-                ?: allProviders.map { Provider(id = it, tip = "") }
-            val serverDubProviders = servers.dubProviders?.takeIf { it.isNotEmpty() }
-                ?.filter { it.id !in hardsubProviders }  // Remove hardsub from dub
-                ?: allProviders.filter { it !in hardsubProviders }.map { Provider(id = it, tip = "") }
-            
-            // If dub is empty after filtering hardsub, fall back to non-hardsub providers
-            val dubProvidersFinal = if (serverDubProviders.isEmpty()) {
-                allProviders.filter { it !in hardsubProviders }.map { Provider(id = it, tip = "") }
-            } else serverDubProviders
-            
-            val subAllIds = serverSubProviders.map { it.id }.distinct()
-            val dubAllIds = dubProvidersFinal.map { it.id }.distinct()
-            
-            // Build provider→tip map for source labeling
+
+            // Use ONLY the providers from the servers response.
+            // NO hardcoded fallback — providers are random per anime.
+            val subProviders: List<Provider> = servers.subProviders?.filter { it.id.isNotBlank() } ?: emptyList()
+            val dubProviders: List<Provider> = servers.dubProviders?.filter { it.id.isNotBlank() } ?: emptyList()
+
+            // Build provider→tip map from the REAL API response (no hardcoding)
             val providerTips = mutableMapOf<String, String>()
-            serverSubProviders.forEach { p ->
-                val tip = p.tip ?: ""
-                val isHardsub = tip.contains("Hard", ignoreCase = true) || p.id in hardsubProviders
-                providerTips[p.id] = if (isHardsub) "Hardsub" else "Soft sub"
-            }
-            dubProvidersFinal.forEach { p ->
-                if (!providerTips.containsKey(p.id)) {
-                    providerTips[p.id] = p.tip ?: "Soft sub"
-                }
-            }
-            
-            Log.d(TAG, "load: subProviders=${subAllIds.size} dubProviders=${dubAllIds.size}")
-            Log.d(TAG, "load: sub ids=$subAllIds")
-            Log.d(TAG, "load: dub ids=$dubAllIds")
+            subProviders.forEach { p -> providerTips[p.id] = p.tip ?: "" }
+            dubProviders.forEach { p -> if (!providerTips.containsKey(p.id)) providerTips[p.id] = p.tip ?: "" }
+
+            Log.d(TAG, "load: subProviders=${subProviders.size} dubProviders=${dubProviders.size}")
+            Log.d(TAG, "load: sub ids=${subProviders.map { it.id }}")
+            Log.d(TAG, "load: dub ids=${dubProviders.map { it.id }}")
             Log.d(TAG, "load: providerTips=$providerTips")
 
-            // 3. Determine sub/dub availability — always true since we force all providers
-            val hasSub = subAllIds.isNotEmpty()
-            val hasDub = dubAllIds.isNotEmpty()
+            if (totalEps <= 0) {
+                Log.e(TAG, "load: no episodes found in detail (totalEps=$totalEps)")
+                return newAnimeLoadResponse(title, url, TvType.Anime) {
+                    this.posterUrl = poster
+                    this.backgroundPosterUrl = banner
+                    this.plot = plot
+                    this.tags = genres
+                    this.year = year
+                }
+            }
+
+            val hasSub = subProviders.isNotEmpty()
+            val hasDub = dubProviders.isNotEmpty()
 
             // 4. Determine TvType
             val tvType = when {
@@ -402,52 +413,40 @@ class AnidapProvider : MainAPI() {
                 else -> TvType.Anime
             }
 
-            // 5. Build episode lists
-            // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}"
-            val subEpisodes = if (subAllIds.isNotEmpty()) (1..totalEps).map { epNum ->
-                newEpisode("$mainUrl|$slug|$epNum|sub|${subAllIds.joinToString(",")}") {
+            // 5. Build episode lists.
+            // Data format: "$mainUrl|$slug|$epNum|$type|${providerIds.joinToString(",")}|${tips.joinToString(";;")}"
+            // We pack the tips so loadLinks can label sources correctly without re-fetching servers.
+            val subEpisodes = if (hasSub) (1..totalEps).map { epNum ->
+                val ids = subProviders.joinToString(",") { it.id }
+                val tips = subProviders.joinToString(";;") { it.id + "=" + (it.tip ?: "") }
+                newEpisode("$mainUrl|$slug|$epNum|sub|$ids|$tips") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
 
-            val dubEpisodes = if (dubAllIds.isNotEmpty()) (1..totalEps).map { epNum ->
-                newEpisode("$mainUrl|$slug|$epNum|dub|${dubAllIds.joinToString(",")}") {
+            val dubEpisodes = if (hasDub) (1..totalEps).map { epNum ->
+                val ids = dubProviders.joinToString(",") { it.id }
+                val tips = dubProviders.joinToString(";;") { it.id + "=" + (it.tip ?: "") }
+                newEpisode("$mainUrl|$slug|$epNum|dub|$ids|$tips") {
                     this.episode = epNum
                     this.name = "Episode $epNum"
                 }
             } else emptyList()
-            
-            // If both sub and dub are empty, force sub with all 8 providers
-            if (subEpisodes.isEmpty() && dubEpisodes.isEmpty() && totalEps > 0) {
-                Log.d(TAG, "load: no providers from servers API, forcing all 8 for sub")
-                val forcedEps = (1..totalEps).map { epNum ->
-                    newEpisode("$mainUrl|$slug|$epNum|sub|${allProviders.joinToString(",")}") {
-                        this.episode = epNum
-                        this.name = "Episode $epNum"
-                    }
-                }
-                Log.d(TAG, "load: forced ${forcedEps.size} sub episodes with all providers")
-                return newAnimeLoadResponse(title, url, TvType.Anime) {
-                    this.posterUrl = poster
-                    this.backgroundPosterUrl = banner
-                    this.plot = plot
-                    this.tags = genres
-                    this.year = year
-                    addEpisodes(DubStatus.Subbed, forcedEps)
-                }
-            } else {
-                Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
 
-                return newAnimeLoadResponse(title, url, tvType) {
-                    this.posterUrl = poster
-                    this.backgroundPosterUrl = banner
-                    this.plot = plot
-                    this.tags = genres
-                    this.year = year
-                    if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
-                    if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
-                }
+            Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
+
+            // If both sub and dub are empty (servers API failed AND no providers),
+            // return a load response with no episodes. The user will see "no episodes"
+            // which is better than fake episodes that all fail to load.
+            return newAnimeLoadResponse(title, url, tvType) {
+                this.posterUrl = poster
+                this.backgroundPosterUrl = banner
+                this.plot = plot
+                this.tags = genres
+                this.year = year
+                if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
+                if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
             }
         } catch (e: Exception) {
             Log.e(TAG, "load FAILED: ${e.message}")
@@ -469,16 +468,24 @@ class AnidapProvider : MainAPI() {
         val cleanData = data.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
         val parts = cleanData.split("|")
         Log.d(TAG, "loadLinks: parts count=${parts.size} parts=$parts")
-        if (parts.size < 4) {
-            Log.e(TAG, "loadLinks: invalid data format")
+        if (parts.size < 5) {
+            Log.e(TAG, "loadLinks: invalid data format (expected >=5 parts, got ${parts.size})")
             return false
         }
         val slug = parts[0]
         val epNum = parts[1]
         val type = parts[2] // "sub" or "dub"
-        val providerIds = parts[3].split(",")
+        val providerIds = parts[3].split(",").filter { it.isNotBlank() }
+        // parts[4] = "id1=tip1;;id2=tip2;;..." (may be empty if no tips)
+        val tipsMap: Map<String, String> = if (parts.size >= 5 && parts[4].isNotBlank()) {
+            parts[4].split(";;").mapNotNull { entry ->
+                val eqIdx = entry.indexOf('=')
+                if (eqIdx > 0) entry.substring(0, eqIdx) to entry.substring(eqIdx + 1)
+                else null
+            }.toMap()
+        } else emptyMap()
 
-        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum type=$type providers=$providerIds")
+        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum type=$type providers=$providerIds tips=$tipsMap")
         if (providerIds.isEmpty()) {
             Log.e(TAG, "loadLinks: no providers")
             return false
@@ -486,26 +493,26 @@ class AnidapProvider : MainAPI() {
 
         var found = false
         for (providerId in providerIds) {
-            Log.d(TAG, "loadLinks: fetching sources for provider=$providerId type=$type")
+            val tip = tipsMap[providerId]
+            Log.d(TAG, "loadLinks: fetching sources for provider=$providerId type=$type tip=$tip")
             try {
                 val sourcesUrl = "$chadUrl/sources?id=$slug&epNum=$epNum&type=$type&providerId=$providerId"
-                // Retry on bot_detected
-                var sourcesText: String? = null
-                for (attempt in 1..2) {
-                    val sourcesRes = app.get(sourcesUrl, headers = chadHeaders, timeout = 30_000L)
-                    Log.d(TAG, "loadLinks: provider=$providerId attempt=$attempt code=${sourcesRes.code} size=${sourcesRes.text.length}")
-                    if (sourcesRes.code == 200 && !sourcesRes.text.contains("bot_detected") && !sourcesRes.text.contains("\"error\"")) {
-                        sourcesText = sourcesRes.text
-                        break
-                    }
-                    if (attempt < 2) kotlinx.coroutines.delay(1500)
-                }
-                if (sourcesText == null) {
-                    Log.e(TAG, "loadLinks: provider=$providerId all attempts failed (bot_detected or error)")
+                // Use cfAppGet for anti-bot bypass (chad.anidap.se is protected)
+                val sourcesRes = cfAppGet(
+                    sourcesUrl,
+                    headers = mapOf(
+                        "Referer" to "$mainUrl/",
+                        "Accept" to "application/json"
+                    )
+                )
+                Log.d(TAG, "loadLinks: provider=$providerId code=${sourcesRes.code} size=${sourcesRes.text.length}")
+                if (sourcesRes.code != 200 || sourcesRes.text.contains("bot_detected") || sourcesRes.text.contains("\"error\"")) {
+                    Log.e(TAG, "loadLinks: provider=$providerId failed (code=${sourcesRes.code})")
                     continue
                 }
-                val sourcesData = try { parseJson<SourcesResponse>(sourcesText) } catch (e: Exception) {
-                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesText.take(200)}")
+
+                val sourcesData = try { parseJson<SourcesResponse>(sourcesRes.text) } catch (e: Exception) {
+                    Log.e(TAG, "loadLinks: provider=$providerId parse failed: ${e.message} body=${sourcesRes.text.take(200)}")
                     continue
                 }
 
@@ -521,12 +528,9 @@ class AnidapProvider : MainAPI() {
                     continue
                 }
 
-                // Determine provider label with type indicator
-                val providerLabel = when (providerId) {
-                    "loli", "uwu", "kiwi" -> "$providerId (Hardsub)"
-                    "beep", "mimi", "vee", "yuki", "sora" -> providerId
-                    else -> providerId
-                }
+                // Build the display label using the REAL tip from the API.
+                // NO hardcoding — the tip tells us if it's hardsub or soft sub.
+                val providerLabel = buildProviderLabel(providerId, tip)
 
                 // Process subtitles
                 for (track in tracks) {
@@ -542,7 +546,8 @@ class AnidapProvider : MainAPI() {
                 for (source in sources) {
                     val sourceUrl = source.url ?: continue
                     val sourceType = source.type ?: ""
-                    Log.d(TAG, "loadLinks: source url=${sourceUrl.take(80)} type=$sourceType")
+                    val quality = source.quality ?: "auto"
+                    Log.d(TAG, "loadLinks: source url=${sourceUrl.take(80)} type=$sourceType quality=$quality")
 
                     when {
                         // HLS m3u8
@@ -571,6 +576,7 @@ class AnidapProvider : MainAPI() {
                                     type = ExtractorLinkType.VIDEO
                                 ) {
                                     this.headers = mapOf("Referer" to referer)
+                                    this.quality = Qualities.Unknown.value
                                 }
                             )
                             found = true
