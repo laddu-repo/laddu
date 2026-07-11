@@ -428,24 +428,7 @@ class AnidapProvider : MainAPI() {
                     }
                 }
                 Log.d(TAG, "load: forced ${forcedEps.size} sub episodes with all providers")
-                newAnimeLoadResponse(title, url, TvType.Anime) {
-                    this.posterUrl = poster
-                    this.backgroundPosterUrl = banner
-                    this.plot = plot
-                    this.tags = genres
-                    this.year = year
-                    addEpisodes(DubStatus.Subbed, forcedEps)
-                }
-            } else {
-                Log.d(TAG, "load: no providers from servers API, forcing all 8 for sub")
-                val forcedEps = (1..totalEps).map { epNum ->
-                    newEpisode("$mainUrl|$slug|$epNum|sub|${allProviders.joinToString(",")}") {
-                        this.episode = epNum
-                        this.name = "Episode $epNum"
-                    }
-                }
-                Log.d(TAG, "load: forced ${forcedEps.size} sub episodes with all providers")
-                newAnimeLoadResponse(title, url, TvType.Anime) {
+                return newAnimeLoadResponse(title, url, TvType.Anime) {
                     this.posterUrl = poster
                     this.backgroundPosterUrl = banner
                     this.plot = plot
@@ -456,7 +439,7 @@ class AnidapProvider : MainAPI() {
             } else {
                 Log.d(TAG, "load: subEps=${subEpisodes.size} dubEps=${dubEpisodes.size}")
 
-                newAnimeLoadResponse(title, url, tvType) {
+                return newAnimeLoadResponse(title, url, tvType) {
                     this.posterUrl = poster
                     this.backgroundPosterUrl = banner
                     this.plot = plot
