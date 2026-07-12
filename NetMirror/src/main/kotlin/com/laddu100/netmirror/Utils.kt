@@ -482,12 +482,35 @@ suspend fun loadNewTvLinks(
 ): Boolean {
     Log.d(TAG, "$providerName: loadLinks id=$id ott=$ott")
 
-    // CNC v93 approach (decompiled from current .cs3):
-    // 1. resolveApiUrl() → /checknewtv.php → tv.imgcdn.kim
-    // 2. getNewTvUserToken(apiBase, ott) → /newtv/otp.php with header otp=111111 → usertoken
-    // 3. player.php?id=<id> with Usertoken header → video_link
-    // 4. Pass video_link as M3U8 ExtractorLink
+    // ════════════════════════════════════════════════════════════════════════════
+    // APPROACH 1 (PRIMARY): play.php + playlist.php on net77.cc
+    // ════════════════════════════════════════════════════════════════════════════
+    // This is the website's native player flow. It does NOT need the NewTV API
+    // or OTP. It just needs the t_hash_t cookie from verify.php bypass.
+    //
+    //   1. GET net77.cc/play.php?id=<id> with t_hash_t cookie
+    //      → HTML with <body data-time="<tm>" data-h="<hash>" data-title="<title>">
+    //   2. Build net77.cc/playlist.php?id=<id>&t=<title>&tm=<tm>&h=<hash>
+    //      → returns M3U8 playlist (segments disguised as .js/.jpg)
+    //   3. Pass playlist.php URL as ExtractorLink (getVideoInterceptor forwards cookie)
+    //
+    // This approach was the original website flow. The NewTV API (approach 2) was
+    // a newer CNC decompile addition that used a master OTP "111111" — but the
+    // site disabled that OTP around July 2026. So we now use approach 1 as primary.
+    // ════════════════════════════════════════════════════════════════════════════
+    val playResult = tryPlayPhpFlow(id, ott, providerName, callback)
+    if (playResult) {
+        Log.d(TAG, "$providerName: play.php flow SUCCEEDED")
+        return true
+    }
+    Log.e(TAG, "$providerName: play.php flow failed, trying NewTV API as fallback")
 
+    // ════════════════════════════════════════════════════════════════════════════
+    // APPROACH 2 (FALLBACK): NewTV API (otp.php → player.php) on tv.imgcdn.kim
+    // ════════════════════════════════════════════════════════════════════════════
+    // This used the hardcoded master OTP "111111" which the site disabled.
+    // It's kept as a fallback in case the site re-enables it or for older content.
+    // ════════════════════════════════════════════════════════════════════════════
     val apiBase = try {
         resolvePlayerApiBase()
     } catch (e: Exception) {
@@ -540,6 +563,114 @@ suspend fun loadNewTvLinks(
         Log.e(TAG, "$providerName: player.php exception: ${e.message}")
         return false
     }
+}
+
+/**
+ * PRIMARY approach: play.php + playlist.php flow on net77.cc.
+ *
+ * Tries two methods:
+ *   1. Direct fetch: app.get play.php with t_hash_t cookie, parse data-time/data-h
+ *   2. WebView fallback: fetchPlayPhpViaWebView (loads page in WebView, intercepts playlist.php)
+ *
+ * Returns true if a link was added to callback.
+ */
+private suspend fun tryPlayPhpFlow(
+    id: String,
+    ott: String,
+    providerName: String,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    Log.d(TAG, "$providerName: tryPlayPhpFlow START id=$id ott=$ott")
+
+    // Step 1: Get the play domain cookie (net77.cc t_hash_t)
+    val playCookie = bypassForPlay()
+    if (playCookie.isEmpty()) {
+        Log.e(TAG, "$providerName: tryPlayPhpFlow: bypassForPlay failed")
+        return false
+    }
+    Log.d(TAG, "$providerName: tryPlayPhpFlow: got play cookie")
+
+    // Step 2: Try direct fetch of play.php (no WebView — faster)
+    val playDomain = "https://net77.cc"
+    val playUrl = "$playDomain/play.php?id=$id"
+    val appUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0"
+
+    try {
+        val res = app.get(
+            playUrl,
+            headers = mapOf(
+                "User-Agent" to appUserAgent,
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language" to "en-US,en;q=0.5",
+                "Referer" to "$playDomain/"
+            ),
+            cookies = mapOf(
+                "t_hash_t" to playCookie,
+                "ott" to ott,
+                "hd" to "on"
+            ),
+            timeout = 15_000L
+        )
+        Log.d(TAG, "$providerName: tryPlayPhpFlow: play.php HTTP ${res.code} size=${res.text.length}")
+
+        if (res.code == 200 && res.text.length > 500) {
+            // Parse data-time and data-h from the HTML body tag
+            val dataTime = Regex("""data-time=["']([^"']+)["']""").find(res.text)?.groupValues?.get(1)
+            val dataH = Regex("""data-h=["']([^"']+)["']""").find(res.text)?.groupValues?.get(1)
+            val dataTitle = Regex("""data-title=["']([^"']+)["']""").find(res.text)?.groupValues?.get(1) ?: ""
+
+            Log.d(TAG, "$providerName: tryPlayPhpFlow: data-time=$dataTime data-h=${dataH?.take(40)}...")
+
+            if (!dataTime.isNullOrBlank() && !dataH.isNullOrBlank()) {
+                // Build the playlist.php URL
+                val encodedTitle = java.net.URLEncoder.encode(dataTitle, "UTF-8")
+                val playlistUrl = "$playDomain/playlist.php?id=$id&t=$encodedTitle&tm=$dataTime&h=$dataH"
+                Log.d(TAG, "$providerName: tryPlayPhpFlow: built playlist URL: ${playlistUrl.take(80)}...")
+
+                callback.invoke(
+                    newExtractorLink(providerName, providerName, playlistUrl, type = ExtractorLinkType.M3U8) {
+                        this.referer = "$playDomain/"
+                        this.headers = mapOf(
+                            "User-Agent" to appUserAgent,
+                            "Cookie" to "t_hash_t=$playCookie; ott=$ott; hd=on"
+                        )
+                    }
+                )
+                return true
+            } else {
+                Log.e(TAG, "$providerName: tryPlayPhpFlow: no data-time/data-h in HTML (title=${res.text.take(100)})")
+            }
+        } else {
+            Log.e(TAG, "$providerName: tryPlayPhpFlow: play.php returned ${res.code} (likely CF challenge)")
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "$providerName: tryPlayPhpFlow: direct fetch exception: ${e.message}")
+    }
+
+    // Step 3: Direct fetch failed (CF challenge or no data attributes) — use WebView
+    Log.d(TAG, "$providerName: tryPlayPhpFlow: falling back to WebView")
+    try {
+        val result = fetchPlayPhpViaWebView(playUrl, playCookie, ott)
+        if (result != null && result.startsWith("PLAYLIST_URL:")) {
+            val playlistUrl = result.removePrefix("PLAYLIST_URL:")
+            Log.d(TAG, "$providerName: tryPlayPhpFlow: WebView got playlist URL: ${playlistUrl.take(80)}...")
+
+            // The WebView already set cookies in CookieManager. The getVideoInterceptor
+            // will forward them on playlist/segment requests.
+            callback.invoke(
+                newExtractorLink(providerName, providerName, playlistUrl, type = ExtractorLinkType.M3U8) {
+                    this.referer = "$playDomain/"
+                    this.headers = mapOf("User-Agent" to appUserAgent)
+                }
+            )
+            return true
+        }
+        Log.e(TAG, "$providerName: tryPlayPhpFlow: WebView returned no playlist URL")
+    } catch (e: Exception) {
+        Log.e(TAG, "$providerName: tryPlayPhpFlow: WebView exception: ${e.message}")
+    }
+
+    return false
 }
 
 /**
