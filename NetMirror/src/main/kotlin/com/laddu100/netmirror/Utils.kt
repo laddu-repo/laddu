@@ -250,12 +250,12 @@ suspend fun bypassForPlay(): String {
 
     // Cache for 5 minutes
     if (!savedCookie.isNullOrEmpty() && System.currentTimeMillis() - savedTimestamp < 300_000) {
-        // Check if the cached cookie has t_hash_p or user_token — if not, it's stale
-        if (savedCookie.contains("t_hash_p") || savedCookie.contains("user_token")) {
-            Log.d(TAG, "bypassForPlay: using cached play cookie (has t_hash_p/user_token)")
+        // Check if the cached cookie has user_token (the critical cookie for ::ni::p)
+        if (savedCookie.contains("user_token=")) {
+            Log.d(TAG, "bypassForPlay: using cached play cookie (has user_token)")
             return savedCookie
         }
-        Log.d(TAG, "bypassForPlay: cached cookie is stale (no t_hash_p/user_token), refreshing")
+        Log.d(TAG, "bypassForPlay: cached cookie is stale (no user_token), refreshing")
     }
 
     // STEP 1: Try HTTP bypass first (fast — gets t_hash)
@@ -305,47 +305,104 @@ suspend fun bypassForPlay(): String {
 }
 
 /**
- * Load a URL in WebView and extract ALL cookies from CookieManager.
- * This is needed because the site sets `t_hash_p` and `user_token` cookies via
- * JavaScript during the Cloudflare challenge — these can't be obtained via HTTP.
+ * Load net77.cc/home in WebView, solve Cloudflare challenge, extract ALL cookies.
+ *
+ * The site sets these cookies via JavaScript during the CF challenge:
+ *   - t_hash_p  (play hash with ::ni::p — allows real content)
+ *   - user_token (32-char hex — REQUIRED for POST play.php to return ::ni::p)
+ *   - cf_clearance (standard Cloudflare clearance)
+ *   - t_hash (from verify.php)
+ *
+ * This function:
+ *   1. Clears old cookies (prevents stale t_hash_p from blocking fresh CF challenge)
+ *   2. Loads net77.cc/home in WebView with a real Android Chrome UA
+ *   3. Waits for CF challenge to resolve (polls CookieManager for user_token)
+ *   4. Waits extra time for JS to finish setting all cookies
+ *   5. Extracts and returns all cookies
  */
 private suspend fun fetchAllCookiesViaWebView(url: String): String {
-    Log.d(TAG, "fetchAllCookiesViaWebView: loading $url")
+    Log.d(TAG, "fetchAllCookiesViaWebView: START url=$url")
     val cm = CookieManager.getInstance()
     cm.setAcceptCookie(true)
+    cm.setAcceptThirdPartyCookies(null, true)
 
-    val appUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0"
+    // Clear ALL old cookies for net77.cc/net52.cc — stale t_hash_p or cf_clearance
+    // can cause the CF challenge to loop or fail
+    listOf("https://net77.cc", "https://net52.cc", "https://net22.cc").forEach { domain ->
+        try {
+            val existing = cm.getCookie(domain) ?: ""
+            existing.split(";").forEach { cookie ->
+                val name = cookie.trim().substringBefore("=", "").trim()
+                if (name.isNotEmpty()) {
+                    cm.setCookie(domain, "$name=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/")
+                }
+            }
+        } catch (_: Exception) {}
+    }
+    cm.flush()
+    Log.d(TAG, "fetchAllCookiesViaWebView: cleared old cookies")
+
+    // Real Android Chrome UA — CF challenge checks this
+    val appUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36"
 
     try {
-        // Use WebViewResolver to load the page and wait for it to settle
-        // The Cloudflare challenge + verify.php flow runs automatically in the WebView
+        // STEP 1: Load the page in WebView, wait for CF challenge to resolve
+        // The CF challenge redirects to verify2 → verify.php → home
+        // We wait until we see the homepage URL (means CF + verify completed)
+        Log.d(TAG, "fetchAllCookiesViaWebView: loading page, waiting for CF challenge...")
         WebViewResolver(
-            interceptUrl = Regex("^https?://net(77|52|22|99|50)\\.cc/(home|mobile/home)"),
+            interceptUrl = Regex("^https?://net(77|52|22|99|50)\\.cc/(home|mobile/home|verify2|verify\\.php)"),
             userAgent = appUserAgent,
             useOkhttp = false,
             additionalUrls = listOf(Regex(".")),
             script = null,
             scriptCallback = null,
-            timeout = 30_000L
+            timeout = 60_000L  // 60 seconds — CF challenge can take a while
         ).resolveUsingWebView(url) { req ->
             val reqUrl = req.url.toString()
             Log.d(TAG, "fetchAllCookiesViaWebView: request: $reqUrl")
-            // Wait until we see the homepage (means CF challenge + verify completed)
+            // Stop when we reach the homepage (CF + verify completed)
             reqUrl.contains("/home") || reqUrl.contains("mobile/home")
         }
 
-        // Extract ALL cookies from CookieManager for net77.cc
+        // STEP 2: Poll for user_token cookie — this is set by JS AFTER the page loads
+        // Give it up to 15 more seconds after the page loads
+        Log.d(TAG, "fetchAllCookiesViaWebView: page loaded, polling for user_token cookie...")
+        var userTokenFound = false
+        for (i in 1..15) {
+            kotlinx.coroutines.delay(1000)  // 1 second per poll
+            cm.flush()
+            val cookies = cm.getCookie("https://net77.cc") ?: ""
+            if (cookies.contains("user_token=")) {
+                Log.d(TAG, "fetchAllCookiesViaWebView: user_token found after ${i}s!")
+                userTokenFound = true
+                break
+            }
+            if (i % 5 == 0) {
+                Log.d(TAG, "fetchAllCookiesViaWebView: still waiting for user_token (${i}s), current cookies: ${cookies.take(100)}...")
+            }
+        }
+
+        if (!userTokenFound) {
+            Log.e(TAG, "fetchAllCookiesViaWebView: user_token NOT found after 15s")
+        }
+
+        // STEP 3: Extract ALL cookies from CookieManager
         cm.flush()
         val cookies77 = cm.getCookie("https://net77.cc") ?: ""
         val cookies52 = cm.getCookie("https://net52.cc") ?: ""
-        Log.d(TAG, "fetchAllCookiesViaWebView: net77.cc cookies: ${cookies77.take(150)}...")
+        Log.d(TAG, "fetchAllCookiesViaWebView: net77.cc cookies: ${cookies77.take(200)}...")
         Log.d(TAG, "fetchAllCookiesViaWebView: net52.cc cookies: ${cookies52.take(100)}...")
 
-        // Combine all cookies (net77.cc has t_hash_p, user_token; net52.cc has t_hash)
+        // Check if we got the critical cookies
+        val hasUserToken = cookies77.contains("user_token=")
+        val hasT_hash_p = cookies77.contains("t_hash_p=")
+        Log.d(TAG, "fetchAllCookiesViaWebView: hasUserToken=$hasUserToken hasT_hash_p=$hasT_hash_p")
+
+        // Combine all cookies (net77.cc has the important ones)
         val allCookies = mutableListOf<String>()
         if (cookies77.isNotBlank()) allCookies.add(cookies77)
         if (cookies52.isNotBlank()) {
-            // Only add net52 cookies that aren't already in net77
             val names77 = cookies77.split(";").map { it.trim().substringBefore("=", "").trim() }.toSet()
             cookies52.split(";").forEach { c ->
                 val name = c.trim().substringBefore("=", "").trim()
@@ -354,7 +411,7 @@ private suspend fun fetchAllCookiesViaWebView(url: String): String {
         }
 
         val result = allCookies.joinToString("; ")
-        Log.d(TAG, "fetchAllCookiesViaWebView: combined ${allCookies.size} cookie parts")
+        Log.d(TAG, "fetchAllCookiesViaWebView: END, ${allCookies.size} cookie parts, hasUserToken=$hasUserToken")
         return result
     } catch (e: Exception) {
         Log.e(TAG, "fetchAllCookiesViaWebView: exception: ${e.message}")
@@ -647,6 +704,13 @@ suspend fun loadNewTvLinks(
     }
     Log.d(TAG, "$providerName: got play cookies: ${playCookieStr.take(80)}...")
 
+    // Check if we have the critical user_token cookie
+    val hasUserToken = playCookieStr.contains("user_token=")
+    Log.d(TAG, "$providerName: hasUserToken=$hasUserToken (REQUIRED for ::ni::p real content)")
+    if (!hasUserToken) {
+        Log.e(TAG, "$providerName: WARNING — no user_token cookie! POST will return ::ni::i:: (10-min placeholder)")
+    }
+
     // STEP 1: POST play.php to get the `in` hash
     val postDomains = listOf("https://net77.cc", "https://net52.cc", "https://net22.cc", "https://net99.cc", "https://net50.cc")
     var inHash = ""
@@ -690,6 +754,16 @@ suspend fun loadNewTvLinks(
     if (inHash.isBlank()) {
         Log.e(TAG, "$providerName: POST play.php failed on all domains")
         return false
+    }
+
+    // Check if we got ::ni::p (real content) or ::ni::i (placeholder)
+    val hashType = inHash.split("::").getOrNull(3) ?: "?"
+    val hashUserToken = inHash.split("::").getOrNull(4) ?: ""
+    Log.d(TAG, "$providerName: hash type=$hashType user_token_in_hash=${hashUserToken.take(20)}...")
+    if (hashType == "i") {
+        Log.e(TAG, "$providerName: GOT ::ni::i:: (PLACEHOLDER 10-MIN VIDEO) — user_token cookie missing or invalid!")
+    } else if (hashType == "p") {
+        Log.d(TAG, "$providerName: GOT ::ni::p:: (REAL CONTENT) ✅")
     }
 
     // STEP 2: Extract tm (timestamp) from the hash's 3rd segment
