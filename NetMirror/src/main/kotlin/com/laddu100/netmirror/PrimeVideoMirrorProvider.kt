@@ -228,31 +228,20 @@ class PrimeVideoMirrorProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val loadData = parseJson<LoadData>(data)
-        val id = loadData.id
-        val title = loadData.title
-        if (cookie_value.isEmpty()) {
-            cookie_value = bypass(netMirrorWorkingDomain)
-        }
-        return loadNewTvLinks(id, "pv", name, cookie_value, callback, subtitleCallback, title)
+        val id = parseJson<LoadData>(data).id
+        return loadNewTvLinks(id, "pv", name, callback, subtitleCallback)
     }
 
-    @Suppress("ObjectLiteralToLambda")
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
         return object : Interceptor {
             override fun intercept(chain: Interceptor.Chain): Response {
                 val request = chain.request()
-                val url = request.url.toString()
-                // Send the t_hash_t cookie with m3u8 playlist AND segment requests
-                // (segments are .js/.jpg files disguised as HLS chunks, loaded from playlist.php base)
-                if (url.contains("playlist.php") || url.contains(".m3u8") || url.contains(".js") || url.contains(".jpg") || url.contains(".ts")) {
-                    val cookieStr = try { android.webkit.CookieManager.getInstance()?.getCookie("https://net77.cc") } catch (_: Exception) { null }
-                    val baseCookie = cookieStr ?: ""
-                    val newRequest = request.newBuilder()
-                        .header("Cookie", baseCookie + "; ott=pv; hd=on")
-                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0")
-                        .build()
-                    return chain.proceed(newRequest)
+                if (request.url.toString().contains(".m3u8")) {
+                    return chain.proceed(
+                        request.newBuilder()
+                            .header("Cookie", "hd=on")
+                            .build()
+                    )
                 }
                 return chain.proceed(request)
             }

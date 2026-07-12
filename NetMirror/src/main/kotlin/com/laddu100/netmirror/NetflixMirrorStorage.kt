@@ -33,57 +33,37 @@ object NetflixMirrorStorage {
         editor.apply()
     }
 
-    // ---- Play domain cookie (net77.cc — for play.php/playlist.php) ----
-
-    fun savePlayCookie(cookie: String) {
+    fun saveUserToken(ott: String, token: String) {
         prefs.edit().apply {
-            putString("nf_play_cookie", cookie)
-            putLong("nf_play_cookie_ts", System.currentTimeMillis())
+            putString("usertoken_$ott", token)
+            putLong("usertoken_ts_$ott", System.currentTimeMillis())
             apply()
         }
     }
 
-    fun getPlayCookie(): Pair<String?, Long> {
-        return Pair(
-            prefs.getString("nf_play_cookie", null),
-            prefs.getLong("nf_play_cookie_ts", 0L)
-        )
-    }
+    fun getUserToken(ott: String): Pair<String?, Long> = Pair(
+        prefs.getString("usertoken_$ott", null),
+        prefs.getLong("usertoken_ts_$ott", 0L)
+    )
 
-    fun clearPlayCookie() {
+    fun clearUserToken(ott: String) {
         prefs.edit().apply {
-            remove("nf_play_cookie")
-            remove("nf_play_cookie_ts")
+            remove("usertoken_$ott")
+            remove("usertoken_ts_$ott")
             apply()
         }
     }
 
-    // ---- NewTV Usertoken (obtained via OTP verification) ----
-
-    fun saveUserToken(token: String) {
+    fun saveApiBase(apiBase: String) {
         prefs.edit().apply {
-            putString("newtv_usertoken", token)
-            putLong("newtv_usertoken_ts", System.currentTimeMillis())
+            putString("newtv_api_base", apiBase)
+            putLong("newtv_api_base_ts", System.currentTimeMillis())
             apply()
         }
     }
 
-    fun getUserToken(): Pair<String?, Long> {
-        val token = prefs.getString("newtv_usertoken", null) ?: return Pair(null, 0L)
-        val ts = prefs.getLong("newtv_usertoken_ts", 0L)
-        // Token expires after 24 hours
-        if (System.currentTimeMillis() - ts > 86_400_000L) {
-            clearUserToken()
-            return Pair(null, 0L)
-        }
-        return Pair(token, ts)
-    }
-
-    fun clearUserToken() {
-        prefs.edit().apply {
-            remove("newtv_usertoken")
-            remove("newtv_usertoken_ts")
-            apply()
-        }
-    }
+    fun getApiBase(): Pair<String?, Long> = Pair(
+        prefs.getString("newtv_api_base", null),
+        prefs.getLong("newtv_api_base_ts", 0L)
+    )
 }
