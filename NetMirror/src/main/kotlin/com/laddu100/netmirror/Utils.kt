@@ -346,23 +346,58 @@ private suspend fun fetchAllCookiesViaWebView(url: String): String {
     val appUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36"
 
     try {
-        // STEP 1: Load the page in WebView, wait for CF challenge to resolve
-        // The CF challenge redirects to verify2 → verify.php → home
-        // We wait until we see the homepage URL (means CF + verify completed)
+        // STEP 1: Load the page in WebView with a script that detects when CF is done.
+        // The CF challenge page has title "Just a moment..." — when it changes to something
+        // else (or when user_token cookie appears), the challenge is resolved.
+        //
+        // We use a JavaScript callback that checks document.title and document.cookie.
+        // The WebViewResolver keeps loading until the script returns a truthy value
+        // OR the interceptUrl matches. We use a regex that NEVER matches (^.^) so
+        // only the script decides when to stop.
         Log.d(TAG, "fetchAllCookiesViaWebView: loading page, waiting for CF challenge...")
+        val cfCheckScript = """
+            (function() {
+                try {
+                    var title = document.title || '';
+                    var cookies = document.cookie || '';
+                    // CF challenge is done when:
+                    // 1. Title is NOT "Just a moment..." (CF challenge page)
+                    // 2. user_token cookie exists
+                    if (title.indexOf('Just a moment') !== -1 || title.indexOf('Checking') !== -1) {
+                        return '';  // CF challenge still running
+                    }
+                    if (cookies.indexOf('user_token=') !== -1) {
+                        return 'CF_DONE:user_token_found';
+                    }
+                    if (cookies.indexOf('t_hash_p=') !== -1) {
+                        return 'CF_DONE:t_hash_p_found';
+                    }
+                    // Page loaded but no critical cookies yet — keep waiting
+                    return '';
+                } catch(e) {
+                    return '';
+                }
+            })();
+        """.trimIndent()
+
         WebViewResolver(
-            interceptUrl = Regex("^https?://net(77|52|22|99|50)\\.cc/(home|mobile/home|verify2|verify\\.php)"),
+            interceptUrl = Regex("^.^"),  // Never matches — only script decides
             userAgent = appUserAgent,
             useOkhttp = false,
-            additionalUrls = listOf(Regex(".")),
-            script = null,
-            scriptCallback = null,
+            additionalUrls = listOf(Regex("^.^")),
+            script = cfCheckScript,
+            scriptCallback = { result ->
+                if (!result.isNullOrBlank()) {
+                    Log.d(TAG, "fetchAllCookiesViaWebView: CF challenge resolved! result=$result")
+                }
+            },
             timeout = 60_000L  // 60 seconds — CF challenge can take a while
         ).resolveUsingWebView(url) { req ->
+            // Also check cookies directly as a fallback
             val reqUrl = req.url.toString()
             Log.d(TAG, "fetchAllCookiesViaWebView: request: $reqUrl")
-            // Stop when we reach the homepage (CF + verify completed)
-            reqUrl.contains("/home") || reqUrl.contains("mobile/home")
+            // Don't stop on URL match — let the script decide
+            false
         }
 
         // STEP 2: Poll for user_token cookie — this is set by JS AFTER the page loads
