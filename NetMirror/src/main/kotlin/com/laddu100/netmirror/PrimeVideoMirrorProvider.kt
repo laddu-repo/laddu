@@ -232,7 +232,7 @@ class PrimeVideoMirrorProvider : MainAPI() {
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "pv", name, cookie_value, callback)
+        return loadNewTvLinks(id, "pv", name, cookie_value, callback, subtitleCallback)
     }
 
     @Suppress("ObjectLiteralToLambda")

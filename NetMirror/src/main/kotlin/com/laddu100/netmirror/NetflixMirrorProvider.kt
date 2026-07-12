@@ -241,7 +241,7 @@ class NetflixMirrorProvider : MainAPI() {
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "nf", name, cookie_value, callback)
+        return loadNewTvLinks(id, "nf", name, cookie_value, callback, subtitleCallback)
     }
 
     @Suppress("ObjectLiteralToLambda")

@@ -232,7 +232,7 @@ class HotStarMirrorProvider : MainAPI() {
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "hs", name, cookie_value, callback)
+        return loadNewTvLinks(id, "hs", name, cookie_value, callback, subtitleCallback)
     }
 
     @Suppress("ObjectLiteralToLambda")

@@ -478,69 +478,226 @@ suspend fun loadNewTvLinks(
     ott: String,
     providerName: String,
     cookie: String,
-    callback: (ExtractorLink) -> Unit
+    callback: (ExtractorLink) -> Unit,
+    subtitleCallback: (SubtitleFile) -> Unit = {}
 ): Boolean {
     Log.d(TAG, "$providerName: loadLinks id=$id ott=$ott")
 
-    // CNC v93 approach (decompiled from current .cs3):
-    // 1. resolveApiUrl() → /checknewtv.php → tv.imgcdn.kim
-    // 2. getNewTvUserToken(apiBase, ott) → /newtv/otp.php with header otp=111111 → usertoken
-    // 3. player.php?id=<id> with Usertoken header → video_link
-    // 4. Pass video_link as M3U8 ExtractorLink
+    // ════════════════════════════════════════════════════════════════════════════
+    // NEW FLOW (confirmed from DevTools HAR capture, July 2026):
+    //
+    // The site disabled the old OTP "111111" master bypass. The new flow uses
+    // a POST to play.php to get an `in` hash, which serves as authentication
+    // for all subsequent requests. NO OTP or usertoken needed.
+    //
+    //   1. POST net52.cc/play.php with body "id=<videoId>"
+    //      → returns {"h":"in=<HASH>"}
+    //
+    //   2. GET net52.cc/play.php?id=<id>&in=<HASH>
+    //      → HTML with <body data-time="<tm>" data-h="<HASH>" data-title="<title>">
+    //      (HASH and data-h are the same; tm is extracted from HASH's 3rd segment)
+    //
+    //   3. GET net52.cc/playlist.php?id=<id>&t=<title>&tm=<tm>&h=<HASH>
+    //      → JSON: [{"title":"...","sources":[{"file":"/hls/<id>.m3u8?in=<HASH2>","label":"Full HD"},...],"tracks":[...subtitles...]}]
+    //
+    //   4. For each source, build full URL: https://net52.cc<hash2_file>
+    //      → Pass as ExtractorLink (M3U8) with Referer: play.php?id=<id>&in=<HASH>
+    //
+    //   5. Segments load from CDN (s23.nm-cdn9.top) with open CORS (*)
+    // ════════════════════════════════════════════════════════════════════════════
 
-    val apiBase = try {
-        resolvePlayerApiBase()
+    val playDomain = "https://net52.cc"
+    val cookies = mapOf(
+        "t_hash_t" to cookie,
+        "ott" to ott,
+        "hd" to "on"
+    )
+    val browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+
+    // STEP 1: POST play.php to get the `in` hash
+    val postHeaders = mapOf(
+        "Accept" to "*/*",
+        "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin" to playDomain,
+        "Referer" to "$playDomain/home",
+        "User-Agent" to browserUA,
+        "X-Requested-With" to "XMLHttpRequest"
+    )
+
+    val inHash: String = try {
+        val res = app.post(
+            "$playDomain/play.php",
+            requestBody = FormBody.Builder().add("id", id).build(),
+            headers = postHeaders,
+            cookies = cookies,
+            timeout = 15_000L
+        )
+        Log.d(TAG, "$providerName: POST play.php HTTP ${res.code} body=${res.text.take(200)}")
+
+        if (res.code != 200) {
+            Log.e(TAG, "$providerName: POST play.php failed (code=${res.code})")
+            return false
+        }
+
+        // Response: {"h":"in=<HASH>"}
+        val resp = tryParseJson<PlayPostResponse>(res.text)
+        val hField = resp?.h ?: ""
+        if (!hField.startsWith("in=")) {
+            Log.e(TAG, "$providerName: POST play.php unexpected response: $hField")
+            return false
+        }
+        val hash = hField.removePrefix("in=")
+        Log.d(TAG, "$providerName: got in hash: ${hash.take(60)}...")
+        hash
     } catch (e: Exception) {
-        Log.e(TAG, "$providerName: resolveApiUrl failed: ${e.message}")
-        return false
-    }
-    Log.d(TAG, "$providerName: apiBase=$apiBase")
-
-    // Step 1: Get usertoken via otp.php with hardcoded OTP "111111"
-    val userToken = getNewTvUserToken(apiBase, ott)
-    Log.d(TAG, "$providerName: userToken=${if (userToken.isNotEmpty()) "YES (${userToken.length} chars)" else "NO"}")
-
-    if (userToken.isEmpty()) {
-        Log.e(TAG, "$providerName: failed to get usertoken")
+        Log.e(TAG, "$providerName: POST play.php exception: ${e.message}")
         return false
     }
 
-    // Step 2: Call player.php with the usertoken
-    val headers = buildNewTvHeaders(ott, mapOf("Usertoken" to userToken))
-    val url = "$apiBase/newtv/player.php?id=$id"
+    // STEP 2: GET play.php?id=<id>&in=<hash> to get data-title (show title)
+    var title = ""
+    var tm = ""
+    try {
+        val res = app.get(
+            "$playDomain/play.php?id=$id&in=$inHash",
+            headers = mapOf(
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer" to "$playDomain/home",
+                "User-Agent" to browserUA
+            ),
+            cookies = cookies,
+            timeout = 15_000L
+        )
+        Log.d(TAG, "$providerName: GET play.php HTTP ${res.code} size=${res.text.length}")
+
+        if (res.code == 200) {
+            title = Regex("""data-title=["']([^"']*)["']""").find(res.text)?.groupValues?.get(1) ?: ""
+            tm = Regex("""data-time=["']([^"']*)["']""").find(res.text)?.groupValues?.get(1) ?: ""
+            Log.d(TAG, "$providerName: data-title='$title' data-time='$tm'")
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "$providerName: GET play.php exception: ${e.message}")
+    }
+
+    // If we couldn't get title/time from HTML, extract timestamp from the hash
+    if (tm.isBlank()) {
+        // Hash format: <seg1>::<seg2>::<timestamp>::ni::p::<seg5>
+        val parts = inHash.split("::")
+        if (parts.size >= 3) {
+            tm = parts[2]
+            Log.d(TAG, "$providerName: extracted tm from hash: $tm")
+        }
+    }
+
+    if (title.isBlank()) {
+        Log.e(TAG, "$providerName: no title for playlist.php URL")
+        return false
+    }
+    if (tm.isBlank()) {
+        Log.e(TAG, "$providerName: no timestamp for playlist.php URL")
+        return false
+    }
+
+    // STEP 3: GET playlist.php to get the m3u8 sources + subtitles
+    val encodedTitle = java.net.URLEncoder.encode(title, "UTF-8")
+    val playlistUrl = "$playDomain/playlist.php?id=$id&t=$encodedTitle&tm=$tm&h=$inHash"
+    val playPageUrl = "$playDomain/play.php?id=$id&in=$inHash"
+
+    val playlistHeaders = mapOf(
+        "Accept" to "*/*",
+        "Referer" to playPageUrl,
+        "User-Agent" to browserUA,
+        "X-Requested-With" to "XMLHttpRequest"
+    )
 
     try {
-        val res = app.get(url, headers = headers)
-        Log.d(TAG, "$providerName: player.php?id=$id HTTP ${res.code}")
-        Log.d(TAG, "$providerName: player.php response: ${res.text.take(500)}")
+        val res = app.get(playlistUrl, headers = playlistHeaders, cookies = cookies, timeout = 15_000L)
+        Log.d(TAG, "$providerName: playlist.php HTTP ${res.code} size=${res.text.length}")
 
-        if (res.code != 200) return false
-
-        val resp = tryParseJson<NewTvPlayerResponse>(res.text)
-        if (resp == null) {
-            Log.e(TAG, "$providerName: failed to parse player.php response")
+        if (res.code != 200) {
+            Log.e(TAG, "$providerName: playlist.php failed (code=${res.code})")
             return false
         }
 
-        Log.d(TAG, "$providerName: status=${resp.status} video_link=${resp.video_link?.take(60)}")
-
-        if (resp.status != "ok" || resp.video_link.isNullOrBlank()) {
-            Log.e(TAG, "$providerName: no valid video_link (status=${resp.status})")
+        // Parse JSON: [{"title":"...","sources":[...],"tracks":[...]}]
+        val playlist = tryParseJson<List<PlaylistItem>>(res.text)
+        if (playlist.isNullOrEmpty()) {
+            Log.e(TAG, "$providerName: playlist.php returned no items")
             return false
         }
 
-        Log.d(TAG, "$providerName: got video_link: ${resp.video_link}")
-        callback.invoke(
-            newExtractorLink(providerName, providerName, resp.video_link, type = ExtractorLinkType.M3U8) {
-                this.referer = resp.referer ?: apiBase
+        var found = false
+        for (item in playlist) {
+            // Pass subtitles
+            item.tracks?.forEach { track ->
+                if (track.kind == "captions" && !track.file.isNullOrBlank()) {
+                    val subUrl = track.file!!.let {
+                        if (it.startsWith("//")) "https:$it" else it
+                    }
+                    val label = track.label ?: track.language ?: "Subtitle"
+                    subtitleCallback.invoke(SubtitleFile(label, subUrl))
+                    Log.d(TAG, "$providerName: subtitle '$label' added")
+                }
             }
-        )
-        return true
+
+            // Pass each source as an ExtractorLink
+            item.sources?.forEach { source ->
+                val file = source.file ?: return@forEach
+                if (file.isBlank()) return@forEach
+
+                // Build full URL (file is relative like "/hls/<id>.m3u8?in=<hash2>")
+                val fullUrl = if (file.startsWith("http")) file else "$playDomain$file"
+                val label = source.label ?: providerName
+                val displayLabel = "$providerName - $label"
+
+                Log.d(TAG, "$providerName: source label='$label' url=${fullUrl.take(80)}...")
+
+                callback.invoke(
+                    newExtractorLink(displayLabel, displayLabel, fullUrl, type = ExtractorLinkType.M3U8) {
+                        this.referer = playPageUrl
+                        this.headers = mapOf(
+                            "Origin" to playDomain,
+                            "User-Agent" to browserUA
+                        )
+                    }
+                )
+                found = true
+            }
+        }
+
+        Log.d(TAG, "$providerName: loadLinks END found=$found")
+        return found
     } catch (e: Exception) {
-        Log.e(TAG, "$providerName: player.php exception: ${e.message}")
+        Log.e(TAG, "$providerName: playlist.php exception: ${e.message}")
         return false
     }
 }
+
+// Response from POST play.php: {"h":"in=<hash>"}
+data class PlayPostResponse(
+    val h: String? = null
+)
+
+// Playlist item from playlist.php
+data class PlaylistItem(
+    val title: String? = null,
+    val sources: List<PlaylistSource>? = null,
+    val tracks: List<PlaylistTrack>? = null
+)
+
+data class PlaylistSource(
+    val file: String? = null,
+    val label: String? = null,
+    val type: String? = null,
+    val default: String? = null
+)
+
+data class PlaylistTrack(
+    val kind: String? = null,
+    val file: String? = null,
+    val label: String? = null,
+    val language: String? = null
+)
 
 /**
  * Get NewTV user token via otp.php with hardcoded OTP "111111".
