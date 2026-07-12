@@ -236,12 +236,14 @@ class NetflixMirrorProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("NetMirror", "Netflix: loadLinks START data=$data")
-        val id = parseJson<LoadData>(data).id
+        val loadData = parseJson<LoadData>(data)
+        val id = loadData.id
+        val title = loadData.title
         Log.d("NetMirror", "Netflix: loadLinks id=$id ott=nf")
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "nf", name, cookie_value, callback, subtitleCallback)
+        return loadNewTvLinks(id, "nf", name, cookie_value, callback, subtitleCallback, title)
     }
 
     @Suppress("ObjectLiteralToLambda")

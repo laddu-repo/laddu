@@ -218,12 +218,14 @@ class DisneyPlusProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val id = parseJson<LoadData>(data).id
+        val loadData = parseJson<LoadData>(data)
+        val id = loadData.id
+        val title = loadData.title
         // Disney+ content is served from the Hotstar (hs) library on the NewTV player.
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "hs", name, cookie_value, callback, subtitleCallback)
+        return loadNewTvLinks(id, "hs", name, cookie_value, callback, subtitleCallback, title)
     }
 
     @Suppress("ObjectLiteralToLambda")

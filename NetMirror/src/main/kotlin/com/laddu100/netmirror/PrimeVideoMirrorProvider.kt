@@ -228,11 +228,13 @@ class PrimeVideoMirrorProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val id = parseJson<LoadData>(data).id
+        val loadData = parseJson<LoadData>(data)
+        val id = loadData.id
+        val title = loadData.title
         if (cookie_value.isEmpty()) {
             cookie_value = bypass(netMirrorWorkingDomain)
         }
-        return loadNewTvLinks(id, "pv", name, cookie_value, callback, subtitleCallback)
+        return loadNewTvLinks(id, "pv", name, cookie_value, callback, subtitleCallback, title)
     }
 
     @Suppress("ObjectLiteralToLambda")
