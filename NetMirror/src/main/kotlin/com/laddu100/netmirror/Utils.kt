@@ -231,35 +231,135 @@ private fun extractCookieValue(cookieStr: String, name: String): String? {
 }
 
 /**
- * Bypass specifically for the play domain (net77.cc). play.php/playlist.php live
- * on net77.cc and need a t_hash_t cookie from net77.cc — the net52.cc cookie
- * (used for browsing) returns null on net77.cc.
+ * Bypass specifically for the play domain (net77.cc).
+ *
+ * The site now sets `t_hash_p` (play hash with ::ni::p) and `user_token` cookies
+ * via JavaScript during the Cloudflare challenge resolution. These CANNOT be
+ * obtained via HTTP requests alone — they need a real browser engine (WebView)
+ * to execute the JavaScript that sets them.
+ *
+ * This function:
+ *   1. Tries HTTP bypass first (verify.php) — may get t_hash but NOT t_hash_p/user_token
+ *   2. Falls back to WebView bypass — loads the homepage, lets JS run, extracts ALL cookies
+ *
+ * Returns the FULL cookie string (all name=value pairs separated by "; ").
  */
 suspend fun bypassForPlay(): String {
     Log.d(TAG, "bypassForPlay: START")
     val (savedCookie, savedTimestamp) = NetflixMirrorStorage.getPlayCookie()
 
+    // Cache for 5 minutes
     if (!savedCookie.isNullOrEmpty() && System.currentTimeMillis() - savedTimestamp < 300_000) {
-        Log.d(TAG, "bypassForPlay: using cached play cookie")
-        return savedCookie
+        // Check if the cached cookie has t_hash_p or user_token — if not, it's stale
+        if (savedCookie.contains("t_hash_p") || savedCookie.contains("user_token")) {
+            Log.d(TAG, "bypassForPlay: using cached play cookie (has t_hash_p/user_token)")
+            return savedCookie
+        }
+        Log.d(TAG, "bypassForPlay: cached cookie is stale (no t_hash_p/user_token), refreshing")
     }
 
-    // Try net77.cc first (where play.php lives), then fall back to others.
+    // STEP 1: Try HTTP bypass first (fast — gets t_hash)
     val playDomains = listOf("https://net77.cc", "https://net52.cc", "https://net22.cc")
     for (domain in playDomains) {
-        Log.d(TAG, "bypassForPlay: trying $domain")
+        Log.d(TAG, "bypassForPlay: trying HTTP bypass on $domain")
         val cookie = tryBypassDomain(domain)
         if (cookie.isNotEmpty()) {
-            Log.d(TAG, "bypassForPlay: success on $domain")
+            Log.d(TAG, "bypassForPlay: HTTP bypass success on $domain")
+            // Check if we got t_hash_p (the critical cookie)
+            if (cookie.contains("t_hash_p")) {
+                Log.d(TAG, "bypassForPlay: got t_hash_p from HTTP — using directly")
+                NetflixMirrorStorage.savePlayCookie(cookie)
+                lastPlayCookie = cookie
+                return cookie
+            }
+            // No t_hash_p — need WebView to get it
+            Log.d(TAG, "bypassForPlay: HTTP bypass got cookies but no t_hash_p — trying WebView")
+            break
+        }
+    }
+
+    // STEP 2: WebView bypass — loads homepage, lets JS set t_hash_p + user_token
+    Log.d(TAG, "bypassForPlay: trying WebView bypass")
+    val webViewCookies = fetchAllCookiesViaWebView("https://net77.cc/home")
+    if (webViewCookies.isNotEmpty()) {
+        Log.d(TAG, "bypassForPlay: WebView bypass success, cookies: ${webViewCookies.take(100)}...")
+        NetflixMirrorStorage.savePlayCookie(webViewCookies)
+        lastPlayCookie = webViewCookies
+        return webViewCookies
+    }
+
+    // STEP 3: Last resort — use whatever HTTP cookies we got (even without t_hash_p)
+    for (domain in playDomains) {
+        val cookie = tryBypassDomain(domain)
+        if (cookie.isNotEmpty()) {
+            Log.d(TAG, "bypassForPlay: using HTTP cookies as fallback (no t_hash_p)")
             NetflixMirrorStorage.savePlayCookie(cookie)
             lastPlayCookie = cookie
             return cookie
         }
     }
 
-    Log.e(TAG, "bypassForPlay: all domains failed")
+    Log.e(TAG, "bypassForPlay: all methods failed")
     NetflixMirrorStorage.clearPlayCookie()
     return ""
+}
+
+/**
+ * Load a URL in WebView and extract ALL cookies from CookieManager.
+ * This is needed because the site sets `t_hash_p` and `user_token` cookies via
+ * JavaScript during the Cloudflare challenge — these can't be obtained via HTTP.
+ */
+private suspend fun fetchAllCookiesViaWebView(url: String): String {
+    Log.d(TAG, "fetchAllCookiesViaWebView: loading $url")
+    val cm = CookieManager.getInstance()
+    cm.setAcceptCookie(true)
+
+    val appUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0"
+
+    try {
+        // Use WebViewResolver to load the page and wait for it to settle
+        // The Cloudflare challenge + verify.php flow runs automatically in the WebView
+        WebViewResolver(
+            interceptUrl = Regex("^https?://net(77|52|22|99|50)\\.cc/(home|mobile/home)"),
+            userAgent = appUserAgent,
+            useOkhttp = false,
+            additionalUrls = listOf(Regex(".")),
+            script = null,
+            scriptCallback = null,
+            timeout = 30_000L
+        ).resolveUsingWebView(url) { req ->
+            val reqUrl = req.url.toString()
+            Log.d(TAG, "fetchAllCookiesViaWebView: request: $reqUrl")
+            // Wait until we see the homepage (means CF challenge + verify completed)
+            reqUrl.contains("/home") || reqUrl.contains("mobile/home")
+        }
+
+        // Extract ALL cookies from CookieManager for net77.cc
+        cm.flush()
+        val cookies77 = cm.getCookie("https://net77.cc") ?: ""
+        val cookies52 = cm.getCookie("https://net52.cc") ?: ""
+        Log.d(TAG, "fetchAllCookiesViaWebView: net77.cc cookies: ${cookies77.take(150)}...")
+        Log.d(TAG, "fetchAllCookiesViaWebView: net52.cc cookies: ${cookies52.take(100)}...")
+
+        // Combine all cookies (net77.cc has t_hash_p, user_token; net52.cc has t_hash)
+        val allCookies = mutableListOf<String>()
+        if (cookies77.isNotBlank()) allCookies.add(cookies77)
+        if (cookies52.isNotBlank()) {
+            // Only add net52 cookies that aren't already in net77
+            val names77 = cookies77.split(";").map { it.trim().substringBefore("=", "").trim() }.toSet()
+            cookies52.split(";").forEach { c ->
+                val name = c.trim().substringBefore("=", "").trim()
+                if (name.isNotEmpty() && name !in names77) allCookies.add(c.trim())
+            }
+        }
+
+        val result = allCookies.joinToString("; ")
+        Log.d(TAG, "fetchAllCookiesViaWebView: combined ${allCookies.size} cookie parts")
+        return result
+    } catch (e: Exception) {
+        Log.e(TAG, "fetchAllCookiesViaWebView: exception: ${e.message}")
+        return ""
+    }
 }
 
 val newTvBaseHeaders = mapOf(
