@@ -25,6 +25,13 @@ import java.util.Base64
 
 private const val TAG = "NetMirror"
 
+/** Shared Jackson ObjectMapper for parsing JSON with TypeReference (avoids type erasure). */
+val netMirrorMapper: ObjectMapper = jacksonObjectMapper().configure(
+    DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false
+).configure(
+    JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature(), true
+)
+
 val JSONParser = object : ResponseParser {
     val mapper: ObjectMapper = jacksonObjectMapper().configure(
         DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false
@@ -597,7 +604,7 @@ suspend fun loadNewTvLinks(
         }
 
         val playlist = try {
-            JSONParser.mapper.readValue(res.text, object : TypeReference<List<PlaylistItem>>() {})
+            netMirrorMapper.readValue(res.text, object : TypeReference<List<PlaylistItem>>() {})
         } catch (e: Exception) {
             Log.e(TAG, "$providerName: playlist.php parse failed: ${e.message} body=${res.text.take(200)}")
             null
