@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.INFER_TYPE
 import com.lagradost.cloudstream3.network.WebViewResolver
 import com.fasterxml.jackson.core.json.JsonReadFeature
+import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -595,7 +596,12 @@ suspend fun loadNewTvLinks(
             return false
         }
 
-        val playlist = tryParseJson<List<PlaylistItem>>(res.text)
+        val playlist = try {
+            JSONParser.mapper.readValue(res.text, object : TypeReference<List<PlaylistItem>>() {})
+        } catch (e: Exception) {
+            Log.e(TAG, "$providerName: playlist.php parse failed: ${e.message} body=${res.text.take(200)}")
+            null
+        }
         if (playlist.isNullOrEmpty()) {
             Log.e(TAG, "$providerName: playlist.php returned no items, body=${res.text.take(200)}")
             return false
