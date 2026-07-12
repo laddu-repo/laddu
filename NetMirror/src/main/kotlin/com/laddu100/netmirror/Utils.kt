@@ -139,6 +139,9 @@ private suspend fun tryBypassDomain(domain: String): String {
         .followSslRedirects(false)
         .build()
 
+    // Collect ALL cookies from verify2 + verify.php (site sets t_hash, NOT t_hash_t)
+    val allCookies = mutableMapOf<String, String>()
+
     try {
         val getReq = Request.Builder()
             .url("$base/verify2")
@@ -150,7 +153,8 @@ private suspend fun tryBypassDomain(domain: String): String {
                 val name = sc.substringBefore("=", "").trim()
                 val value = sc.substringAfter("=", "").substringBefore(";").trim()
                 if (name.isNotEmpty() && value.isNotEmpty()) {
-                    // collected but not strictly needed
+                    allCookies[name] = value
+                    Log.d(TAG, "bypass: verify2 set $name=${value.take(50)}...")
                 }
             }
         }
@@ -168,11 +172,16 @@ private suspend fun tryBypassDomain(domain: String): String {
     return try {
         client.newCall(postReq).execute().use { response ->
             Log.d(TAG, "bypass: $base/verify.php HTTP ${response.code}")
-            response.headers("Set-Cookie")
-                .firstOrNull { it.startsWith("t_hash_t=") }
-                ?.substringAfter("t_hash_t=")
-                ?.substringBefore(";")
-                .orEmpty()
+            response.headers("Set-Cookie").forEach { sc ->
+                val name = sc.substringBefore("=", "").trim()
+                val value = sc.substringAfter("=", "").substringBefore(";").trim()
+                if (name.isNotEmpty() && value.isNotEmpty()) {
+                    allCookies[name] = value
+                    Log.d(TAG, "bypass: verify.php set $name=${value.take(50)}...")
+                }
+            }
+            // Return ALL cookies as a cookie string — send everything to play.php
+            if (allCookies.isEmpty()) "" else allCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
         }
     } catch (e: Exception) {
         Log.d(TAG, "bypass: $base exception: ${e.message}")
@@ -191,18 +200,34 @@ suspend fun bypass(mainUrl: String): String {
 
     for (domain in candidateDomains) {
         Log.d(TAG, "bypass: trying $domain")
-        val cookie = tryBypassDomain(domain)
-        if (cookie.isNotEmpty()) {
+        val fullCookies = tryBypassDomain(domain)
+        if (fullCookies.isNotEmpty()) {
             Log.d(TAG, "bypass: success on $domain")
             netMirrorWorkingDomain = domain
-            NetflixMirrorStorage.saveCookie(cookie)
-            return cookie
+            // Extract just the t_hash (or t_hash_t) value for backward compat with providers
+            // Providers use: cookies = mapOf("t_hash_t" to cookie_value)
+            val cookieValue = extractCookieValue(fullCookies, "t_hash")
+                ?: extractCookieValue(fullCookies, "t_hash_t")
+                ?: fullCookies  // fallback: return everything
+            NetflixMirrorStorage.saveCookie(cookieValue)
+            return cookieValue
         }
     }
 
     Log.e(TAG, "bypass: all ${candidateDomains.size} domains failed")
     NetflixMirrorStorage.clearCookie()
     return ""
+}
+
+/** Extract a specific cookie value from a "name=value; name=value" string. */
+private fun extractCookieValue(cookieStr: String, name: String): String? {
+    for (part in cookieStr.split(";")) {
+        val trimmed = part.trim()
+        if (trimmed.startsWith("$name=")) {
+            return trimmed.substringAfter("=")
+        }
+    }
+    return null
 }
 
 /**
@@ -514,32 +539,29 @@ suspend fun loadNewTvLinks(
     val browseDomain = netMirrorWorkingDomain  // e.g. https://net52.cc
     val browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
 
-    // STEP 0: Get the PLAY cookie (for net77.cc — where the POST goes)
-    val playCookie = bypassForPlay()
-    if (playCookie.isEmpty()) {
+    // STEP 0: Get ALL cookies from the play domain (t_hash, t_hash_t, etc.)
+    val playCookieStr = bypassForPlay()
+    if (playCookieStr.isEmpty()) {
         Log.e(TAG, "$providerName: bypassForPlay failed — cannot POST play.php")
         return false
     }
-    Log.d(TAG, "$providerName: got play cookie")
-
-    val playCookies = mapOf(
-        "t_hash_t" to playCookie,
-        "ott" to ott,
-        "hd" to "on"
-    )
+    Log.d(TAG, "$providerName: got play cookies: ${playCookieStr.take(80)}...")
 
     // STEP 1: POST play.php to get the `in` hash
     val postDomains = listOf("https://net77.cc", "https://net52.cc", "https://net22.cc", "https://net99.cc", "https://net50.cc")
     var inHash = ""
 
     for (domain in postDomains) {
+        // Send ALL cookies from verify.php + ott + hd as a raw Cookie header
+        val fullCookieStr = "$playCookieStr; ott=$ott; hd=on"
         val postHeaders = mapOf(
             "Accept" to "*/*",
             "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
             "Origin" to domain,
             "Referer" to "$domain/home",
             "User-Agent" to browserUA,
-            "X-Requested-With" to "XMLHttpRequest"
+            "X-Requested-With" to "XMLHttpRequest",
+            "Cookie" to fullCookieStr
         )
 
         try {
@@ -547,7 +569,6 @@ suspend fun loadNewTvLinks(
                 "$domain/play.php",
                 requestBody = FormBody.Builder().add("id", id).build(),
                 headers = postHeaders,
-                cookies = playCookies,
                 timeout = 15_000L
             )
             Log.d(TAG, "$providerName: POST $domain/play.php HTTP ${res.code} body=${res.text.take(200)}")
