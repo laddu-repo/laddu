@@ -486,86 +486,102 @@ suspend fun loadNewTvLinks(
     // ════════════════════════════════════════════════════════════════════════════
     // NEW FLOW (confirmed from DevTools HAR capture, July 2026):
     //
-    // The site disabled the old OTP "111111" master bypass. The new flow uses
-    // a POST to play.php to get an `in` hash, which serves as authentication
-    // for all subsequent requests. NO OTP or usertoken needed.
+    // The site uses TWO different domains:
+    //   - PLAY domain (net77.cc): POST play.php to get the `in` hash
+    //   - BROWSE domain (net52.cc): GET play.php, playlist.php, hls m3u8
     //
-    //   1. POST net52.cc/play.php with body "id=<videoId>"
+    // The `in` hash from the POST works cross-domain (it's in the URL, not a cookie).
+    //
+    //   1. Get play cookie via bypassForPlay() (tries net77.cc first)
+    //   2. POST net77.cc/play.php with body "id=<videoId>" + play cookie
     //      → returns {"h":"in=<HASH>"}
-    //
-    //   2. GET net52.cc/play.php?id=<id>&in=<HASH>
-    //      → HTML with <body data-time="<tm>" data-h="<HASH>" data-title="<title>">
-    //      (HASH and data-h are the same; tm is extracted from HASH's 3rd segment)
-    //
-    //   3. GET net52.cc/playlist.php?id=<id>&t=<title>&tm=<tm>&h=<HASH>
-    //      → JSON: [{"title":"...","sources":[{"file":"/hls/<id>.m3u8?in=<HASH2>","label":"Full HD"},...],"tracks":[...subtitles...]}]
-    //
-    //   4. For each source, build full URL: https://net52.cc<hash2_file>
-    //      → Pass as ExtractorLink (M3U8) with Referer: play.php?id=<id>&in=<HASH>
-    //
-    //   5. Segments load from CDN (s23.nm-cdn9.top) with open CORS (*)
+    //   3. GET net52.cc/play.php?id=<id>&in=<HASH> + browse cookie
+    //      → HTML with data-time, data-h, data-title
+    //   4. GET net52.cc/playlist.php?id=<id>&t=<title>&tm=<tm>&h=<HASH>
+    //      → JSON with m3u8 sources + subtitles
+    //   5. Pass each source as ExtractorLink (M3U8) on net52.cc
     // ════════════════════════════════════════════════════════════════════════════
 
-    val playDomain = "https://net52.cc"
-    val cookies = mapOf(
+    val browseDomain = netMirrorWorkingDomain  // e.g. https://net52.cc
+    val browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+
+    // STEP 0: Get the PLAY cookie (for net77.cc — where the POST goes)
+    val playCookie = bypassForPlay()
+    if (playCookie.isEmpty()) {
+        Log.e(TAG, "$providerName: bypassForPlay failed — cannot POST play.php")
+        return false
+    }
+    Log.d(TAG, "$providerName: got play cookie")
+
+    val playCookies = mapOf(
+        "t_hash_t" to playCookie,
+        "ott" to ott,
+        "hd" to "on"
+    )
+    val browseCookies = mapOf(
         "t_hash_t" to cookie,
         "ott" to ott,
         "hd" to "on"
     )
-    val browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
 
     // STEP 1: POST play.php to get the `in` hash
-    val postHeaders = mapOf(
-        "Accept" to "*/*",
-        "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-        "Origin" to playDomain,
-        "Referer" to "$playDomain/home",
-        "User-Agent" to browserUA,
-        "X-Requested-With" to "XMLHttpRequest"
-    )
+    // Try the play domain (net77.cc) first, then fall back to other domains
+    val postDomains = listOf("https://net77.cc", "https://net52.cc", "https://net22.cc", "https://net99.cc", "https://net50.cc")
+    var inHash = ""
+    var postDomain = ""
 
-    val inHash: String = try {
-        val res = app.post(
-            "$playDomain/play.php",
-            requestBody = FormBody.Builder().add("id", id).build(),
-            headers = postHeaders,
-            cookies = cookies,
-            timeout = 15_000L
+    for (domain in postDomains) {
+        val postHeaders = mapOf(
+            "Accept" to "*/*",
+            "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin" to domain,
+            "Referer" to "$domain/home",
+            "User-Agent" to browserUA,
+            "X-Requested-With" to "XMLHttpRequest"
         )
-        Log.d(TAG, "$providerName: POST play.php HTTP ${res.code} body=${res.text.take(200)}")
 
-        if (res.code != 200) {
-            Log.e(TAG, "$providerName: POST play.php failed (code=${res.code})")
-            return false
-        }
+        try {
+            val res = app.post(
+                "$domain/play.php",
+                requestBody = FormBody.Builder().add("id", id).build(),
+                headers = postHeaders,
+                cookies = playCookies,
+                timeout = 15_000L
+            )
+            Log.d(TAG, "$providerName: POST $domain/play.php HTTP ${res.code} body=${res.text.take(200)}")
 
-        // Response: {"h":"in=<HASH>"}
-        val resp = tryParseJson<PlayPostResponse>(res.text)
-        val hField = resp?.h ?: ""
-        if (!hField.startsWith("in=")) {
-            Log.e(TAG, "$providerName: POST play.php unexpected response: $hField")
-            return false
+            if (res.code == 200) {
+                val resp = tryParseJson<PlayPostResponse>(res.text)
+                val hField = resp?.h ?: ""
+                if (hField.startsWith("in=")) {
+                    inHash = hField.removePrefix("in=")
+                    postDomain = domain
+                    Log.d(TAG, "$providerName: got in hash from $domain: ${inHash.take(60)}...")
+                    break
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "$providerName: POST $domain/play.php exception: ${e.message}")
         }
-        val hash = hField.removePrefix("in=")
-        Log.d(TAG, "$providerName: got in hash: ${hash.take(60)}...")
-        hash
-    } catch (e: Exception) {
-        Log.e(TAG, "$providerName: POST play.php exception: ${e.message}")
+    }
+
+    if (inHash.isBlank()) {
+        Log.e(TAG, "$providerName: POST play.php failed on all domains")
         return false
     }
 
-    // STEP 2: GET play.php?id=<id>&in=<hash> to get data-title (show title)
+    // STEP 2: GET play.php?id=<id>&in=<hash> on the BROWSE domain to get data-title
     var title = ""
     var tm = ""
     try {
         val res = app.get(
-            "$playDomain/play.php?id=$id&in=$inHash",
+            "$browseDomain/play.php?id=$id&in=$inHash",
             headers = mapOf(
                 "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Referer" to "$playDomain/home",
+                "Referer" to "$browseDomain/home",
                 "User-Agent" to browserUA
             ),
-            cookies = cookies,
+            cookies = browseCookies,
             timeout = 15_000L
         )
         Log.d(TAG, "$providerName: GET play.php HTTP ${res.code} size=${res.text.length}")
@@ -581,7 +597,6 @@ suspend fun loadNewTvLinks(
 
     // If we couldn't get title/time from HTML, extract timestamp from the hash
     if (tm.isBlank()) {
-        // Hash format: <seg1>::<seg2>::<timestamp>::ni::p::<seg5>
         val parts = inHash.split("::")
         if (parts.size >= 3) {
             tm = parts[2]
@@ -598,10 +613,10 @@ suspend fun loadNewTvLinks(
         return false
     }
 
-    // STEP 3: GET playlist.php to get the m3u8 sources + subtitles
+    // STEP 3: GET playlist.php on the BROWSE domain to get m3u8 sources + subtitles
     val encodedTitle = java.net.URLEncoder.encode(title, "UTF-8")
-    val playlistUrl = "$playDomain/playlist.php?id=$id&t=$encodedTitle&tm=$tm&h=$inHash"
-    val playPageUrl = "$playDomain/play.php?id=$id&in=$inHash"
+    val playlistUrl = "$browseDomain/playlist.php?id=$id&t=$encodedTitle&tm=$tm&h=$inHash"
+    val playPageUrl = "$browseDomain/play.php?id=$id&in=$inHash"
 
     val playlistHeaders = mapOf(
         "Accept" to "*/*",
@@ -611,7 +626,7 @@ suspend fun loadNewTvLinks(
     )
 
     try {
-        val res = app.get(playlistUrl, headers = playlistHeaders, cookies = cookies, timeout = 15_000L)
+        val res = app.get(playlistUrl, headers = playlistHeaders, cookies = browseCookies, timeout = 15_000L)
         Log.d(TAG, "$providerName: playlist.php HTTP ${res.code} size=${res.text.length}")
 
         if (res.code != 200) {
@@ -619,7 +634,6 @@ suspend fun loadNewTvLinks(
             return false
         }
 
-        // Parse JSON: [{"title":"...","sources":[...],"tracks":[...]}]
         val playlist = tryParseJson<List<PlaylistItem>>(res.text)
         if (playlist.isNullOrEmpty()) {
             Log.e(TAG, "$providerName: playlist.php returned no items")
@@ -646,7 +660,7 @@ suspend fun loadNewTvLinks(
                 if (file.isBlank()) return@forEach
 
                 // Build full URL (file is relative like "/hls/<id>.m3u8?in=<hash2>")
-                val fullUrl = if (file.startsWith("http")) file else "$playDomain$file"
+                val fullUrl = if (file.startsWith("http")) file else "$browseDomain$file"
                 val label = source.label ?: providerName
                 val displayLabel = "$providerName - $label"
 
@@ -656,7 +670,7 @@ suspend fun loadNewTvLinks(
                     newExtractorLink(displayLabel, displayLabel, fullUrl, type = ExtractorLinkType.M3U8) {
                         this.referer = playPageUrl
                         this.headers = mapOf(
-                            "Origin" to playDomain,
+                            "Origin" to browseDomain,
                             "User-Agent" to browserUA
                         )
                     }
