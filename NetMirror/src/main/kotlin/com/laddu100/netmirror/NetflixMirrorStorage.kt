@@ -36,20 +36,20 @@ object NetflixMirrorStorage {
     fun saveUserToken(ott: String, token: String) {
         prefs.edit().apply {
             putString("usertoken_$ott", token)
-            putLong("usertoken_ts_$ott", System.currentTimeMillis())
+            putLong("usertoken_timestamp_$ott", System.currentTimeMillis())
             apply()
         }
     }
 
     fun getUserToken(ott: String): Pair<String?, Long> = Pair(
         prefs.getString("usertoken_$ott", null),
-        prefs.getLong("usertoken_ts_$ott", 0L)
+        prefs.getLong("usertoken_timestamp_$ott", 0L)
     )
 
     fun clearUserToken(ott: String) {
         prefs.edit().apply {
             remove("usertoken_$ott")
-            remove("usertoken_ts_$ott")
+            remove("usertoken_timestamp_$ott")
             apply()
         }
     }
