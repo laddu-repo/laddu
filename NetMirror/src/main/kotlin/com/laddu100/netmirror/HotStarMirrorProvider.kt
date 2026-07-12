@@ -49,7 +49,10 @@ class HotStarMirrorProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        cookie_value = if (cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
+        if (cookie_value.isEmpty()) {
+            cookie_value = bypass(netMirrorWorkingDomain)
+            mainUrl = netMirrorWorkingDomain
+        }
         val cookies = mapOf(
             "t_hash_t" to cookie_value,
             "ott" to "hs",
@@ -85,7 +88,10 @@ class HotStarMirrorProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        cookie_value = if (cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
+        if (cookie_value.isEmpty()) {
+            cookie_value = bypass(netMirrorWorkingDomain)
+            mainUrl = netMirrorWorkingDomain
+        }
         val cookies = mapOf(
             "t_hash_t" to cookie_value,
             "hd" to "on",
@@ -103,7 +109,10 @@ class HotStarMirrorProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        cookie_value = if (cookie_value.isEmpty()) bypass(mainUrl) else cookie_value
+        if (cookie_value.isEmpty()) {
+            cookie_value = bypass(netMirrorWorkingDomain)
+            mainUrl = netMirrorWorkingDomain
+        }
         val id = parseJson<Id>(url).id
         val cookies = mapOf(
             "t_hash_t" to cookie_value,
@@ -220,7 +229,10 @@ class HotStarMirrorProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val id = parseJson<LoadData>(data).id
-        return loadNewTvLinks(id, "hs", name, callback)
+        if (cookie_value.isEmpty()) {
+            cookie_value = bypass(netMirrorWorkingDomain)
+        }
+        return loadNewTvLinks(id, "hs", name, cookie_value, callback)
     }
 
     @Suppress("ObjectLiteralToLambda")
@@ -228,9 +240,15 @@ class HotStarMirrorProvider : MainAPI() {
         return object : Interceptor {
             override fun intercept(chain: Interceptor.Chain): Response {
                 val request = chain.request()
-                if (request.url.toString().contains(".m3u8")) {
+                val url = request.url.toString()
+                // Send the t_hash_t cookie with m3u8 playlist AND segment requests
+                // (segments are .js/.jpg files disguised as HLS chunks, loaded from playlist.php base)
+                if (url.contains("playlist.php") || url.contains(".m3u8") || url.contains(".js") || url.contains(".jpg") || url.contains(".ts")) {
+                    val cookieStr = try { android.webkit.CookieManager.getInstance()?.getCookie("https://net77.cc") } catch (_: Exception) { null }
+                    val baseCookie = cookieStr ?: ""
                     val newRequest = request.newBuilder()
-                        .header("Cookie", "hd=on")
+                        .header("Cookie", baseCookie + "; ott=hs; hd=on")
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0")
                         .build()
                     return chain.proceed(newRequest)
                 }
