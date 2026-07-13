@@ -20,8 +20,8 @@ import kotlin.coroutines.resume
 
 private const val TAG = "AniSnatch"
 private const val BASE_URL = "https://anisnatch.top"
-private const val PAGE_LOAD_TIMEOUT = 45_000L
-private const val API_CALL_TIMEOUT = 30_000L
+private const val PAGE_LOAD_TIMEOUT = 90_000L
+private const val API_CALL_TIMEOUT = 45_000L
 
 class AniSnatchWebView {
     private var webViewRef: WebView? = null
@@ -83,22 +83,24 @@ class AniSnatchWebView {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 if (url == null || resumed) return
+                                Log.d(TAG, "onPageFinished: $url title=${view?.title}")
                                 pollForReady(view, 0)
                             }
 
                             private fun pollForReady(view: WebView?, count: Int) {
-                                if (resumed || count > 40) return
+                                if (resumed || count > 60) return
                                 view?.evaluateJavascript(
-                                    "(typeof xhrAjax !== 'undefined' && typeof str2ArrayEnc !== 'undefined') ? 'READY' : 'WAITING'"
+                                    "(function(){ var t=document.title||''; var x=typeof xhrAjax; var s=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t; if(x==='undefined'||s==='undefined') return 'NOJS:'+t; return 'READY:'+t; })();"
                                 ) { res ->
-                                    if (res != null && res.contains("READY") && !resumed) {
+                                    Log.d(TAG, "poll $count: $res")
+                                    if (res != null && res.contains("READY:") && !resumed) {
                                         CookieManager.getInstance().flush()
-                                        Log.d(TAG, "Page ready after $count polls")
+                                        Log.d(TAG, "Page ready after $count polls: $res")
                                         pageReady.set(true)
                                         resumed = true
                                         if (cont.isActive) cont.resume(true)
                                     } else {
-                                        view?.postDelayed({ pollForReady(view, count + 1) }, 500)
+                                        view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
                                     }
                                 }
                             }
@@ -142,9 +144,9 @@ class AniSnatchWebView {
             return null
         }
 
-        val context = CommonActivity.activity ?: return null
         val dataJson = data.toJson()
         val callId = System.currentTimeMillis()
+        Log.d(TAG, "callApi $endpoint data=$dataJson")
 
         return withContext(Dispatchers.Main) {
             withTimeoutOrNull(API_CALL_TIMEOUT) {
@@ -152,6 +154,7 @@ class AniSnatchWebView {
                     var resumed = false
                     val webView = webViewRef
                     if (webView == null) {
+                        Log.e(TAG, "callApi: webViewRef is null")
                         if (cont.isActive) cont.resume(null)
                         return@suspendCancellableCoroutine
                     }
@@ -161,36 +164,50 @@ class AniSnatchWebView {
                             (function() {
                                 try {
                                     window.__anisnatch_result_$callId = null;
+                                    var t = document.title || '';
+                                    if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "CF challenge active: " + t});
+                                        return;
+                                    }
+                                    if (typeof xhrAjax === 'undefined') {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "xhrAjax undefined, title=" + t});
+                                        return;
+                                    }
                                     var p = xhrAjax("$endpoint", $dataJson);
                                     var promise = (p && p.promise) ? p.promise : p;
                                     if (promise && typeof promise.then === 'function') {
                                         promise.then(function(r) {
                                             window.__anisnatch_result_$callId = JSON.stringify(r);
                                         }).catch(function(e) {
-                                            window.__anisnatch_result_$callId = JSON.stringify({success:false, error: String(e)});
+                                            window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "promise.catch: " + String(e)});
                                         });
                                     } else {
                                         window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "no promise, got " + typeof promise});
                                     }
                                 } catch(e) {
-                                    window.__anisnatch_result_$callId = JSON.stringify({success:false, error: String(e)});
+                                    window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "exception: " + String(e)});
                                 }
                             })();
                         """.trimIndent()
 
                         webView.evaluateJavascript(js, null)
 
+                        val pollCount = intArrayOf(0)
                         val pollRunnable = object : Runnable {
                             override fun run() {
                                 if (resumed) return
+                                pollCount[0]++
                                 webView.evaluateJavascript(
                                     "window.__anisnatch_result_$callId || null"
                                 ) { res ->
                                     if (res != null && res != "null" && !resumed) {
                                         resumed = true
-                                        Log.d(TAG, "API $endpoint response: ${res.take(500)}")
+                                        Log.d(TAG, "API $endpoint response (poll ${pollCount[0]}): ${res.take(800)}")
                                         if (cont.isActive) cont.resume(res)
                                     } else {
+                                        if (pollCount[0] % 10 == 0) {
+                                            Log.d(TAG, "API $endpoint still waiting (poll ${pollCount[0]})...")
+                                        }
                                         webView.postDelayed(this, 500)
                                     }
                                 }
@@ -209,6 +226,9 @@ class AniSnatchWebView {
                         }
                     }
                 }
+            } ?: run {
+                Log.e(TAG, "callApi $endpoint TIMED OUT after ${API_CALL_TIMEOUT}ms")
+                null
             }
         }
     }
