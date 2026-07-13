@@ -23,6 +23,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import java.net.URLEncoder
 
 class AniPmProvider : MainAPI() {
     override var mainUrl = "https://ani.pm"
@@ -46,6 +47,7 @@ class AniPmProvider : MainAPI() {
     )
 
     private val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
+    private val megaplayPrefix = "https://megaplay.buzz/stream/"
 
     // ─────────────────────────────────────────────────────────────
     // JACKSON DATA CLASSES (from live API probes — zero guesswork)
@@ -127,6 +129,7 @@ class AniPmProvider : MainAPI() {
         val runtime: Int? = null
     )
 
+    // src/servers response (Lyra, Halo, Cobalt, Orion, Onyx, Comet, Pulse, Nova)
     private data class SrcServersResponse(
         val sub: List<SrcSource> = emptyList(),
         val dub: List<SrcSource> = emptyList()
@@ -135,12 +138,12 @@ class AniPmProvider : MainAPI() {
     private data class SrcSource(
         val provider: String = "",
         val name: String = "",
-        val kind: String = "hls",        // hls, embed, file
+        val kind: String = "hls",
         val url: String = "",
         val priority: Int = 0,
-        val subtitle: String? = null,     // hard, soft, null
+        val subtitle: String? = null,
         val tracks: List<SubtitleTrack>? = null,
-        val audioLang: String? = null,    // ja, en
+        val audioLang: String? = null,
         val resolvable: Boolean? = null
     )
 
@@ -150,6 +153,47 @@ class AniPmProvider : MainAPI() {
         val default: Boolean = false
     )
 
+    // ep-servers response (Zephyr: VidPlay-1, HD-1, Vidstream-2, VidCloud-1)
+    private data class EpServersResponse(
+        val servers: List<EpServer> = emptyList()
+    )
+
+    private data class EpServer(
+        val id: String = "",
+        val name: String = "",
+        val type: String = "sub"  // sub or dub
+    )
+
+    // ep-direct response (Zephyr HLS resolution)
+    private data class EpDirectResponse(
+        val m3u8: String? = null,
+        val embed: String? = null,
+        val tracks: List<SubtitleTrack>? = null
+    )
+
+    // mega/sources response (Helios Direct HLS)
+    private data class MegaSourcesResponse(
+        val m3u8: String? = null,
+        val tracks: List<SubtitleTrack>? = null
+    )
+
+    // pahe/find response (Drift)
+    private data class PaheFindResponse(
+        val sources: List<PaheSource> = emptyList()
+    )
+
+    private data class PaheSource(
+        val kwik: String = "",
+        val quality: String = "",
+        val audio: String = "jpn"  // jpn = sub, eng = dub
+    )
+
+    // pahe/resolve response (Drift kwik resolution)
+    private data class PaheResolveResponse(
+        val url: String? = null
+    )
+
+    // animegg response
     private data class AnimeggResponse(
         val sources: List<AnimeggSource> = emptyList()
     )
@@ -201,7 +245,7 @@ class AniPmProvider : MainAPI() {
         if (query.isBlank()) return emptyList()
         val response = try {
             app.get(
-                "$mainUrl/api/anime/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}",
+                "$mainUrl/api/anime/search?q=${URLEncoder.encode(query, "UTF-8")}",
                 headers = apiHeaders
             ).parsedSafe<SearchResponseData>()
         } catch (e: Exception) {
@@ -209,8 +253,6 @@ class AniPmProvider : MainAPI() {
             return emptyList()
         }
 
-        // Filter to source="anikoto" items — only those have full episode data.
-        // Anilist-source items are metadata-only (no episodes/streams).
         return response?.items
             ?.filter { it.source == "anikoto" }
             ?.mapNotNull { item ->
@@ -270,9 +312,6 @@ class AniPmProvider : MainAPI() {
             else -> TvType.Anime
         }
 
-        // Build sub/dub episodes with REAL titles, descriptions, thumbnails.
-        // Encode the type (sub/dub) + metadata into the data string so loadLinks
-        // can call src/servers with the correct title/ep/year/anilistId/malId.
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
 
@@ -281,10 +320,18 @@ class AniPmProvider : MainAPI() {
             val epTitle = ep.title?.takeIf { it.isNotBlank() }
             val epThumb = fixPoster(ep.thumbnail)
             val epDesc = ep.description?.takeIf { it.isNotBlank() }
-            // Data string: $mainUrl|$title|$epNum|$type|$year|$anilistId|$malId
-            // type = "sub" or "dub" — loadLinks uses this to select the right array.
-            val subData = buildEpisodeData(title, epNum, "sub", year, detail.anilistId, detail.malId)
-            val dubData = buildEpisodeData(title, epNum, "dub", year, detail.anilistId, detail.malId)
+
+            // Data string encodes everything loadLinks needs:
+            // $mainUrl|$seriesId|$title|$epNum|$type|$year|$anilistId|$malId|$subUrl|$dubUrl
+            // subUrl/dubUrl = megaplay.buzz stream URLs (for Helios Direct megaPath)
+            val subData = buildEpisodeData(
+                seriesId, title, epNum, "sub", year,
+                detail.anilistId, detail.malId, ep.sub, ep.dub
+            )
+            val dubData = buildEpisodeData(
+                seriesId, title, epNum, "dub", year,
+                detail.anilistId, detail.malId, ep.sub, ep.dub
+            )
 
             val hasSub = (detail.subCount ?: 0) > 0 || ep.sub != null
             val hasDub = (detail.dubCount ?: 0) > 0 || ep.dub != null
@@ -323,7 +370,7 @@ class AniPmProvider : MainAPI() {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // LOAD LINKS — the core source system
+    // LOAD LINKS — 6 source systems, all with sub/dub separation
     // ─────────────────────────────────────────────────────────────
 
     override suspend fun loadLinks(
@@ -332,32 +379,154 @@ class AniPmProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Data: $mainUrl|$title|$epNum|$type|$year|$anilistId|$malId
+        // Data: $mainUrl|$seriesId|$title|$epNum|$type|$year|$anilistId|$malId|$subUrl|$dubUrl
         val parts = data.split("|")
-        if (parts.size < 4) {
+        if (parts.size < 5) {
             Log.d("AniPm", "loadLinks: bad data='$data'")
             return false
         }
-        val title = parts[1]
-        val epNum = parts[2]
-        val type = parts[3]  // "sub" or "dub"
-        val year = parts.getOrNull(4)?.takeIf { it.isNotBlank() }
-        val anilistId = parts.getOrNull(5)?.takeIf { it.isNotBlank() }
-        val malId = parts.getOrNull(6)?.takeIf { it.isNotBlank() }
+        val seriesId = parts[1]
+        val title = parts[2]
+        val epNum = parts[3]
+        val type = parts[4]  // "sub" or "dub"
+        val year = parts.getOrNull(5)?.takeIf { it.isNotBlank() }
+        val anilistId = parts.getOrNull(6)?.takeIf { it.isNotBlank() }
+        val malId = parts.getOrNull(7)?.takeIf { it.isNotBlank() }
+        val subUrl = parts.getOrNull(8)?.takeIf { it.isNotBlank() }
+        val dubUrl = parts.getOrNull(9)?.takeIf { it.isNotBlank() }
 
-        Log.d("AniPm", "loadLinks: title='$title' ep=$epNum type=$type year=$year alId=$anilistId malId=$malId")
+        Log.d("AniPm", "loadLinks: title='$title' ep=$epNum type=$type")
 
         var found = false
 
-        // ── PRIMARY: src/servers (Lyra, Halo, Cobalt, Orion, Onyx, Comet, Pulse, Nova) ──
+        // ── 1. HELIOS DIRECT (mega/sources) — HLS with soft subs ──
+        // Uses the episode's sub/dub megaplay URL to get a direct HLS stream.
+        val megaUrl = if (type == "dub") dubUrl else subUrl
+        if (megaUrl != null && megaUrl.contains("megaplay.buzz/stream/")) {
+            val megaPath = megaUrl.removePrefix(megaplayPrefix)
+            try {
+                val megaResp = app.get(
+                    "$mainUrl/api/anime/mega/sources?path=${URLEncoder.encode(megaPath, "UTF-8")}",
+                    headers = apiHeaders
+                ).parsedSafe<MegaSourcesResponse>()
+                if (megaResp?.m3u8 != null) {
+                    val hlsUrl = resolveUrl(megaResp.m3u8)
+                    callback(newExtractorLink(
+                        source = name,
+                        name = "AniPm - Helios · Direct (${type.replaceFirstChar { it.uppercase() }}, Soft Sub)",
+                        url = hlsUrl,
+                        type = ExtractorLinkType.M3U8
+                    ) {})
+                    megaResp.tracks?.forEach { track ->
+                        val vttUrl = resolveUrl(track.url)
+                        if (vttUrl.isNotEmpty()) {
+                            subtitleCallback.invoke(SubtitleFile(track.label, vttUrl))
+                        }
+                    }
+                    found = true
+                    Log.d("AniPm", "Helios Direct: OK")
+                }
+            } catch (e: Exception) {
+                Log.d("AniPm", "Helios Direct error: ${e.message}")
+            }
+        }
+
+        // ── 2. ZEPHYR (ep-servers → ep-direct) — 4 HLS sources with soft subs ──
+        // ep-servers returns VidPlay-1, HD-1, Vidstream-2, VidCloud-1 for sub and dub.
+        // Each is resolved via ep-direct to get an HLS m3u8 URL.
+        try {
+            val epServersResp = app.get(
+                "$mainUrl/api/anime/ep-servers/$seriesId/$epNum",
+                headers = apiHeaders
+            ).parsedSafe<EpServersResponse>()
+            val zephyrServers = epServersResp?.servers?.filter { it.type == type }
+            Log.d("AniPm", "Zephyr ep-servers $type: ${zephyrServers?.size ?: 0} servers")
+            zephyrServers?.forEach { server ->
+                try {
+                    val encId = URLEncoder.encode(server.id, "UTF-8")
+                    val directResp = app.get(
+                        "$mainUrl/api/anime/ep-direct?id=$encId",
+                        headers = apiHeaders
+                    ).parsedSafe<EpDirectResponse>()
+                    if (directResp?.m3u8 != null) {
+                        val hlsUrl = resolveUrl(directResp.m3u8)
+                        val variant = if (server.name.startsWith("HD", ignoreCase = true)) "HD" else "Direct"
+                        callback(newExtractorLink(
+                            source = name,
+                            name = "AniPm - Zephyr · $variant (${type.replaceFirstChar { it.uppercase() }}, ${server.name}, Soft Sub)",
+                            url = hlsUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {})
+                        directResp.tracks?.forEach { track ->
+                            val vttUrl = resolveUrl(track.url)
+                            if (vttUrl.isNotEmpty()) {
+                                subtitleCallback.invoke(SubtitleFile(track.label, vttUrl))
+                            }
+                        }
+                        found = true
+                    }
+                } catch (e: Exception) {
+                    Log.d("AniPm", "Zephyr ${server.name} error: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("AniPm", "Zephyr ep-servers error: ${e.message}")
+        }
+
+        // ── 3. DRIFT (pahe/find → pahe/resolve) — HLS hardsub for sub, raw for dub ──
+        // pahe/find returns kwik sources with audio field (jpn=sub, eng=dub).
+        // pahe/resolve converts kwik URL to a master m3u8.
+        try {
+            val paheParams = buildString {
+                append("title=${URLEncoder.encode(title, "UTF-8")}")
+                append("&ep=$epNum")
+                if (year != null) append("&year=$year")
+            }
+            val paheResp = app.get(
+                "$mainUrl/api/anime/pahe/find?$paheParams",
+                headers = apiHeaders
+            ).parsedSafe<PaheFindResponse>()
+            // Filter by audio: jpn = sub, eng = dub
+            val paheSources = paheResp?.sources?.filter {
+                val isDub = it.audio.equals("eng", ignoreCase = true)
+                isDub == (type == "dub")
+            }
+            Log.d("AniPm", "Drift pahe/find $type: ${paheSources?.size ?: 0} sources")
+            paheSources?.forEach { src ->
+                try {
+                    val encKwik = URLEncoder.encode(src.kwik, "UTF-8")
+                    val resolveResp = app.get(
+                        "$mainUrl/api/anime/pahe/resolve?kwik=$encKwik",
+                        headers = apiHeaders
+                    ).parsedSafe<PaheResolveResponse>()
+                    if (resolveResp?.url != null) {
+                        val masterUrl = resolveUrl(resolveResp.url)
+                        val subLabel = if (type == "dub") "Dub" else "Hardsub"
+                        callback(newExtractorLink(
+                            source = name,
+                            name = "AniPm - Drift · ${src.quality}p (${type.replaceFirstChar { it.uppercase() }}, $subLabel)",
+                            url = masterUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {})
+                        found = true
+                    }
+                } catch (e: Exception) {
+                    Log.d("AniPm", "Drift ${src.quality}p error: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("AniPm", "Drift pahe/find error: ${e.message}")
+        }
+
+        // ── 4. SRC/SERVERS (Lyra, Halo, Cobalt, Orion, Onyx, Comet, Pulse, Nova) ──
+        // 37 sub + 13 dub sources. HLS + file + embed kinds.
         val srcParams = buildString {
-            append("title=${java.net.URLEncoder.encode(title, "UTF-8")}")
+            append("title=${URLEncoder.encode(title, "UTF-8")}")
             append("&ep=$epNum")
             if (year != null) append("&year=$year")
             if (anilistId != null) append("&anilistId=$anilistId")
             if (malId != null) append("&malId=$malId")
         }
-
         val srcResponse = try {
             app.get(
                 "$mainUrl/api/anime/src/servers?$srcParams",
@@ -367,11 +536,8 @@ class AniPmProvider : MainAPI() {
             Log.d("AniPm", "src/servers error: ${e.message}")
             null
         }
-
-        // Select the correct array based on the requested type (sub/dub).
         val sources = if (type == "dub") srcResponse?.dub else srcResponse?.sub
         Log.d("AniPm", "src/servers $type: ${sources?.size ?: 0} sources")
-
         sources?.forEach { src ->
             val resolvedUrl = resolveUrl(src.url)
             if (resolvedUrl.isEmpty()) return@forEach
@@ -386,15 +552,12 @@ class AniPmProvider : MainAPI() {
 
             when (src.kind) {
                 "hls" -> {
-                    // HLS streams work directly — no Referer, no headers needed.
-                    // ExoPlayer resolves relative variant/segment URLs against the master URL origin.
                     callback(newExtractorLink(
                         source = name,
                         name = label,
                         url = resolvedUrl,
                         type = ExtractorLinkType.M3U8
                     ) {})
-                    // Pass VTT subtitle tracks for soft-sub sources.
                     src.tracks?.forEach { track ->
                         val vttUrl = resolveUrl(track.url)
                         if (vttUrl.isNotEmpty()) {
@@ -404,7 +567,6 @@ class AniPmProvider : MainAPI() {
                     found = true
                 }
                 "file" -> {
-                    // Direct video file — works for download.
                     callback(newExtractorLink(
                         source = name,
                         name = label,
@@ -414,8 +576,6 @@ class AniPmProvider : MainAPI() {
                     found = true
                 }
                 "embed" -> {
-                    // Embed sources (vivibebe.site, bibiemb.xyz, otakuhg.site, otakuvid.online)
-                    // — same pattern as AniDao. Try loadExtractor first, then HTML m3u8 extraction.
                     try {
                         val loaded = loadExtractor(resolvedUrl, "$mainUrl/", subtitleCallback, callback)
                         if (loaded) {
@@ -442,10 +602,10 @@ class AniPmProvider : MainAPI() {
             }
         }
 
-        // ── SECONDARY: AnimeGG MP4 downloads ──
+        // ── 5. ANIMEGG — MP4 downloads (sub + dub) ──
         try {
             val animeggResponse = app.get(
-                "$mainUrl/api/anime/animegg/sources?title=${java.net.URLEncoder.encode(title, "UTF-8")}&ep=$epNum&lang=$type",
+                "$mainUrl/api/anime/animegg/sources?title=${URLEncoder.encode(title, "UTF-8")}&ep=$epNum&lang=$type",
                 headers = apiHeaders
             ).parsedSafe<AnimeggResponse>()
             animeggResponse?.sources?.forEach { src ->
@@ -464,7 +624,7 @@ class AniPmProvider : MainAPI() {
             Log.d("AniPm", "animegg error: ${e.message}")
         }
 
-        Log.d("AniPm", "loadLinks $data type=$type: found=$found")
+        Log.d("AniPm", "loadLinks title='$title' ep=$epNum type=$type: found=$found")
         return found
     }
 
@@ -473,30 +633,38 @@ class AniPmProvider : MainAPI() {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * Builds the episode data string: $mainUrl|$title|$epNum|$type|$year|$anilistId|$malId
+     * Builds the episode data string:
+     * $mainUrl|$seriesId|$title|$epNum|$type|$year|$anilistId|$malId|$subUrl|$dubUrl
      * Starts with https:// so CloudStream doesn't prepend mainUrl.
+     * subUrl/dubUrl are megaplay.buzz stream URLs (for Helios Direct megaPath).
      */
     private fun buildEpisodeData(
+        seriesId: Int,
         title: String,
         epNum: Int,
         type: String,
         year: Int?,
         anilistId: String?,
-        malId: String?
+        malId: String?,
+        subUrl: String?,
+        dubUrl: String?
     ): String {
         return buildString {
             append(mainUrl).append("|")
+            append(seriesId).append("|")
             append(title).append("|")
             append(epNum).append("|")
             append(type).append("|")
             append(year ?: "").append("|")
             append(anilistId ?: "").append("|")
-            append(malId ?: "")
+            append(malId ?: "").append("|")
+            append(subUrl ?: "").append("|")
+            append(dubUrl ?: "")
         }
     }
 
     /**
-     * Resolves relative URLs (/api/anime/src/hls?t=...) to absolute (https://ani.pm/api/...).
+     * Resolves relative URLs (/api/anime/src/hls?t=...) to absolute.
      * Embed URLs are already absolute (https://vivibebe.site/...).
      */
     private fun resolveUrl(url: String): String {
@@ -505,9 +673,7 @@ class AniPmProvider : MainAPI() {
     }
 
     /**
-     * Fixes poster URLs. The API sometimes returns relative paths like
-     * "/api/anime/cover?anilistId=20" which need the mainUrl prefix.
-     * AniList CDN URLs (s4.anilist.co) and other absolute URLs are returned as-is.
+     * Fixes poster URLs. Relative paths get mainUrl prefix.
      */
     private fun fixPoster(url: String?): String? {
         if (url.isNullOrBlank()) return null
