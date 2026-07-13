@@ -31,7 +31,7 @@ import kotlin.coroutines.resume
 private const val TAG = "AniSnatch"
 private const val BASE_URL = "https://anisnatch.top"
 private const val PAGE_LOAD_TIMEOUT = 90_000L
-private const val API_CALL_TIMEOUT = 60_000L
+private const val API_CALL_TIMEOUT = 30_000L
 
 class AniSnatchWebView {
     private var webViewRef: WebView? = null
@@ -213,45 +213,64 @@ class AniSnatchWebView {
                                     var ts = str4time();
                                     var url = endpoint + "/" + ts;
 
-                                    fetch(url, {
-                                        method: "POST",
-                                        headers: {"Content-Type": "application/json"},
-                                        body: body,
-                                        credentials: "include"
-                                    }).then(function(response) {
-                                        if (!response.ok) {
-                                            throw new Error("HTTP " + response.status);
-                                        }
-                                        return response.arrayBuffer();
-                                    }).then(function(buffer) {
-                                        var a = new Uint8Array(buffer);
-                                        var marker = [65,110,105,83,110,97,116,99,104];
-                                        var e = -1;
-                                        for (var i = 0; i <= a.length - marker.length; i++) {
-                                            var match = true;
-                                            for (var j = 0; j < marker.length; j++) {
-                                                if (a[i+j] !== marker[j]) { match = false; break; }
+                                    var xhr = new XMLHttpRequest();
+                                    xhr.open("POST", url, true);
+                                    xhr.responseType = "arraybuffer";
+                                    xhr.timeout = 15000;
+                                    xhr.setRequestHeader("Content-Type", "application/json");
+
+                                    xhr.onload = function() {
+                                        try {
+                                            if (xhr.status === 0) {
+                                                window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "status 0 (CORS/block)"});
+                                                return;
                                             }
-                                            if (match) { e = i + marker.length; break; }
-                                        }
-                                        if (e === -1) {
-                                            var text = new TextDecoder().decode(a);
-                                            window.__anisnatch_result_$callId = text;
-                                            return;
-                                        }
+                                            if (xhr.status !== 200) {
+                                                var errText = "";
+                                                try { errText = new TextDecoder().decode(xhr.response); } catch(e){}
+                                                window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "HTTP " + xhr.status, body: errText.substring(0, 300)});
+                                                return;
+                                            }
 
-                                        var key = ir.token;
-                                        var decrypted = new Uint8Array(a.length - e);
-                                        for (var k = 0; k < decrypted.length; k++) {
-                                            decrypted[k] = a[e + k] ^ key.charCodeAt(k % key.length);
-                                        }
+                                            var a = new Uint8Array(xhr.response);
+                                            var marker = [65,110,105,83,110,97,116,99,104];
+                                            var e = -1;
+                                            for (var i = 0; i <= a.length - marker.length; i++) {
+                                                var match = true;
+                                                for (var j = 0; j < marker.length; j++) {
+                                                    if (a[i+j] !== marker[j]) { match = false; break; }
+                                                }
+                                                if (match) { e = i + marker.length; break; }
+                                            }
+                                            if (e === -1) {
+                                                var text = new TextDecoder().decode(a);
+                                                window.__anisnatch_result_$callId = text;
+                                                return;
+                                            }
 
-                                        var inflated = pako.inflate(decrypted);
-                                        var json = new TextDecoder().decode(inflated);
-                                        window.__anisnatch_result_$callId = json;
-                                    }).catch(function(e) {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "fetch: " + String(e)});
-                                    });
+                                            var key = ir.token;
+                                            var decrypted = new Uint8Array(a.length - e);
+                                            for (var k = 0; k < decrypted.length; k++) {
+                                                decrypted[k] = a[e + k] ^ key.charCodeAt(k % key.length);
+                                            }
+
+                                            var inflated = pako.inflate(decrypted);
+                                            var json = new TextDecoder().decode(inflated);
+                                            window.__anisnatch_result_$callId = json;
+                                        } catch(de) {
+                                            window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "decrypt: " + String(de)});
+                                        }
+                                    };
+
+                                    xhr.onerror = function() {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "XHR onerror"});
+                                    };
+
+                                    xhr.ontimeout = function() {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "XHR timeout 15s"});
+                                    };
+
+                                    xhr.send(body);
                                 } catch(e) {
                                     window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "exception: " + String(e)});
                                 }
