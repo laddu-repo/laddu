@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 android {
     buildFeatures {
@@ -16,5 +16,5 @@ cloudstream {
     authors = listOf("raghav")
     status = 1
     tvTypes = listOf("Live")
-    iconUrl = "https://ppv.st/favicon.png"
+    iconUrl = "https://ppv.st/assets/img/ppv.png"
 }

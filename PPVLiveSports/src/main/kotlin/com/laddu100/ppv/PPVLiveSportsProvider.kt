@@ -187,37 +187,37 @@ class PPVLiveSportsProvider : MainAPI() {
 
         val ctx = context ?: return false
 
-        val html = try {
-            app.get(iframeUrl, headers = mapOf(
+        var found = false
+
+        try {
+            val html = app.get(iframeUrl, headers = mapOf(
                 "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
                 "Referer" to "$mainUrl/"
             ), timeout = TIMEOUT).text
-        } catch (e: Exception) {
-            Log.e(TAG, "loadLinks fetch embed failed: ${e.message}")
-            return false
-        }
 
-        val m3u8Regex = Regex("""https?://[^\s"'\\]+\.m3u8[^\s"'\\]*""")
-        val directMatches = m3u8Regex.findAll(html)
-            .map { it.value.replace("\\u0026", "&").replace("\\/", "/") }
-            .toList()
-            .distinct()
+            val m3u8Regex = Regex("""https?://[^\s"'\\]+\.m3u8[^\s"'\\]*""")
+            val directMatches = m3u8Regex.findAll(html)
+                .map { it.value.replace("\\u0026", "&").replace("\\/", "/") }
+                .toList()
+                .distinct()
 
-        var found = false
-        if (directMatches.isNotEmpty()) {
-            directMatches.forEachIndexed { idx, m3u8 ->
-                val label = if (epData.tag != null) "PPV • ${epData.tag}" else "PPV"
-                try {
-                    M3u8Helper.generateM3u8(
-                        source = label,
-                        streamUrl = m3u8,
-                        referer = "https://embedindia.st/"
-                    ).forEach(callback)
-                    found = true
-                } catch (e: Exception) {
-                    Log.d(TAG, "m3u8 gen failed: ${e.message}")
+            if (directMatches.isNotEmpty()) {
+                directMatches.forEach { m3u8 ->
+                    val label = if (epData.tag != null) "PPV • ${epData.tag}" else "PPV"
+                    try {
+                        M3u8Helper.generateM3u8(
+                            source = label,
+                            streamUrl = m3u8,
+                            referer = "https://embedindia.st/"
+                        ).forEach(callback)
+                        found = true
+                    } catch (e: Exception) {
+                        Log.d(TAG, "m3u8 gen failed: ${e.message}")
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.d(TAG, "Direct fetch failed, trying WebView: ${e.message}")
         }
 
         if (!found) {
