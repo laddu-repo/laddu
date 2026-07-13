@@ -197,24 +197,61 @@ class AniSnatchWebView {
                                     window.__anisnatch_result_$callId = null;
                                     var t = document.title || '';
                                     if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "CF challenge active: " + t});
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "CF active: " + t});
                                         return;
                                     }
-                                    if (typeof xhrAjax === 'undefined') {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "xhrAjax undefined, title=" + t});
+                                    if (typeof str2ArrayEnc === 'undefined') {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "str2ArrayEnc undefined"});
                                         return;
                                     }
-                                    var p = xhrAjax("$endpoint", $dataJson);
-                                    var promise = (p && p.promise) ? p.promise : p;
-                                    if (promise && typeof promise.then === 'function') {
-                                        promise.then(function(r) {
-                                            window.__anisnatch_result_$callId = JSON.stringify(r);
-                                        }).catch(function(e) {
-                                            window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "promise.catch: " + String(e)});
-                                        });
-                                    } else {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "no promise, got " + typeof promise});
-                                    }
+
+                                    var endpoint = "$endpoint";
+                                    var data = $dataJson;
+
+                                    var ir = str2ArrayEnc(JSON.stringify(data));
+                                    var body = JSON.stringify(ir);
+                                    var ts = str4time();
+                                    var url = endpoint + "/" + ts;
+
+                                    fetch(url, {
+                                        method: "POST",
+                                        headers: {"Content-Type": "application/json"},
+                                        body: body,
+                                        credentials: "include"
+                                    }).then(function(response) {
+                                        if (!response.ok) {
+                                            throw new Error("HTTP " + response.status);
+                                        }
+                                        return response.arrayBuffer();
+                                    }).then(function(buffer) {
+                                        var a = new Uint8Array(buffer);
+                                        var marker = [65,110,105,83,110,97,116,99,104];
+                                        var e = -1;
+                                        for (var i = 0; i <= a.length - marker.length; i++) {
+                                            var match = true;
+                                            for (var j = 0; j < marker.length; j++) {
+                                                if (a[i+j] !== marker[j]) { match = false; break; }
+                                            }
+                                            if (match) { e = i + marker.length; break; }
+                                        }
+                                        if (e === -1) {
+                                            var text = new TextDecoder().decode(a);
+                                            window.__anisnatch_result_$callId = text;
+                                            return;
+                                        }
+
+                                        var key = ir.token;
+                                        var decrypted = new Uint8Array(a.length - e);
+                                        for (var k = 0; k < decrypted.length; k++) {
+                                            decrypted[k] = a[e + k] ^ key.charCodeAt(k % key.length);
+                                        }
+
+                                        var inflated = pako.inflate(decrypted);
+                                        var json = new TextDecoder().decode(inflated);
+                                        window.__anisnatch_result_$callId = json;
+                                    }).catch(function(e) {
+                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "fetch: " + String(e)});
+                                    });
                                 } catch(e) {
                                     window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "exception: " + String(e)});
                                 }
@@ -233,7 +270,7 @@ class AniSnatchWebView {
                                 ) { res ->
                                     if (res != null && res != "null" && !resumed) {
                                         resumed = true
-                                        Log.d(TAG, "API $endpoint response (poll ${pollCount[0]}): ${res.take(800)}")
+                                        Log.d(TAG, "API $endpoint response (poll ${pollCount[0]}): ${res.take(1000)}")
                                         if (cont.isActive) cont.resume(res)
                                     } else {
                                         if (pollCount[0] % 10 == 0) {
@@ -244,7 +281,7 @@ class AniSnatchWebView {
                                 }
                             }
                         }
-                        webView.postDelayed(pollRunnable, 1000)
+                        webView.postDelayed(pollRunnable, 500)
 
                         cont.invokeOnCancellation {
                             resumed = true
