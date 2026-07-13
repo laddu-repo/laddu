@@ -224,20 +224,31 @@ class AniDaoProvider : MainAPI() {
 
             val titleText = row.selectFirst(".an-episode-row__title a")?.text()?.trim() ?: ""
             val epNum = Regex("-episode-(\\d+)").find(href)?.groupValues?.get(1)?.toIntOrNull()
-            val epName = titleText.replace(Regex("\\s*[Ee]pisode\\s*\\d+\\s*$"), "").trim().ifEmpty { null }
+            // Strip trailing "Episode N" and leading "N " prefix that the site adds to titles.
+            val epName = titleText
+                .replace(Regex("\\s*[Ee]pisode\\s*\\d+\\s*$"), "")
+                .replace(Regex("^\\d+\\s+"), "")
+                .trim()
+                .ifEmpty { null }
 
             val hasHsub = row.select(".an-badge--hsub").isNotEmpty()
             val hasSub = row.select(".an-badge--sub").isNotEmpty()
             val hasDub = row.select(".an-badge--dub").isNotEmpty()
 
+            // Encode the requested DubStatus into the episode data string so that
+            // loadLinks() can fetch only the matching panel (sub/hsub for Subbed
+            // tab, dub for Dubbed tab). This is what makes Sub/Dub separation work.
+            // Hardsub streams live in their own "hsub" panel on the watch page,
+            // but we surface them in the Subbed tab (with a clear "(Hardsub)"
+            // label) because that's where users expect to find them.
             if (hasSub || hasHsub) {
-                subEpisodes.add(newEpisode(href) {
+                subEpisodes.add(newEpisode("$href|sub") {
                     this.name = epName
                     this.episode = epNum
                 })
             }
             if (hasDub) {
-                dubEpisodes.add(newEpisode(href) {
+                dubEpisodes.add(newEpisode("$href|dub") {
                     this.name = epName
                     this.episode = epNum
                 })
@@ -264,25 +275,74 @@ class AniDaoProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data, headers = baseHeaders).document
+        // Data string is "$watchUrl|$type" where type is "sub" or "dub".
+        // Hardsub is part of the Subbed tab (merged), per user requirement.
+        val parts = data.split("|")
+        val watchUrl = parts[0]
+        val type = parts.getOrElse(1) { "sub" }
+
+        val doc = fetchWatchDoc(watchUrl)
         var found = false
 
-        for (panel in listOf("hsub", "sub", "dub")) {
+        // Subbed tab → fetch hsub + sub panels (hardsub is merged into Subbed).
+        // Dubbed tab → fetch only the dub panel.
+        // This is THE fix for "sub and dub separation not working" and
+        // "hardsubs too loads in dub" — each tab now only returns its own sources.
+        val panels = if (type == "dub") {
+            listOf("dub" to SourceKind.DUB)
+        } else {
+            listOf("hsub" to SourceKind.HARDSUB, "sub" to SourceKind.SUB)
+        }
+
+        for ((panel, kind) in panels) {
             val section = doc.selectFirst("""[data-an-panel="$panel"]""") ?: continue
-            val hardsub = panel == "hsub"
             for (btn in section.select("button[data-an-video]")) {
                 val embed = btn.attr("data-an-video")
                 if (embed.isEmpty()) continue
-                val label = if (hardsub) "AniDao - ${domainName(embed)} (Hardsub)"
-                else "AniDao - ${domainName(embed)}"
+                val label = "AniDao - ${domainName(embed)} (${kind.label})"
                 passSubtitle(embed, subtitleCallback)
-                if (resolveEmbed(embed, data, label, subtitleCallback, callback)) {
+                if (resolveEmbed(embed, watchUrl, label, subtitleCallback, callback)) {
                     found = true
                 }
             }
         }
-        Log.d("AniDao", "loadLinks $data: found=$found")
+        Log.d("AniDao", "loadLinks $data type=$type: found=$found")
         return found
+    }
+
+    private enum class SourceKind(val label: String) {
+        SUB("Sub"), DUB("Dub"), HARDSUB("Hardsub")
+    }
+
+    /**
+     * Fetches the watch-online page. AniDao has a known soft-404 quirk where
+     * episode 1 of long-running anime (e.g. One Piece) is linked as
+     * `/watch-online/one-piece-100-episode-1` but that URL returns a "not found"
+     * page (HTTP 200 with an error body). The real URL is
+     * `/watch-online/one-piece-episode-1`. Detect the soft-404 (no source
+     * panels present) and retry with the `-100-` segment stripped from the slug.
+     */
+    private suspend fun fetchWatchDoc(url: String): Document {
+        val doc = app.get(url, headers = baseHeaders).document
+        val hasPanels = doc.selectFirst(
+            """[data-an-panel="sub"], [data-an-panel="dub"], [data-an-panel="hsub"]"""
+        ) != null
+        if (hasPanels) return doc
+
+        // Soft-404 fallback: strip a stray "-100-" segment that some episode-1
+        // URLs carry (e.g. one-piece-100-episode-1 → one-piece-episode-1).
+        val altUrl = url.replace(Regex("-100-episode-"), "-episode-")
+        if (altUrl != url) {
+            Log.d("AniDao", "fetchWatchDoc: soft-404 fallback $url -> $altUrl")
+            val altDoc = app.get(altUrl, headers = baseHeaders).document
+            if (altDoc.selectFirst(
+                    """[data-an-panel="sub"], [data-an-panel="dub"], [data-an-panel="hsub"]"""
+                ) != null
+            ) {
+                return altDoc
+            }
+        }
+        return doc
     }
 
     private suspend fun resolveEmbed(
@@ -330,7 +390,8 @@ class AniDaoProvider : MainAPI() {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d("AniDao", "resolveEmbed failed $embedUrl: ${e.message}")
             false
         }
     }
@@ -367,6 +428,9 @@ class AniDaoProvider : MainAPI() {
 
     private fun toAnimePath(watchHref: String): String {
         val slug = watchHref.substringAfter("/watch-online/", "")
+            // Strip "-episode-N" and any stray "-100-" segment that episode-1
+            // URLs carry on AniDao (e.g. one-piece-100-episode-1 → one-piece).
+            .replace(Regex("-100-episode-\\d+.*"), "")
             .replace(Regex("-episode-\\d+.*"), "")
             .trim()
         return if (slug.isEmpty()) watchHref else "/anime/$slug"
