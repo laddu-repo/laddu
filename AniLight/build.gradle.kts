@@ -10,5 +10,5 @@ cloudstream {
         "AnimeMovie",
         "OVA"
     )
-    iconUrl = "https://anilight.live/favicon.ico"
+    iconUrl = "https://anilight.live/favicon.svg"
 }
