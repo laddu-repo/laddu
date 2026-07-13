@@ -55,8 +55,20 @@ class AniSnatchWebView {
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePageLoaded(): Boolean {
-        Log.d(TAG, "ensurePageLoaded: called, pageReady=${pageReady.get()} webViewRef=${webViewRef != null}")
+        Log.d(TAG, "ensurePageLoaded: called, pageReady=${pageReady.get()} webViewRef=${webViewRef != null} loadingPage=${loadingPage.get()}")
         if (pageReady.get() && webViewRef != null) return true
+
+        // Force reset stuck state from previous cancelled attempts
+        if (loadingPage.get()) {
+            Log.d(TAG, "ensurePageLoaded: force resetting stuck loadingPage")
+            loadingPage.set(false)
+            try {
+                webViewRef?.destroy()
+            } catch (_: Exception) {}
+            webViewRef = null
+            pageReady.set(false)
+        }
+
         if (!loadingPage.compareAndSet(false, true)) {
             Log.d(TAG, "ensurePageLoaded: waiting for other load")
             var wait = 0
@@ -77,121 +89,126 @@ class AniSnatchWebView {
 
         Log.d(TAG, "ensurePageLoaded: starting fresh page load")
 
-        val success = withContext(Dispatchers.Main) {
-            withTimeoutOrNull(PAGE_LOAD_TIMEOUT) {
-                suspendCancellableCoroutine<Boolean> { cont ->
-                    var resumed = false
-                    val webView = WebView(context)
-                    webViewRef = webView
-                    try {
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        var success = false
+        try {
+            success = withContext(Dispatchers.Main) {
+                withTimeoutOrNull(PAGE_LOAD_TIMEOUT) {
+                    suspendCancellableCoroutine<Boolean> { cont ->
+                        var resumed = false
+                        val webView = WebView(context)
+                        webViewRef = webView
+                        try {
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-                        webView.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            val originalUa = userAgentString ?: ""
-                            userAgentString = originalUa.replace("; wv", "").replace("Android TV", "Android")
-                            blockNetworkImage = true
-                        }
-
-                        webView.addJavascriptInterface(bridge, "AndroidBridge")
-
-                        webView.webChromeClient = object : android.webkit.WebChromeClient() {
-                            override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
-                                Log.d(TAG, "JS: ${consoleMessage?.message()}")
-                                return true
-                            }
-                        }
-
-                        webView.webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ) = false
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                if (url == null || resumed) return
-                                Log.d(TAG, "onPageFinished: $url title=${view?.title}")
-
-                                view?.evaluateJavascript("""
-                                    (function() {
-                                        try {
-                                            var t = document.title || '';
-                                            if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
-                                                AndroidBridge.log('CF challenge: ' + t);
-                                                return;
-                                            }
-                                            if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
-                                                AndroidBridge.log('Page ready, str2ArrayEnc and pako available');
-                                                AndroidBridge.onReady();
-                                            } else {
-                                                AndroidBridge.log('Waiting for JS: str2ArrayEnc=' + typeof str2ArrayEnc + ' pako=' + typeof pako);
-                                            }
-                                        } catch(e) {
-                                            AndroidBridge.log('Ready check error: ' + e);
-                                        }
-                                    })();
-                                """.trimIndent(), null)
-
-                                pollForReady(view, 0)
+                            webView.settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                val originalUa = userAgentString ?: ""
+                                userAgentString = originalUa.replace("; wv", "").replace("Android TV", "Android")
+                                blockNetworkImage = true
                             }
 
-                            private fun pollForReady(view: WebView?, count: Int) {
-                                if (resumed || count > 80) return
-                                if (bridge.ready) {
-                                    CookieManager.getInstance().flush()
-                                    Log.d(TAG, "Page ready after $count polls")
-                                    pageReady.set(true)
-                                    resumed = true
-                                    if (cont.isActive) cont.resume(true)
-                                    return
+                            webView.addJavascriptInterface(bridge, "AndroidBridge")
+
+                            webView.webChromeClient = object : android.webkit.WebChromeClient() {
+                                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                                    Log.d(TAG, "JS: ${consoleMessage?.message()}")
+                                    return true
                                 }
-                                view?.evaluateJavascript("""
-                                    (function() {
-                                        try {
-                                            var t = document.title || '';
-                                            if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) return;
-                                            if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
-                                                AndroidBridge.onReady();
-                                            }
-                                        } catch(e) {}
-                                    })();
-                                """.trimIndent(), null)
-                                view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
                             }
-                        }
 
-                        Log.d(TAG, "Loading URL: $BASE_URL/home")
-                        webView.loadUrl("$BASE_URL/home")
+                            webView.webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ) = false
 
-                        cont.invokeOnCancellation {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    if (url == null || resumed) return
+                                    Log.d(TAG, "onPageFinished: $url title=${view?.title}")
+
+                                    view?.evaluateJavascript("""
+                                        (function() {
+                                            try {
+                                                var t = document.title || '';
+                                                if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
+                                                    AndroidBridge.log('CF challenge: ' + t);
+                                                    return;
+                                                }
+                                                if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
+                                                    AndroidBridge.log('Page ready, str2ArrayEnc and pako available');
+                                                    AndroidBridge.onReady();
+                                                } else {
+                                                    AndroidBridge.log('Waiting for JS: str2ArrayEnc=' + typeof str2ArrayEnc + ' pako=' + typeof pako);
+                                                }
+                                            } catch(e) {
+                                                AndroidBridge.log('Ready check error: ' + e);
+                                            }
+                                        })();
+                                    """.trimIndent(), null)
+
+                                    pollForReady(view, 0)
+                                }
+
+                                private fun pollForReady(view: WebView?, count: Int) {
+                                    if (resumed || count > 80) return
+                                    if (bridge.ready) {
+                                        CookieManager.getInstance().flush()
+                                        Log.d(TAG, "Page ready after $count polls")
+                                        pageReady.set(true)
+                                        resumed = true
+                                        if (cont.isActive) cont.resume(true)
+                                        return
+                                    }
+                                    view?.evaluateJavascript("""
+                                        (function() {
+                                            try {
+                                                var t = document.title || '';
+                                                if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) return;
+                                                if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
+                                                    AndroidBridge.onReady();
+                                                }
+                                            } catch(e) {}
+                                        })();
+                                    """.trimIndent(), null)
+                                    view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
+                                }
+                            }
+
+                            Log.d(TAG, "Loading URL: $BASE_URL/home")
+                            webView.loadUrl("$BASE_URL/home")
+
+                            cont.invokeOnCancellation {
+                                try {
+                                    webView.destroy()
+                                    webViewRef = null
+                                    pageReady.set(false)
+                                } catch (_: Exception) {
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "ensurePageLoaded error: ${e.message}")
                             try {
                                 webView.destroy()
                                 webViewRef = null
                             } catch (_: Exception) {
                             }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "ensurePageLoaded error: ${e.message}")
-                        try {
-                            webView.destroy()
-                            webViewRef = null
-                        } catch (_: Exception) {
-                        }
-                        if (cont.isActive && !resumed) {
-                            resumed = true
-                            cont.resume(false)
+                            if (cont.isActive && !resumed) {
+                                resumed = true
+                                cont.resume(false)
+                            }
                         }
                     }
-                }
-            } ?: false
+                } ?: false
+            }
+        } finally {
+            loadingPage.set(false)
         }
 
-        loadingPage.set(false)
         if (!success) {
             pageReady.set(false)
             Log.e(TAG, "ensurePageLoaded FAILED")
