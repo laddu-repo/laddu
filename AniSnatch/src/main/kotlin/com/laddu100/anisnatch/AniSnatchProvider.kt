@@ -216,30 +216,23 @@ class AniSnatchProvider : MainAPI() {
         }
         if (epCount < 1) epCount = 1
 
-        val episodesData = fetchEpisodes(anilistId, title)
         val subEps = mutableListOf<Episode>()
         val dubEps = mutableListOf<Episode>()
 
-        val epTitles = episodesData?.episodes?.associate { it.episode to it.title }
-        val hasDub = episodesData?.episodes?.any { it.dub == true } ?: false
-
         for (ep in 1..epCount) {
-            val epTitle = epTitles?.get(ep) ?: "Episode $ep"
             val subData = EpisodeData(anilistId, ep, "sub", isMovie, title).toJson()
             subEps.add(newEpisode(subData) {
                 this.episode = ep
-                this.name = epTitle
+                this.name = "Episode $ep"
             })
-            if (hasDub) {
-                val dubData = EpisodeData(anilistId, ep, "dub", isMovie, title).toJson()
-                dubEps.add(newEpisode(dubData) {
-                    this.episode = ep
-                    this.name = epTitle
-                })
-            }
+            val dubData = EpisodeData(anilistId, ep, "dub", isMovie, title).toJson()
+            dubEps.add(newEpisode(dubData) {
+                this.episode = ep
+                this.name = "Episode $ep"
+            })
         }
 
-        val tvType = if (isMovie && hasDub) TvType.Anime else if (isMovie) TvType.AnimeMovie else TvType.Anime
+        val tvType = if (isMovie) TvType.Anime else TvType.Anime
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
@@ -248,17 +241,6 @@ class AniSnatchProvider : MainAPI() {
             this.year = year
             addEpisodes(DubStatus.Subbed, subEps)
             addEpisodes(DubStatus.Dubbed, dubEps)
-        }
-    }
-
-    private suspend fun fetchEpisodes(anilistId: Int, title: String): EpisodesResponse? {
-        val params = mapOf("animeID" to anilistId)
-        val result = webView.callApi("api/loadEPs", params) ?: return null
-        return try {
-            parseJson<EpisodesResponse>(result)
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchEpisodes parse failed: ${e.message}")
-            null
         }
     }
 
@@ -286,12 +268,17 @@ class AniSnatchProvider : MainAPI() {
             "animeID" to anilistId,
             "episodeNO" to epNum
         )
-        val result = webView.callApi("api/loadSVs", params) ?: return false
+        val result = webView.callApi("api/loadSVs", params) ?: run {
+            Log.e(TAG, "loadSVs returned null")
+            return false
+        }
+
+        Log.d(TAG, "loadSVs full response: ${result.take(2000)}")
 
         val servers = try {
             parseJson<ServersResponse>(result)
         } catch (e: Exception) {
-            Log.e(TAG, "loadLinks parse failed: ${e.message}")
+            Log.e(TAG, "loadLinks parse failed: ${e.message} — raw: ${result.take(500)}")
             return false
         }
 
@@ -318,18 +305,37 @@ class AniSnatchProvider : MainAPI() {
 
         if (allServers.isEmpty()) {
             servers.servers?.forEach { server ->
-                val serverLang = if (server.type == "dub" || server.audio == "dub") "dub"
-                    else if (server.lang?.contains("hi", true) == true) "hindi"
-                    else "sub"
+                val serverLang = when {
+                    server.type == "dub" || server.audio == "dub" -> "dub"
+                    server.lang?.contains("hi", true) == true -> "hindi"
+                    server.lang?.contains("multi", true) == true -> "multi"
+                    else -> "sub"
+                }
                 allServers.add(ServerInfo(server, serverLang))
             }
         }
+
+        if (allServers.isEmpty()) {
+            servers.data?.sub?.forEach { allServers.add(ServerInfo(it, "sub")) }
+            servers.data?.dub?.forEach { allServers.add(ServerInfo(it, "dub")) }
+            servers.data?.hindi?.forEach { allServers.add(ServerInfo(it, "hindi")) }
+            servers.data?.multi?.forEach { allServers.add(ServerInfo(it, "multi")) }
+        }
+
+        if (allServers.isEmpty()) {
+            Log.e(TAG, "No servers found in response. Raw: ${result.take(500)}")
+            return false
+        }
+
+        Log.d(TAG, "Found ${allServers.size} servers (${allServers.count { it.langType == "sub" }} sub, ${allServers.count { it.langType == "dub" }} dub, ${allServers.count { it.langType == "hindi" }} hindi, ${allServers.count { it.langType == "multi" }} multi)")
 
         if (lang == "dub") {
             allServers.retainAll { it.langType == "dub" || it.langType == "hindi" || it.langType == "multi" }
         } else {
             allServers.retainAll { it.langType == "sub" || it.langType == "multi" }
         }
+
+        Log.d(TAG, "After lang filter ($lang): ${allServers.size} servers")
 
         coroutineScope {
             val jobs = allServers.map { serverInfo ->
@@ -359,12 +365,11 @@ class AniSnatchProvider : MainAPI() {
             append("AniSnatch")
             append(" • ")
             append(server.name ?: server.server ?: server.source ?: "Server")
-            if (server.quality != null) append(" • ${server.quality}")
             when (serverInfo.langType) {
                 "hindi" -> append(" • Hindi")
                 "multi" -> append(" • Multi")
-                "dub" -> if (requestedLang == "dub") append(" • Dub")
-                "sub" -> if (requestedLang == "sub") append(" • Sub")
+                "dub" -> append(" • Dub")
+                "sub" -> append(" • Sub")
             }
         }
 
@@ -401,19 +406,43 @@ class AniSnatchProvider : MainAPI() {
             return true
         }
 
-        if (url.startsWith(mainUrl) || url.startsWith("/video/")) {
+        if (url.startsWith(mainUrl) || url.startsWith("/video/") || url.contains("/video/")) {
+            Log.d(TAG, "$sourceName fetching stream URL from: $url")
             val streamUrl = webView.fetchStreamUrl(url)
-            if (streamUrl != null && streamUrl.contains(".m3u8")) {
-                try {
-                    M3u8Helper.generateM3u8(
-                        source = sourceName,
-                        streamUrl = streamUrl,
-                        referer = mainUrl
-                    ).forEach(callback)
-                    return true
-                } catch (e: Exception) {
-                    Log.d(TAG, "$sourceName stream m3u8 failed: ${e.message}")
+            if (streamUrl != null) {
+                Log.d(TAG, "$sourceName got stream: $streamUrl")
+                if (streamUrl.contains(".m3u8")) {
+                    try {
+                        val referer = if (streamUrl.contains("megaup")) {
+                            "https://argon.razorshell.space/"
+                        } else {
+                            mainUrl
+                        }
+                        M3u8Helper.generateM3u8(
+                            source = sourceName,
+                            streamUrl = streamUrl,
+                            referer = referer
+                        ).forEach(callback)
+                        return true
+                    } catch (e: Exception) {
+                        Log.d(TAG, "$sourceName stream m3u8 failed: ${e.message}")
+                    }
                 }
+                if (streamUrl.contains(".mp4")) {
+                    callback.invoke(
+                        newExtractorLink(
+                            sourceName,
+                            sourceName,
+                            streamUrl,
+                            ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = mainUrl
+                        }
+                    )
+                    return true
+                }
+            } else {
+                Log.d(TAG, "$sourceName fetchStreamUrl returned null")
             }
         }
 
@@ -498,26 +527,6 @@ data class AniListAiring(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class EpisodesResponse(
-    @JsonProperty("success") val success: Boolean? = null,
-    @JsonProperty("message") val message: String? = null,
-    @JsonProperty("episodes") val episodes: List<EpisodeInfo>? = null
-)
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-data class EpisodeInfo(
-    @JsonProperty("episode") val episode: Int? = null,
-    @JsonProperty("episodeNO") val episodeNO: Int? = null,
-    @JsonProperty("number") val number: Int? = null,
-    @JsonProperty("title") val title: String? = null,
-    @JsonProperty("title_en") val titleEn: String? = null,
-    @JsonProperty("sub") val sub: Boolean? = null,
-    @JsonProperty("dub") val dub: Boolean? = null,
-    @JsonProperty("hindi") val hindi: Boolean? = null,
-    @JsonProperty("img") val img: String? = null
-)
-
-@JsonIgnoreProperties(ignoreUnknown = true)
 data class ServersResponse(
     @JsonProperty("success") val success: Boolean? = null,
     @JsonProperty("message") val message: String? = null,
@@ -525,7 +534,16 @@ data class ServersResponse(
     @JsonProperty("dub") val dub: List<ServerData>? = null,
     @JsonProperty("hindi") val hindi: List<ServerData>? = null,
     @JsonProperty("multi") val multi: List<ServerData>? = null,
-    @JsonProperty("servers") val servers: List<ServerData>? = null
+    @JsonProperty("servers") val servers: List<ServerData>? = null,
+    @JsonProperty("data") val data: ServersData? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ServersData(
+    @JsonProperty("sub") val sub: List<ServerData>? = null,
+    @JsonProperty("dub") val dub: List<ServerData>? = null,
+    @JsonProperty("hindi") val hindi: List<ServerData>? = null,
+    @JsonProperty("multi") val multi: List<ServerData>? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
