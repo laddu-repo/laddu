@@ -455,7 +455,7 @@ class AniPmProvider : MainAPI() {
                         source = name,
                         name = "AniPm - AnimeGG (${type.replaceFirstChar { it.uppercase() }}, ${src.quality})",
                         url = mp4Url,
-                        type = ExtractorLinkType.MP4
+                        type = ExtractorLinkType.VIDEO
                     ) {})
                     found = true
                 }
