@@ -408,11 +408,7 @@ class AniNamiProvider : MainAPI() {
         val tags = media.genres ?: emptyList()
         val animeScore = media.averageScore
 
-        val tvType = when (media.format) {
-            "MOVIE" -> TvType.AnimeMovie
-            "OVA", "ONA" -> TvType.OVA
-            else -> TvType.Anime
-        }
+        val tvType = TvType.Anime
         val showStatus = when (media.status) {
             "RELEASING" -> ShowStatus.Ongoing
             "FINISHED" -> ShowStatus.Completed
@@ -424,7 +420,7 @@ class AniNamiProvider : MainAPI() {
 
         try {
             val epsUrl = "$mainUrl/api/episodes/$anilistId"
-            val epsText = app.get(epsUrl, headers = apiHeaders).text
+            val epsText = app.get(epsUrl, headers = apiHeaders).textLarge
             val epsData = parseJson<EpisodesResponse>(epsText)
             val providers = epsData.results?.providers ?: emptyMap()
 
