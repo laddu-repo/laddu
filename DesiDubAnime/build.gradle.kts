@@ -2,7 +2,7 @@ version = 3
 
 cloudstream {
     language = "en"
-    description = "Watch Indian Regional Dubbed Anime Online from DesiDubAnime"
+    description = "Watch Indian Regional Dubbed Anime Online from DesiDubAnime - Sub and Dub"
     authors = listOf("raghav")
     status = 1
     tvTypes = listOf(
