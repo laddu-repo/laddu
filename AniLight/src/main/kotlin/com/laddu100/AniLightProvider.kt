@@ -385,7 +385,7 @@ class AniLightProvider : MainAPI() {
                     }
                 }
 
-                malResponse.tracks?.forEach { track ->
+                malResponse?.tracks?.forEach { track ->
                     if (track.url.isNotBlank() && (track.kind == "captions" || track.kind == "subtitles")) {
                         subtitleCallback.invoke(SubtitleFile(track.label ?: "English", track.url))
                     }
