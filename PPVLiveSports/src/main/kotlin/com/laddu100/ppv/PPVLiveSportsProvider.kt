@@ -236,6 +236,122 @@ class PPVLiveSportsProvider : MainAPI() {
         return found
     }
 
+    private val playScript = """
+        (function() {
+            if (window.__interceptor_installed) return "already_installed";
+            Object.defineProperty(window, '__interceptor_installed', {
+                value: true, writable: true, configurable: true, enumerable: false
+            });
+            function log(msg) { console.log("[Hook] " + msg); }
+            log("Installing stealth hooks...");
+            function triggerInterception(url) {
+                if (!url) return;
+                var urlStr = (url && typeof url.toString === 'function') ? url.toString() : url;
+                log("Triggering: " + urlStr);
+                if (urlStr.indexOf('m3u8') !== -1 || urlStr.indexOf('master') !== -1) {
+                    window.location.href = urlStr;
+                }
+            }
+            try {
+                var originalSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+                if (originalSrcDescriptor && originalSrcDescriptor.set) {
+                    var originalSet = originalSrcDescriptor.set;
+                    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+                        set: function(val) { log("MediaElement src: " + val); triggerInterception(val); return originalSet.apply(this, arguments); },
+                        configurable: true, enumerable: true
+                    });
+                }
+            } catch(e) { log("Error hooking MediaElement.src: " + e.message); }
+            try {
+                var originalSetAttribute = Element.prototype.setAttribute;
+                Element.prototype.setAttribute = function(name, value) {
+                    if (typeof name === 'string' && name.toLowerCase() === 'src') { log("setAttribute src: " + value); triggerInterception(value); }
+                    return originalSetAttribute.apply(this, arguments);
+                };
+                Element.prototype.setAttribute.toString = function() { return "function setAttribute() { [native code] }"; };
+            } catch(e) { log("Error hooking setAttribute: " + e.message); }
+            try {
+                var originalFetch = window.fetch;
+                window.fetch = function() {
+                    var url = arguments[0];
+                    var urlStr = typeof url === 'string' ? url : (url && url.url) ? url.url : (url && typeof url.toString === 'function') ? url.toString() : '';
+                    if (urlStr) { log("Fetch: " + urlStr); if (urlStr.indexOf('m3u8') !== -1) triggerInterception(urlStr); }
+                    return originalFetch.apply(this, arguments);
+                };
+                window.fetch.toString = function() { return "function fetch() { [native code] }"; };
+            } catch(e) { log("Error hooking fetch: " + e.message); }
+            try {
+                var originalOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    var urlStr = (url && typeof url.toString === 'function') ? url.toString() : url;
+                    this._url = urlStr; log("XHR open: " + urlStr);
+                    if (typeof urlStr === 'string' && urlStr.indexOf('m3u8') !== -1) triggerInterception(urlStr);
+                    return originalOpen.apply(this, arguments);
+                };
+                XMLHttpRequest.prototype.open.toString = function() { return "function open() { [native code] }"; };
+            } catch(e) { log("Error hooking XHR: " + e.message); }
+            try {
+                var installHlsHook = function(HlsClass) {
+                    if (HlsClass.prototype && !HlsClass.prototype._hooked) {
+                        HlsClass.prototype._hooked = true;
+                        var originalLoadSource = HlsClass.prototype.loadSource;
+                        if (originalLoadSource) {
+                            HlsClass.prototype.loadSource = function(src) { log("Hls.loadSource: " + src); triggerInterception(src); return originalLoadSource.apply(this, arguments); };
+                            HlsClass.prototype.loadSource.toString = function() { return "function loadSource() { [native code] }"; };
+                        }
+                    }
+                };
+                if (window.Hls) { installHlsHook(window.Hls); }
+                else {
+                    var hlsVal = undefined;
+                    Object.defineProperty(window, 'Hls', { get: function() { return hlsVal; }, set: function(val) { hlsVal = val; try { installHlsHook(val); } catch(e) {} }, configurable: true, enumerable: true });
+                }
+            } catch(e) { log("Error hooking Hls: " + e.message); }
+            try {
+                var installJwHook = function(jwplayerFunc) {
+                    if (!jwplayerFunc._hooked) {
+                        jwplayerFunc._hooked = true;
+                        window.jwplayer = function() {
+                            var playerInstance = jwplayerFunc.apply(this, arguments);
+                            if (playerInstance && !playerInstance._hooked) {
+                                playerInstance._hooked = true;
+                                var originalSetup = playerInstance.setup;
+                                if (originalSetup) {
+                                    playerInstance.setup = function(config) {
+                                        log("jwplayer.setup");
+                                        if (config && config.file) triggerInterception(config.file);
+                                        if (config && config.playlist) {
+                                            try { config.playlist.forEach(function(item) { if (item.file) triggerInterception(item.file); if (item.sources) { item.sources.forEach(function(src) { if (src.file) triggerInterception(src.file); }); } }); } catch(e) {}
+                                        }
+                                        return originalSetup.apply(this, arguments);
+                                    };
+                                    playerInstance.setup.toString = function() { return "function setup() { [native code] }"; };
+                                }
+                            }
+                            return playerInstance;
+                        };
+                        for (var key in jwplayerFunc) { if (jwplayerFunc.hasOwnProperty(key)) { window.jwplayer[key] = jwplayerFunc[key]; } }
+                    }
+                };
+                if (window.jwplayer) { installJwHook(window.jwplayer); }
+                else {
+                    var jwVal = undefined;
+                    Object.defineProperty(window, 'jwplayer', { get: function() { return jwVal; }, set: function(val) { jwVal = val; try { installJwHook(val); } catch(e) {} }, configurable: true, enumerable: true });
+                }
+            } catch(e) { log("Error hooking jwplayer: " + e.message); }
+            var checkerInterval = setInterval(function() {
+                var videos = document.querySelectorAll('video');
+                if (videos && videos.length > 0) {
+                    for (var i = 0; i < videos.length; i++) {
+                        var src = videos[i].src;
+                        if (src && src.indexOf('m3u8') !== -1) { log("Checker found video src: " + src); triggerInterception(src); clearInterval(checkerInterval); }
+                    }
+                }
+            }, 1000);
+            log("Stealth hooks installed.");
+        })();
+    """.trimIndent()
+
     private suspend fun resolveViaWebView(
         context: Context,
         url: String,
@@ -273,7 +389,7 @@ class PPVLiveSportsProvider : MainAPI() {
                                 request: WebResourceRequest?
                             ): WebResourceResponse? {
                                 val reqUrl = request?.url?.toString() ?: return null
-                                if ((reqUrl.contains(".m3u8") || reqUrl.contains("playlist") || reqUrl.contains("master")) && !found) {
+                                if ((reqUrl.contains("m3u8") || reqUrl.contains("master")) && !found) {
                                     found = true
                                     val label = if (tag != null) "PPV • $tag" else "PPV"
                                     callback(
@@ -291,49 +407,11 @@ class PPVLiveSportsProvider : MainAPI() {
                                 return null
                             }
 
-                            override fun onLoadResource(view: WebView?, resourceUrl: String?) {
-                                super.onLoadResource(view, resourceUrl)
-                                if (resourceUrl != null && (resourceUrl.contains(".m3u8") || resourceUrl.contains("playlist")) && !found) {
-                                    found = true
-                                    val label = if (tag != null) "PPV • $tag" else "PPV"
-                                    callback(
-                                        ExtractorLink(
-                                            source = label,
-                                            name = label,
-                                            url = resourceUrl,
-                                            referer = "https://embedindia.st/",
-                                            type = ExtractorLinkType.M3U8,
-                                            quality = Qualities.Unknown.value
-                                        )
-                                    )
-                                    if (cont.isActive) cont.resume(true)
-                                }
-                            }
-
                             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                                 super.onPageFinished(view, pageUrl)
                                 if (found) return
-
-                                view?.evaluateJavascript("""
-                                    (function() {
-                                        try {
-                                            var scripts = document.querySelectorAll('script[src]');
-                                            for (var i = 0; i < scripts.length; i++) {
-                                                var src = scripts[i].src;
-                                                if (src.indexOf('bundle') >= 0) {
-                                                    console.log('Found player bundle: ' + src);
-                                                }
-                                            }
-                                            var player = document.querySelector('video, audio, [data-player], #player, .jwplayer, .video-js');
-                                            if (player) {
-                                                console.log('Found player element: ' + player.tagName);
-                                                if (player.src) console.log('Player src: ' + player.src);
-                                            }
-                                        } catch(e) {
-                                            console.log('Page check error: ' + e);
-                                        }
-                                    })();
-                                """.trimIndent(), null)
+                                Log.d(TAG, "onPageFinished: $pageUrl")
+                                view?.evaluateJavascript(playScript, null)
                             }
                         }
 
