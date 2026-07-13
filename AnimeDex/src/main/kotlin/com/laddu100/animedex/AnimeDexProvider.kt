@@ -181,6 +181,7 @@ class AnimeDexProvider : MainAPI() {
                 duration
                 genres
                 startDate { year month day }
+                nextAiringEpisode { episode airingAt }
                 studios(isMain: true) { nodes { name } }
               }
             }
@@ -209,7 +210,13 @@ class AnimeDexProvider : MainAPI() {
         val genres = anime.genres?.filterNotNull() ?: emptyList()
         val year = anime.startDate?.year
         val isMovie = anime.format == "MOVIE"
-        val epCount = anime.episodes ?: 0
+        var epCount = anime.episodes ?: 0
+        if (epCount == 0 && anime.status == "RELEASING") {
+            anime.nextAiringEpisode?.episode?.let { nextEp ->
+                epCount = nextEp - 1
+            }
+        }
+        if (epCount < 1) epCount = 1
 
         val hasDub = checkDubAvailability(anilistId)
 
@@ -267,25 +274,45 @@ class AnimeDexProvider : MainAPI() {
     }
 
     private suspend fun checkDubAvailability(anilistId: Int): Boolean {
-        return try {
-            val body = mapOf(
-                "anilistId" to anilistId,
-                "ep" to 1,
-                "lang" to "dub",
-                "provider" to "anineko"
-            )
-            val resp = app.post(
-                "$API_BASE/api/stream/anivexa",
-                headers = streamHeaders(),
-                json = body,
-                timeout = TIMEOUT
-            ).text
-            val parsed = parseJson<StreamResponse>(resp)
-            !parsed.sources.isNullOrEmpty()
-        } catch (e: Exception) {
-            Log.d(TAG, "dub check failed: ${e.message}")
-            false
+        val sources = listOf("anivexa", "luna", "anidap")
+        for (source in sources) {
+            val hasIt = try {
+                val body = when (source) {
+                    "anivexa" -> mapOf(
+                        "anilistId" to anilistId,
+                        "ep" to 1,
+                        "lang" to "dub",
+                        "provider" to "anineko"
+                    )
+                    "luna" -> mapOf(
+                        "provider" to "anineko",
+                        "anilistId" to anilistId,
+                        "ep" to 1,
+                        "subType" to "dub"
+                    )
+                    else -> mapOf(
+                        "action" to "sources",
+                        "anilistId" to anilistId,
+                        "ep" to 1,
+                        "lang" to "dub",
+                        "provider" to "anineko"
+                    )
+                }
+                val resp = app.post(
+                    "$API_BASE/api/stream/$source",
+                    headers = streamHeaders(),
+                    json = body,
+                    timeout = TIMEOUT
+                ).text
+                val parsed = parseJson<StreamResponse>(resp)
+                !parsed.sources.isNullOrEmpty()
+            } catch (e: Exception) {
+                Log.d(TAG, "dub check $source failed: ${e.message}")
+                false
+            }
+            if (hasIt) return true
         }
+        return false
     }
 
     override suspend fun loadLinks(
@@ -849,7 +876,8 @@ data class AniListMedia(
     @JsonProperty("episodes") val episodes: Int? = null,
     @JsonProperty("duration") val duration: Int? = null,
     @JsonProperty("genres") val genres: List<String>? = null,
-    @JsonProperty("startDate") val startDate: AniListDate? = null
+    @JsonProperty("startDate") val startDate: AniListDate? = null,
+    @JsonProperty("nextAiringEpisode") val nextAiringEpisode: AniListAiring? = null
 ) {
     fun toSearchResult(provider: AnimeDexProvider): SearchResponse? {
         val title = title?.english?.ifBlank { null } ?: title?.romaji ?: return null
@@ -879,6 +907,12 @@ data class AniListDate(
     @JsonProperty("year") val year: Int? = null,
     @JsonProperty("month") val month: Int? = null,
     @JsonProperty("day") val day: Int? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniListAiring(
+    @JsonProperty("episode") val episode: Int? = null,
+    @JsonProperty("airingAt") val airingAt: Int? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
