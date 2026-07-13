@@ -253,8 +253,8 @@ class DesiDubAnimeProvider : MainAPI() {
         }
 
         // Fetch episodes via admin-ajax (paginated, fetch all pages)
-        val subEpisodes = mutableListOf<Episode>()
-        val dubEpisodes = mutableListOf<Episode>()
+        // This is a dub-focused site — all episodes go in a single list (no sub/dub split).
+        val episodes = mutableListOf<Episode>()
         var currentPage = 1
         var maxPage = 1
 
@@ -278,19 +278,10 @@ class DesiDubAnimeProvider : MainAPI() {
                 val epThumb = ep.thumbnail
                 val watchUrl = ep.url
 
-                // Data string: $mainUrl|$watchUrl|$type
-                // type = "sub" or "dub" — loadLinks fetches the watch page and parses the section.
-                val subData = "$mainUrl|$watchUrl|sub"
-                val dubData = "$mainUrl|$watchUrl|dub"
-
-                // This is a dub-focused site — most episodes have dub.
-                // We expose both sub and dub; loadLinks will check which sections exist.
-                subEpisodes.add(newEpisode(subData) {
-                    this.name = epTitle
-                    this.episode = epNum
-                    this.posterUrl = epThumb
-                })
-                dubEpisodes.add(newEpisode(dubData) {
+                // Data string: $mainUrl|$watchUrl
+                // loadLinks fetches the watch page and merges ALL sources from both sections.
+                val epData = "$mainUrl|$watchUrl"
+                episodes.add(newEpisode(epData) {
                     this.name = epTitle
                     this.episode = epNum
                     this.posterUrl = epThumb
@@ -301,15 +292,14 @@ class DesiDubAnimeProvider : MainAPI() {
             currentPage++
         }
 
-        Log.d("DesiDubAnime", "load $title: ${subEpisodes.size} sub, ${dubEpisodes.size} dub eps")
+        Log.d("DesiDubAnime", "load $title: ${episodes.size} eps")
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
             this.plot = plot
             this.tags = genres
             this.showStatus = showStatus
-            if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
-            if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
+            if (episodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -323,13 +313,12 @@ class DesiDubAnimeProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Data: $mainUrl|$watchUrl|$type
+        // Data: $mainUrl|$watchUrl
         val parts = data.split("|")
-        if (parts.size < 3) return false
+        if (parts.size < 2) return false
         val watchUrl = parts[1]
-        val type = parts[2]  // "sub" or "dub"
 
-        Log.d("DesiDubAnime", "loadLinks: $watchUrl type=$type")
+        Log.d("DesiDubAnime", "loadLinks: $watchUrl")
 
         val doc = try {
             app.get(watchUrl, headers = baseHeaders).document
@@ -338,34 +327,31 @@ class DesiDubAnimeProvider : MainAPI() {
             return false
         }
 
-        // Find the correct section: player-selection player-sub or player-selection player-dub
-        val sectionClass = if (type == "dub") "player-selection player-dub" else "player-selection player-sub"
-        val section = doc.selectFirst("div.$sectionClass")
-            ?: doc.selectFirst("div[class*=$sectionClass]")
-            ?: run {
-                // Fallback: if the requested section doesn't exist, try the other one
-                // (some episodes only have dub, some only have sub)
-                val fallbackClass = if (type == "dub") "player-selection player-sub" else "player-selection player-dub"
-                doc.selectFirst("div.$fallbackClass")
-                    ?: doc.selectFirst("div[class*=$fallbackClass]")
-                    ?: return false
-            }
+        // Merge ALL sources from BOTH sub and dub sections into one clean list.
+        // This is a dub-focused site — the sub section is often empty, so we grab
+        // everything available and deduplicate by URL.
+        val seenUrls = mutableSetOf<String>()
+        val embedSources = mutableListOf<EmbedSource>()
 
-        // Extract all data-embed-id attributes from this section
-        val embedSources = section.select("[data-embed-id]").mapNotNull { el ->
-            val embedId = el.attr("data-embed-id").ifBlank { return@mapNotNull null }
-            val displayName = el.text().trim()
-            decodeEmbedId(embedId, displayName)
+        for (sectionClass in listOf("player-selection player-sub", "player-selection player-dub")) {
+            val section = doc.selectFirst("div.$sectionClass")
+                ?: doc.selectFirst("div[class*=$sectionClass]")
+                ?: continue
+            section.select("[data-embed-id]").forEach { el ->
+                val embedId = el.attr("data-embed-id").ifBlank { return@forEach }
+                val displayName = el.text().trim()
+                val src = decodeEmbedId(embedId, displayName) ?: return@forEach
+                if (seenUrls.add(src.url)) embedSources.add(src)
+            }
         }
 
-        Log.d("DesiDubAnime", "found ${embedSources.size} embed sources for type=$type")
+        Log.d("DesiDubAnime", "found ${embedSources.size} embed sources (merged)")
 
         var found = false
-        val typeLabel = type.replaceFirstChar { it.uppercase() }
-
         for (src in embedSources) {
             Log.d("DesiDubAnime", "resolving ${src.name}: ${src.url}")
-            val label = "DesiDubAnime - ${src.name} ($typeLabel)"
+            // Clean, consistent label: just the server name, no Sub/Dub clutter.
+            val label = "DesiDubAnime - ${src.name}"
 
             try {
                 when {
@@ -376,13 +362,13 @@ class DesiDubAnimeProvider : MainAPI() {
                         )
                         found = true
                     }
-                    // Mirror, PlayerX, Ruby, Cloud, and any others — try loadExtractor first
+                    // All other sources — try loadExtractor first (handles Krakenfiles,
+                    // FileMoon, VidMoly, etc.), then WebView fallback for the rest.
                     else -> {
                         val loaded = loadExtractor(src.url, watchUrl, subtitleCallback, callback)
                         if (loaded) {
                             found = true
                         } else {
-                            // WebView fallback: render the page and intercept m3u8/mp4
                             DesiDubWebView(label, src.url).getUrl(
                                 src.url, watchUrl, subtitleCallback, callback
                             )
@@ -395,7 +381,7 @@ class DesiDubAnimeProvider : MainAPI() {
             }
         }
 
-        Log.d("DesiDubAnime", "loadLinks $watchUrl type=$type: found=$found")
+        Log.d("DesiDubAnime", "loadLinks $watchUrl: found=$found")
         return found
     }
 
