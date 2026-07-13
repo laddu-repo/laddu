@@ -92,8 +92,6 @@ class AnikageProvider : MainAPI() {
         return newAnimeLoadResponse(titleName, url, tvType) {
             this.posterUrl = anime.coverImage?.let { it.extraLarge ?: it.large }
             this.year = anime.seasonYear
-            anime.anilistId?.let { addAniListId(it) }
-            anime.malId?.let { addMalId(it) }
             this.plot = anime.description?.replace(Regex("<[^>]+>"), "")
             this.showStatus = when (anime.status?.uppercase()) {
                 "FINISHED" -> ShowStatus.Completed

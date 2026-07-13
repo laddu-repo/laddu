@@ -287,7 +287,7 @@ class RaghavAniDao : MainAPI() {
 
     private fun extractM3u8(html: String): String? = m3u8Regex.find(html)?.value
 
-    private fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
+    private suspend fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
         source = name,
         name = label,
         url = m3u8,
