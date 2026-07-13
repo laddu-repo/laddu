@@ -38,10 +38,11 @@ class DesiDubAnimeProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     override val mainPage = mainPageOf(
-        "" to "Latest Updates",
-        "trending" to "Top Airing",
+        "top-airing" to "Top Airing",
         "popular" to "Most Popular",
-        "completed" to "Completed Series"
+        "completed" to "Completed Series",
+        "latest-episode" to "Latest Episode",
+        "latest-movies" to "Latest Movies"
     )
 
     private val baseHeaders = mapOf(
@@ -90,42 +91,77 @@ class DesiDubAnimeProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val sectionName = request.name
-        val response = try {
+        if (page > 1) return newHomePageResponse(sectionName, emptyList())
+        val document = try {
             app.get(mainUrl, headers = baseHeaders).document
         } catch (e: Exception) {
             Log.d("DesiDubAnime", "getMainPage error: ${e.message}")
             return newHomePageResponse(sectionName, emptyList())
         }
 
-        // Find the section by its heading text
-        val allSections = response.select("section, div.mb-8, div.mb-6")
-        val section = allSections.firstOrNull { el ->
-            val h = el.selectFirst("h1, h2, h3")?.text()?.trim()
-            h != null && h.contains(sectionName, ignoreCase = true)
+        // The homepage has sections identified by <h2> headings. The heading and
+        // the card container are siblings inside a parent <div>. We find the h2
+        // matching the section name, then grab its parent and extract all anime
+        // links from within.
+        //
+        // Two card formats exist on the site:
+        //   1. <article class="anime-card"> — used by Latest Episode / Latest Movies
+        //      (links to /watch/<slug>-episode-N/)
+        //   2. <ul><li> list — used by Top Airing / Most Popular / Completed Series
+        //      (links directly to /anime/<slug>/)
+
+        val h2 = document.select("h2").firstOrNull { el ->
+            el.text().trim().contains(sectionName, ignoreCase = true)
+        } ?: run {
+            Log.d("DesiDubAnime", "homepage: section '$sectionName' heading not found")
+            return newHomePageResponse(sectionName, emptyList())
+        }
+
+        // Get the parent container that holds both the heading and the cards.
+        val container = h2.parent() ?: run {
+            Log.d("DesiDubAnime", "homepage: no parent for h2")
+            return newHomePageResponse(sectionName, emptyList())
         }
 
         val home = mutableListOf<SearchResponse>()
-        section?.select("article.anime-card")?.forEach { card ->
+        val seenUrls = mutableSetOf<String>()
+
+        // Format 1: anime-card articles (Latest Episode / Latest Movies)
+        container.select("article.anime-card").forEach { card ->
             val watchHref = card.selectFirst("a[href*='/watch/']")?.attr("href") ?: return@forEach
-            // Derive the anime slug from the watch URL: /watch/<slug>-episode-N/ → /anime/<slug>/
             val animeUrl = watchUrlToAnimeUrl(watchHref) ?: return@forEach
+            if (!seenUrls.add(animeUrl)) return@forEach
             val title = card.selectFirst("img")?.attr("alt")?.trim()?.ifEmpty { null }
                 ?: card.selectFirst("h3")?.text()?.trim()
                 ?: return@forEach
             val poster = card.selectFirst("img")?.let {
                 it.attr("data-src").ifEmpty { it.attr("src") }
             } ?: ""
-
-            // Extract type and sub/dub from badges
             val badges = card.select("span.inline-flex").map { it.text().trim() }
             val isMovie = badges.any { it.contains("movie", ignoreCase = true) }
             val hasDub = badges.any { it.contains("dub", ignoreCase = true) }
             val hasSub = badges.any { it.contains("sub", ignoreCase = true) }
-
             val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
             home.add(newAnimeSearchResponse(title, animeUrl, tvType) {
                 this.posterUrl = poster
                 addDubStatus(dubExist = hasDub, subExist = hasSub || hasDub)
+            })
+        }
+
+        // Format 2: <ul><li> list items (Top Airing / Most Popular / Completed Series)
+        container.select("li a[href*='/anime/']").forEach { a ->
+            val animeUrl = a.attr("href").ifBlank { return@forEach }
+            if (!seenUrls.add(animeUrl)) return@forEach
+            val title = a.attr("title").trim().ifEmpty { a.text().trim() }.ifEmpty { return@forEach }
+            // Find the poster image — walk up to the <li> and find an <img>
+            val poster = a.selectFirst("img")?.let {
+                it.attr("data-src").ifEmpty { it.attr("src") }
+            } ?: a.parent()?.selectFirst("img")?.let {
+                it.attr("data-src").ifEmpty { it.attr("src") }
+            } ?: ""
+            home.add(newAnimeSearchResponse(title, animeUrl, TvType.Anime) {
+                this.posterUrl = poster
+                addDubStatus(dubExist = true, subExist = true)
             })
         }
 
@@ -183,8 +219,11 @@ class DesiDubAnimeProvider : MainAPI() {
             return null
         }
 
-        val title = doc.selectFirst("h1")?.text()?.trim()
-            ?: doc.selectFirst(".anime-main-image")?.attr("alt")?.trim()
+        // Use the main image alt attribute for a clean title (h1 has two
+        // language spans that would duplicate the name via .text()).
+        val title = doc.selectFirst(".anime-main-image")?.attr("alt")?.trim()
+            ?: doc.selectFirst("h1 span")?.text()?.trim()
+            ?: doc.selectFirst("h1")?.text()?.trim()
             ?: return null
         val poster = doc.selectFirst(".anime-main-image")?.attr("src")
         val plot = doc.selectFirst("meta[name=description]")?.attr("content")
