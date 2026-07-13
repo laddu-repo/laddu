@@ -1,37 +1,23 @@
 package com.laddu100.anisnatch
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.net.http.SslError
+import android.content.Context
 import android.webkit.CookieManager
-import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.CommonActivity
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.ByteArrayInputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.net.ssl.HostnameVerifier
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 import kotlin.coroutines.resume
 
 private const val TAG = "AniSnatch"
 private const val BASE_URL = "https://anisnatch.top"
 private const val PAGE_LOAD_TIMEOUT = 90_000L
-private const val API_CALL_TIMEOUT = 30_000L
 
 class AniSnatchWebView {
     private var webViewRef: WebView? = null
@@ -40,14 +26,11 @@ class AniSnatchWebView {
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePageLoaded(): Boolean {
-        if (pageReady.get() && webViewRef != null) {
-            Log.d(TAG, "ensurePageLoaded: using cached ready state")
-            return true
-        }
+        if (pageReady.get() && webViewRef != null) return true
         if (!loadingPage.compareAndSet(false, true)) {
             var wait = 0
             while (!pageReady.get() && wait < 90) {
-                delay(1000)
+                kotlinx.coroutines.delay(1000)
                 wait++
             }
             return pageReady.get()
@@ -70,17 +53,15 @@ class AniSnatchWebView {
                     try {
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-                        CookieManager.getInstance().removeAllCookies(null)
-                        CookieManager.getInstance().flush()
 
                         webView.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+                            val originalUa = userAgentString ?: ""
+                            userAgentString = originalUa.replace("; wv", "").replace("Android TV", "Android")
                             blockNetworkImage = true
-                            cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                         }
 
                         webView.webViewClient = object : WebViewClient() {
@@ -88,26 +69,6 @@ class AniSnatchWebView {
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ) = false
-
-                            override fun onReceivedSslError(
-                                view: WebView?,
-                                handler: SslErrorHandler?,
-                                error: SslError?
-                            ) {
-                                Log.d(TAG, "SSL error ${error?.primaryError} — proceeding")
-                                handler?.proceed()
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: android.webkit.WebResourceError?
-                            ) {
-                                if (request?.url?.toString()?.contains("anisnatch") == true) {
-                                    Log.e(TAG, "WebView error: ${error?.description} for ${request.url}")
-                                }
-                                super.onReceivedError(view, request, error)
-                            }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
@@ -119,7 +80,7 @@ class AniSnatchWebView {
                             private fun pollForReady(view: WebView?, count: Int) {
                                 if (resumed || count > 80) return
                                 view?.evaluateJavascript(
-                                    "(function(){ try{ var t=document.title||''; var x=typeof xhrAjax; var s=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t.substring(0,30); if(x==='undefined'||s==='undefined') return 'NOJS:'+t.substring(0,30); return 'READY:'+t.substring(0,40); }catch(e){ return 'ERR:'+e; } })();"
+                                    "(function(){ try{ var t=document.title||''; var x=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t.substring(0,30); if(x==='undefined') return 'NOJS:'+t.substring(0,30); return 'READY:'+t.substring(0,40); }catch(e){ return 'ERR:'+e; } })();"
                                 ) { res ->
                                     Log.d(TAG, "poll $count: $res")
                                     if (res != null && res.contains("READY:") && !resumed) {
@@ -164,158 +125,132 @@ class AniSnatchWebView {
         loadingPage.set(false)
         if (!success) {
             pageReady.set(false)
-            Log.e(TAG, "ensurePageLoaded FAILED — pageReady reset")
+            Log.e(TAG, "ensurePageLoaded FAILED")
         }
         return success
     }
 
-    suspend fun callApi(endpoint: String, data: Map<String, Any?>): String? {
-        if (!ensurePageLoaded()) {
-            Log.e(TAG, "callApi: page not loaded")
-            return null
-        }
+    suspend fun encryptData(data: String): String? {
+        if (!ensurePageLoaded()) return null
 
-        val dataJson = data.toJson()
         val callId = System.currentTimeMillis()
-        Log.d(TAG, "callApi $endpoint data=$dataJson")
-
         return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(API_CALL_TIMEOUT) {
+            withTimeoutOrNull(15_000L) {
                 suspendCancellableCoroutine<String?> { cont ->
                     var resumed = false
                     val webView = webViewRef
                     if (webView == null) {
-                        Log.e(TAG, "callApi: webViewRef is null")
                         if (cont.isActive) cont.resume(null)
                         return@suspendCancellableCoroutine
                     }
 
-                    try {
-                        val js = """
-                            (function() {
-                                try {
-                                    window.__anisnatch_result_$callId = null;
-                                    var t = document.title || '';
-                                    if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "CF active: " + t});
-                                        return;
-                                    }
-                                    if (typeof str2ArrayEnc === 'undefined') {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "str2ArrayEnc undefined"});
-                                        return;
-                                    }
+                    val js = """
+                        (function() {
+                            try {
+                                window.__anisnatch_enc_$callId = null;
+                                var ir = str2ArrayEnc($data);
+                                window.__anisnatch_enc_$callId = JSON.stringify(ir);
+                            } catch(e) {
+                                window.__anisnatch_enc_$callId = JSON.stringify({error: String(e)});
+                            }
+                        })();
+                    """.trimIndent()
 
-                                    var endpoint = "$endpoint";
-                                    var data = $dataJson;
+                    webView.evaluateJavascript(js, null)
 
-                                    var ir = str2ArrayEnc(JSON.stringify(data));
-                                    var body = JSON.stringify(ir);
-                                    var ts = str4time();
-                                    var url = endpoint + "/" + ts;
-
-                                    var xhr = new XMLHttpRequest();
-                                    xhr.open("POST", url, true);
-                                    xhr.responseType = "arraybuffer";
-                                    xhr.timeout = 15000;
-                                    xhr.setRequestHeader("Content-Type", "application/json");
-
-                                    xhr.onload = function() {
-                                        try {
-                                            if (xhr.status === 0) {
-                                                window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "status 0 (CORS/block)"});
-                                                return;
-                                            }
-                                            if (xhr.status !== 200) {
-                                                var errText = "";
-                                                try { errText = new TextDecoder().decode(xhr.response); } catch(e){}
-                                                window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "HTTP " + xhr.status, body: errText.substring(0, 300)});
-                                                return;
-                                            }
-
-                                            var a = new Uint8Array(xhr.response);
-                                            var marker = [65,110,105,83,110,97,116,99,104];
-                                            var e = -1;
-                                            for (var i = 0; i <= a.length - marker.length; i++) {
-                                                var match = true;
-                                                for (var j = 0; j < marker.length; j++) {
-                                                    if (a[i+j] !== marker[j]) { match = false; break; }
-                                                }
-                                                if (match) { e = i + marker.length; break; }
-                                            }
-                                            if (e === -1) {
-                                                var text = new TextDecoder().decode(a);
-                                                window.__anisnatch_result_$callId = text;
-                                                return;
-                                            }
-
-                                            var key = ir.token;
-                                            var decrypted = new Uint8Array(a.length - e);
-                                            for (var k = 0; k < decrypted.length; k++) {
-                                                decrypted[k] = a[e + k] ^ key.charCodeAt(k % key.length);
-                                            }
-
-                                            var inflated = pako.inflate(decrypted);
-                                            var json = new TextDecoder().decode(inflated);
-                                            window.__anisnatch_result_$callId = json;
-                                        } catch(de) {
-                                            window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "decrypt: " + String(de)});
-                                        }
-                                    };
-
-                                    xhr.onerror = function() {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "XHR onerror"});
-                                    };
-
-                                    xhr.ontimeout = function() {
-                                        window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "XHR timeout 15s"});
-                                    };
-
-                                    xhr.send(body);
-                                } catch(e) {
-                                    window.__anisnatch_result_$callId = JSON.stringify({success:false, error: "exception: " + String(e)});
-                                }
-                            })();
-                        """.trimIndent()
-
-                        webView.evaluateJavascript(js, null)
-
-                        val pollCount = intArrayOf(0)
-                        val pollRunnable = object : Runnable {
-                            override fun run() {
-                                if (resumed) return
-                                pollCount[0]++
-                                webView.evaluateJavascript(
-                                    "window.__anisnatch_result_$callId || null"
-                                ) { res ->
-                                    if (res != null && res != "null" && !resumed) {
-                                        resumed = true
-                                        Log.d(TAG, "API $endpoint response (poll ${pollCount[0]}): ${res.take(1000)}")
-                                        if (cont.isActive) cont.resume(res)
-                                    } else {
-                                        if (pollCount[0] % 10 == 0) {
-                                            Log.d(TAG, "API $endpoint still waiting (poll ${pollCount[0]})...")
-                                        }
-                                        webView.postDelayed(this, 500)
-                                    }
+                    val pollRunnable = object : Runnable {
+                        override fun run() {
+                            if (resumed) return
+                            webView.evaluateJavascript(
+                                "window.__anisnatch_enc_$callId || null"
+                            ) { res ->
+                                if (res != null && res != "null" && !resumed) {
+                                    resumed = true
+                                    if (cont.isActive) cont.resume(res)
+                                } else {
+                                    webView.postDelayed(this, 200)
                                 }
                             }
                         }
-                        webView.postDelayed(pollRunnable, 500)
+                    }
+                    webView.postDelayed(pollRunnable, 200)
 
-                        cont.invokeOnCancellation {
-                            resumed = true
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "callApi error: ${e.message}")
-                        if (cont.isActive && !resumed) {
-                            resumed = true
-                            cont.resume(null)
+                    cont.invokeOnCancellation { resumed = true }
+                }
+            }
+        }
+    }
+
+    suspend fun decryptResponse(encryptedHex: String, token: String): String? {
+        if (!ensurePageLoaded()) return null
+
+        val callId = System.currentTimeMillis()
+        return withContext(Dispatchers.Main) {
+            withTimeoutOrNull(15_000L) {
+                suspendCancellableCoroutine<String?> { cont ->
+                    var resumed = false
+                    val webView = webViewRef
+                    if (webView == null) {
+                        if (cont.isActive) cont.resume(null)
+                        return@suspendCancellableCoroutine
+                    }
+
+                    val js = """
+                        (function() {
+                            try {
+                                window.__anisnatch_dec_$callId = null;
+                                var hex = "$encryptedHex";
+                                var token = "$token";
+                                var bytes = new Uint8Array(hex.length / 2);
+                                for (var i = 0; i < bytes.length; i++) {
+                                    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+                                }
+                                var marker = [65,110,105,83,110,97,116,99,104];
+                                var e = -1;
+                                for (var i = 0; i <= bytes.length - marker.length; i++) {
+                                    var match = true;
+                                    for (var j = 0; j < marker.length; j++) {
+                                        if (bytes[i+j] !== marker[j]) { match = false; break; }
+                                    }
+                                    if (match) { e = i + marker.length; break; }
+                                }
+                                if (e === -1) {
+                                    window.__anisnatch_dec_$callId = new TextDecoder().decode(bytes);
+                                    return;
+                                }
+                                var decrypted = new Uint8Array(bytes.length - e);
+                                for (var k = 0; k < decrypted.length; k++) {
+                                    decrypted[k] = bytes[e + k] ^ token.charCodeAt(k % token.length);
+                                }
+                                var inflated = pako.inflate(decrypted);
+                                window.__anisnatch_dec_$callId = new TextDecoder().decode(inflated);
+                            } catch(e) {
+                                window.__anisnatch_dec_$callId = JSON.stringify({error: String(e)});
+                            }
+                        })();
+                    """.trimIndent()
+
+                    webView.evaluateJavascript(js, null)
+
+                    val pollRunnable = object : Runnable {
+                        override fun run() {
+                            if (resumed) return
+                            webView.evaluateJavascript(
+                                "window.__anisnatch_dec_$callId || null"
+                            ) { res ->
+                                if (res != null && res != "null" && !resumed) {
+                                    resumed = true
+                                    if (cont.isActive) cont.resume(res)
+                                } else {
+                                    webView.postDelayed(this, 200)
+                                }
+                            }
                         }
                     }
+                    webView.postDelayed(pollRunnable, 200)
+
+                    cont.invokeOnCancellation { resumed = true }
                 }
-            } ?: run {
-                Log.e(TAG, "callApi $endpoint TIMED OUT after ${API_CALL_TIMEOUT}ms")
-                null
             }
         }
     }
@@ -337,7 +272,8 @@ class AniSnatchWebView {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+                            val originalUa = userAgentString ?: ""
+                            userAgentString = originalUa.replace("; wv", "").replace("Android TV", "Android")
                             blockNetworkImage = true
                         }
 
@@ -346,14 +282,6 @@ class AniSnatchWebView {
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ) = false
-
-                            override fun onReceivedSslError(
-                                view: WebView?,
-                                handler: SslErrorHandler?,
-                                error: SslError?
-                            ) {
-                                handler?.proceed()
-                            }
 
                             override fun onLoadResource(view: WebView?, url: String?) {
                                 super.onLoadResource(view, url)
@@ -364,19 +292,6 @@ class AniSnatchWebView {
                                     Log.d(TAG, "fetchStreamUrl found: $url")
                                     if (cont.isActive) cont.resume(url)
                                 }
-                            }
-
-                            override fun shouldInterceptRequest(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): WebResourceResponse? {
-                                val url = request?.url?.toString() ?: return null
-                                if (url.contains(".m3u8") && foundUrl == null) {
-                                    foundUrl = url
-                                    Log.d(TAG, "fetchStreamUrl intercepted: $url")
-                                    if (cont.isActive) cont.resume(url)
-                                }
-                                return null
                             }
                         }
 

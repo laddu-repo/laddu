@@ -16,13 +16,21 @@ import com.lagradost.cloudstream3.newSubtitleFile
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 private const val TAG = "AniSnatch"
 private const val ANILIST_URL = "https://graphql.anilist.co"
+private const val BASE_URL = "https://anisnatch.top"
 private const val TIMEOUT = 30_000L
 
 class AniSnatchProvider : MainAPI() {
-    override var mainUrl = "https://anisnatch.top"
+    override var mainUrl = BASE_URL
     override var name = "AniSnatch"
     override var lang = "en"
     override val hasMainPage = true
@@ -39,9 +47,18 @@ class AniSnatchProvider : MainAPI() {
 
     companion object {
         var context: Context? = null
-    }
+        private val cfBypassMutex = Mutex()
+        private val webView = AniSnatchWebView()
 
-    private val webView = AniSnatchWebView()
+        private val okHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .build()
+        }
+    }
 
     private fun anilistHeaders(): Map<String, String> = mapOf(
         "Content-Type" to "application/json",
@@ -244,6 +261,93 @@ class AniSnatchProvider : MainAPI() {
         }
     }
 
+    private suspend fun callApi(endpoint: String, data: Map<String, Any?>): String? {
+        val ctx = context ?: return null
+        val dataJson = data.toJson()
+        Log.d(TAG, "callApi $endpoint data=$dataJson")
+
+        val encryptedBody = webView.encryptData(dataJson) ?: run {
+            Log.e(TAG, "encryptData returned null")
+            return null
+        }
+
+        Log.d(TAG, "Encrypted body: ${encryptedBody.take(200)}")
+
+        val ir = try {
+            parseJson<EncryptedResponse>(encryptedBody)
+        } catch (e: Exception) {
+            Log.e(TAG, "Parse encrypted body failed: ${e.message}")
+            return null
+        }
+
+        val timestamp = (System.currentTimeMillis() / 1000).toString()
+        val apiUrl = "$BASE_URL/$endpoint/$timestamp"
+        Log.d(TAG, "POST $apiUrl")
+
+        val response = doOkHttpPost(apiUrl, encryptedBody, ctx)
+        if (response == null) {
+            Log.e(TAG, "OkHttp POST returned null — trying CF bypass")
+            val bypassed = cfBypassMutex.withLock {
+                showAniSnatchCFDialogAndWait("$BASE_URL/home")
+            }
+            if (!bypassed) {
+                Log.e(TAG, "CF bypass dialog failed/cancelled")
+                return null
+            }
+            val retryResponse = doOkHttpPost(apiUrl, encryptedBody, ctx)
+            if (retryResponse == null) {
+                Log.e(TAG, "OkHttp POST still null after CF bypass")
+                return null
+            }
+            return decryptOkHttp(retryResponse, ir.token ?: return null)
+        }
+
+        return decryptOkHttp(response, ir.token ?: return null)
+    }
+
+    private fun doOkHttpPost(url: String, body: String, ctx: Context): ByteArray? {
+        return try {
+            val cookies = AniSnatchPlugin.getCfCookies(ctx)
+            val ua = AniSnatchPlugin.getCfUserAgent(ctx).ifBlank {
+                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .header("Content-Type", "application/json")
+                .header("User-Agent", ua)
+                .header("Accept", "*/*")
+                .header("Referer", "$BASE_URL/")
+                .header("Origin", BASE_URL)
+                .apply {
+                    if (cookies.isNotEmpty()) {
+                        header("Cookie", cookies)
+                    }
+                }
+                .build()
+
+            okHttpClient.newCall(request).execute().use { resp ->
+                Log.d(TAG, "OkHttp response: HTTP ${resp.code} ${resp.message}")
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "OkHttp failed: HTTP ${resp.code}")
+                    return null
+                }
+                resp.body?.bytes()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "OkHttp POST error: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun decryptOkHttp(responseBytes: ByteArray, token: String): String? {
+        val hex = responseBytes.joinToString("") { "%02x".format(it) }
+        val decrypted = webView.decryptResponse(hex, token)
+        Log.d(TAG, "Decrypted response: ${decrypted?.take(500)}")
+        return decrypted
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -260,7 +364,6 @@ class AniSnatchProvider : MainAPI() {
         val anilistId = epData.anilistId
         val epNum = epData.episode
         val lang = epData.lang
-        val title = epData.title
 
         Log.d(TAG, "loadLinks: al=$anilistId ep=$epNum lang=$lang")
 
@@ -268,8 +371,8 @@ class AniSnatchProvider : MainAPI() {
             "animeID" to anilistId,
             "episodeNO" to epNum
         )
-        val result = webView.callApi("api/loadSVs", params) ?: run {
-            Log.e(TAG, "loadSVs returned null")
+        val result = callApi("api/loadSVs", params) ?: run {
+            Log.e(TAG, "callApi returned null")
             return false
         }
 
@@ -278,7 +381,7 @@ class AniSnatchProvider : MainAPI() {
         val servers = try {
             parseJson<ServersResponse>(result)
         } catch (e: Exception) {
-            Log.e(TAG, "loadLinks parse failed: ${e.message} — raw: ${result.take(500)}")
+            Log.e(TAG, "loadLinks parse failed: ${e.message}")
             return false
         }
 
@@ -290,18 +393,10 @@ class AniSnatchProvider : MainAPI() {
         var found = false
         val allServers = mutableListOf<ServerInfo>()
 
-        servers.sub?.forEach { server ->
-            allServers.add(ServerInfo(server, "sub"))
-        }
-        servers.dub?.forEach { server ->
-            allServers.add(ServerInfo(server, "dub"))
-        }
-        servers.hindi?.forEach { server ->
-            allServers.add(ServerInfo(server, "hindi"))
-        }
-        servers.multi?.forEach { server ->
-            allServers.add(ServerInfo(server, "multi"))
-        }
+        servers.sub?.forEach { allServers.add(ServerInfo(it, "sub")) }
+        servers.dub?.forEach { allServers.add(ServerInfo(it, "dub")) }
+        servers.hindi?.forEach { allServers.add(ServerInfo(it, "hindi")) }
+        servers.multi?.forEach { allServers.add(ServerInfo(it, "multi")) }
 
         if (allServers.isEmpty()) {
             servers.servers?.forEach { server ->
@@ -323,11 +418,11 @@ class AniSnatchProvider : MainAPI() {
         }
 
         if (allServers.isEmpty()) {
-            Log.e(TAG, "No servers found in response. Raw: ${result.take(500)}")
+            Log.e(TAG, "No servers found. Raw: ${result.take(500)}")
             return false
         }
 
-        Log.d(TAG, "Found ${allServers.size} servers (${allServers.count { it.langType == "sub" }} sub, ${allServers.count { it.langType == "dub" }} dub, ${allServers.count { it.langType == "hindi" }} hindi, ${allServers.count { it.langType == "multi" }} multi)")
+        Log.d(TAG, "Found ${allServers.size} servers")
 
         if (lang == "dub") {
             allServers.retainAll { it.langType == "dub" || it.langType == "hindi" || it.langType == "multi" }
@@ -335,16 +430,11 @@ class AniSnatchProvider : MainAPI() {
             allServers.retainAll { it.langType == "sub" || it.langType == "multi" }
         }
 
-        Log.d(TAG, "After lang filter ($lang): ${allServers.size} servers")
-
         coroutineScope {
             val jobs = allServers.map { serverInfo ->
-                async {
-                    resolveServer(serverInfo, lang, callback, subtitleCallback)
-                }
+                async { resolveServer(serverInfo, lang, callback, subtitleCallback) }
             }
-            val results = jobs.awaitAll()
-            found = results.any { it }
+            found = jobs.awaitAll().any { it }
         }
 
         Log.d(TAG, "loadLinks done: found=$found")
@@ -394,12 +484,7 @@ class AniSnatchProvider : MainAPI() {
 
         if (url.contains(".mp4")) {
             callback.invoke(
-                newExtractorLink(
-                    sourceName,
-                    sourceName,
-                    url,
-                    ExtractorLinkType.VIDEO
-                ) {
+                newExtractorLink(sourceName, sourceName, url, ExtractorLinkType.VIDEO) {
                     this.referer = mainUrl
                 }
             )
@@ -430,19 +515,12 @@ class AniSnatchProvider : MainAPI() {
                 }
                 if (streamUrl.contains(".mp4")) {
                     callback.invoke(
-                        newExtractorLink(
-                            sourceName,
-                            sourceName,
-                            streamUrl,
-                            ExtractorLinkType.VIDEO
-                        ) {
+                        newExtractorLink(sourceName, sourceName, streamUrl, ExtractorLinkType.VIDEO) {
                             this.referer = mainUrl
                         }
                     )
                     return true
                 }
-            } else {
-                Log.d(TAG, "$sourceName fetchStreamUrl returned null")
             }
         }
 
@@ -462,6 +540,14 @@ data class EpisodeData(
     @JsonProperty("lang") val lang: String,
     @JsonProperty("isMovie") val isMovie: Boolean,
     @JsonProperty("title") val title: String
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class EncryptedResponse(
+    @JsonProperty("data") val data: List<String>? = null,
+    @JsonProperty("key") val key: List<Int>? = null,
+    @JsonProperty("token") val token: String? = null,
+    @JsonProperty("authenticator") val authenticator: String? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
