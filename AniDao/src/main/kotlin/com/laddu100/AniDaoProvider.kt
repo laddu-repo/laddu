@@ -20,7 +20,6 @@ import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -336,7 +335,7 @@ class AniDaoProvider : MainAPI() {
         }
     }
 
-    private fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
+    private suspend fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
         source = name,
         name = label,
         url = m3u8,
@@ -353,7 +352,7 @@ class AniDaoProvider : MainAPI() {
             val decoded = URLDecoder.decode(sub, "UTF-8")
             val label = Regex("""(?:sub_1|c1_label)=([^&]+)""").find(query)?.groupValues?.get(1)
                 ?.let { URLDecoder.decode(it, "UTF-8") } ?: "English"
-            subtitleCallback.invoke(newSubtitleFile(label, decoded))
+            subtitleCallback.invoke(SubtitleFile(label, decoded))
         } catch (_: Exception) {
         }
     }
