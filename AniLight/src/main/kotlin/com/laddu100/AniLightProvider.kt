@@ -263,8 +263,8 @@ class AniLightProvider : MainAPI() {
             val epDesc = ep.description?.takeIf { it.isNotBlank() }
             val fillerStr = if (ep.isFiller) " (Filler)" else null
 
-            val subData = "$anilistId|$epNum|sub|${subProviders.joinToString(",") { it.id }}|${subProviders.joinToString(";") { it.tip ?: "" }}"
-            val dubData = "$anilistId|$epNum|dub|${dubProviders.joinToString(",") { it.id }}|${dubProviders.joinToString(";") { it.tip ?: "" }}"
+            val subData = "$mainUrl|$anilistId|$epNum|sub|${subProviders.joinToString(",") { it.id }}|${subProviders.joinToString(";") { it.tip ?: "" }}"
+            val dubData = "$mainUrl|$anilistId|$epNum|dub|${dubProviders.joinToString(",") { it.id }}|${dubProviders.joinToString(";") { it.tip ?: "" }}"
 
             if (subProviders.isNotEmpty()) {
                 subEpisodes.add(newEpisode(subData) {
@@ -306,15 +306,16 @@ class AniLightProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val parts = data.split("|")
-        if (parts.size < 3) {
+        if (parts.size < 4) {
             Log.d("AniLight", "loadLinks: bad data='$data'")
             return false
         }
-        val anilistId = parts[0]
-        val epNum = parts[1]
-        val type = parts[2]
-        val providerIds = parts.getOrNull(3)?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
-        val tips = parts.getOrNull(4)?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
+        // parts[0] = mainUrl (prevents CloudStream from prepending it)
+        val anilistId = parts[1]
+        val epNum = parts[2]
+        val type = parts[3]
+        val providerIds = parts.getOrNull(4)?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        val tips = parts.getOrNull(5)?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
 
         Log.d("AniLight", "loadLinks: id=$anilistId ep=$epNum type=$type providers=$providerIds")
 
