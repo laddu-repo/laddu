@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.newSubtitleFile
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.URLEncoder
@@ -400,13 +401,15 @@ class TwoDHiveProvider : MainAPI() {
                             sources?.get("file")?.asText()
                         }
 
-                        // Handle subtitles
+                        // Handle subtitles — megaplay VTT files require Referer header
                         val tracks = sourcesJson.get("tracks")
                         if (tracks != null && tracks.isArray) {
                             tracks.forEach { track ->
                                 val file = track.get("file")?.asText() ?: return@forEach
                                 val label = track.get("label")?.asText() ?: "Unknown"
-                                subtitleCallback(SubtitleFile(label, file))
+                                subtitleCallback(newSubtitleFile(label, file) {
+                                    this.headers = mapOf("Referer" to "https://megaplay.buzz/")
+                                })
                             }
                         }
 

@@ -1,5 +1,6 @@
 package com.laddu100
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
@@ -53,6 +54,7 @@ class AniPmProvider : MainAPI() {
     // JACKSON DATA CLASSES (from live API probes — zero guesswork)
     // ─────────────────────────────────────────────────────────────
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class CatalogResponse(
         val items: List<SearchItem> = emptyList(),
         val page: Int = 1,
@@ -61,6 +63,7 @@ class AniPmProvider : MainAPI() {
         val hasNextPage: Boolean = false
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SearchItem(
         val id: Int,
         val source: String = "",
@@ -86,10 +89,12 @@ class AniPmProvider : MainAPI() {
         val season: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SearchResponseData(
         val items: List<SearchItem> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SeriesDetail(
         val id: Int,
         val source: String = "",
@@ -116,6 +121,7 @@ class AniPmProvider : MainAPI() {
         val episodes: List<EpisodeData> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class EpisodeData(
         val number: Int,
         val title: String? = null,
@@ -130,11 +136,13 @@ class AniPmProvider : MainAPI() {
     )
 
     // src/servers response (Lyra, Halo, Cobalt, Orion, Onyx, Comet, Pulse, Nova)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SrcServersResponse(
         val sub: List<SrcSource> = emptyList(),
         val dub: List<SrcSource> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SrcSource(
         val provider: String = "",
         val name: String = "",
@@ -147,6 +155,7 @@ class AniPmProvider : MainAPI() {
         val resolvable: Boolean? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SubtitleTrack(
         val url: String = "",
         val label: String = "English",
@@ -154,10 +163,12 @@ class AniPmProvider : MainAPI() {
     )
 
     // ep-servers response (Zephyr: VidPlay-1, HD-1, Vidstream-2, VidCloud-1)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class EpServersResponse(
         val servers: List<EpServer> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class EpServer(
         val id: String = "",
         val name: String = "",
@@ -165,6 +176,7 @@ class AniPmProvider : MainAPI() {
     )
 
     // ep-direct response (Zephyr HLS resolution)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class EpDirectResponse(
         val m3u8: String? = null,
         val embed: String? = null,
@@ -172,16 +184,19 @@ class AniPmProvider : MainAPI() {
     )
 
     // mega/sources response (Helios Direct HLS)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class MegaSourcesResponse(
         val m3u8: String? = null,
         val tracks: List<SubtitleTrack>? = null
     )
 
     // pahe/find response (Drift)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class PaheFindResponse(
         val sources: List<PaheSource> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class PaheSource(
         val kwik: String = "",
         val quality: String = "",
@@ -189,15 +204,18 @@ class AniPmProvider : MainAPI() {
     )
 
     // pahe/resolve response (Drift kwik resolution)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class PaheResolveResponse(
         val url: String? = null
     )
 
     // animegg response
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class AnimeggResponse(
         val sources: List<AnimeggSource> = emptyList()
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class AnimeggSource(
         val url: String = "",
         val quality: String = "",
@@ -254,7 +272,7 @@ class AniPmProvider : MainAPI() {
         }
 
         return response?.items
-            ?.filter { it.source == "anikoto" }
+            
             ?.mapNotNull { item ->
                 val poster = fixPoster(item.poster) ?: return@mapNotNull null
                 val title = item.title.ifEmpty { return@mapNotNull null }
