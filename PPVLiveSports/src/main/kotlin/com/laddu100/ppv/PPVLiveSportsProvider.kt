@@ -244,9 +244,10 @@ class PPVLiveSportsProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit
     ): Boolean {
         return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(30_000L) {
+            withTimeoutOrNull(45_000L) {
                 suspendCancellableCoroutine<Boolean> { cont ->
                     var found = false
+                    var playerUrlExtracted = false
                     val webView = WebView(context)
                     try {
                         webView.settings.apply {
@@ -254,7 +255,6 @@ class PPVLiveSportsProvider : MainAPI() {
                             domStorageEnabled = true
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                            blockNetworkImage = true
                         }
 
                         webView.webViewClient = object : WebViewClient() {
@@ -299,6 +299,25 @@ class PPVLiveSportsProvider : MainAPI() {
                                         )
                                     )
                                     if (cont.isActive) cont.resume(true)
+                                }
+                            }
+
+                            override fun onPageFinished(view: WebView?, pageUrl: String?) {
+                                super.onPageFinished(view, pageUrl)
+                                if (found || playerUrlExtracted) return
+
+                                if (pageUrl?.contains("embedindia.st") == true) {
+                                    view?.evaluateJavascript("""
+                                        (function() {
+                                            try {
+                                                var matches = document.body.innerHTML.match(/switchPlayer\(['"](https?:\/\/[^'"]+)['"]/);
+                                                if (matches && matches[1]) {
+                                                    window.location.href = matches[1];
+                                                }
+                                            } catch(e) {}
+                                        })();
+                                    """.trimIndent(), null)
+                                    playerUrlExtracted = true
                                 }
                             }
                         }
