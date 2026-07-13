@@ -68,6 +68,13 @@ class AniSnatchWebView {
                             blockNetworkImage = true
                         }
 
+                        webView.webChromeClient = object : android.webkit.WebChromeClient() {
+                            override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                                Log.d(TAG, "JS: ${consoleMessage?.message()}")
+                                return true
+                            }
+                        }
+
                         webView.webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
@@ -156,26 +163,44 @@ class AniSnatchWebView {
                         (function() {
                             try {
                                 window.__anisnatch_enc_$callId = null;
+                                console.log('AS_ENC: str2ArrayEnc type=' + typeof str2ArrayEnc);
+                                if (typeof str2ArrayEnc !== 'function') {
+                                    window.__anisnatch_enc_$callId = JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc});
+                                    return;
+                                }
                                 var ir = str2ArrayEnc($data);
-                                window.__anisnatch_enc_$callId = JSON.stringify(ir);
+                                console.log('AS_ENC: ir type=' + typeof ir + ' keys=' + (ir ? Object.keys(ir).join(',') : 'null'));
+                                var str = JSON.stringify(ir);
+                                console.log('AS_ENC: str length=' + (str ? str.length : 'null'));
+                                if (!str || str === 'undefined') {
+                                    window.__anisnatch_enc_$callId = JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir});
+                                    return;
+                                }
+                                window.__anisnatch_enc_$callId = str;
                             } catch(e) {
-                                window.__anisnatch_enc_$callId = JSON.stringify({error: String(e)});
+                                window.__anisnatch_enc_$callId = JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'});
                             }
                         })();
                     """.trimIndent()
 
                     webView.evaluateJavascript(js, null)
 
+                    val pollCount = intArrayOf(0)
                     val pollRunnable = object : Runnable {
                         override fun run() {
                             if (resumed) return
+                            pollCount[0]++
                             webView.evaluateJavascript(
                                 "window.__anisnatch_enc_$callId || null"
                             ) { res ->
                                 if (res != null && res != "null" && !resumed) {
                                     resumed = true
+                                    Log.d(TAG, "encryptData got result (poll ${pollCount[0]}): ${res.take(300)}")
                                     if (cont.isActive) cont.resume(res)
                                 } else {
+                                    if (pollCount[0] % 10 == 0) {
+                                        Log.d(TAG, "encryptData still waiting (poll ${pollCount[0]})...")
+                                    }
                                     webView.postDelayed(this, 200)
                                 }
                             }
