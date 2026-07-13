@@ -244,17 +244,25 @@ class PPVLiveSportsProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit
     ): Boolean {
         return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(45_000L) {
+            withTimeoutOrNull(60_000L) {
                 suspendCancellableCoroutine<Boolean> { cont ->
                     var found = false
-                    var playerUrlExtracted = false
                     val webView = WebView(context)
                     try {
                         webView.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            databaseEnabled = true
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                            mediaPlaybackRequiresUserGesture = false
+                        }
+
+                        webView.webChromeClient = object : android.webkit.WebChromeClient() {
+                            override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                                Log.d(TAG, "JS: ${consoleMessage?.message()}")
+                                return true
+                            }
                         }
 
                         webView.webViewClient = object : WebViewClient() {
@@ -265,7 +273,7 @@ class PPVLiveSportsProvider : MainAPI() {
                                 request: WebResourceRequest?
                             ): WebResourceResponse? {
                                 val reqUrl = request?.url?.toString() ?: return null
-                                if (reqUrl.contains(".m3u8") && !found) {
+                                if ((reqUrl.contains(".m3u8") || reqUrl.contains("playlist") || reqUrl.contains("master")) && !found) {
                                     found = true
                                     val label = if (tag != null) "PPV • $tag" else "PPV"
                                     callback(
@@ -285,7 +293,7 @@ class PPVLiveSportsProvider : MainAPI() {
 
                             override fun onLoadResource(view: WebView?, resourceUrl: String?) {
                                 super.onLoadResource(view, resourceUrl)
-                                if (resourceUrl != null && resourceUrl.contains(".m3u8") && !found) {
+                                if (resourceUrl != null && (resourceUrl.contains(".m3u8") || resourceUrl.contains("playlist")) && !found) {
                                     found = true
                                     val label = if (tag != null) "PPV • $tag" else "PPV"
                                     callback(
@@ -304,21 +312,28 @@ class PPVLiveSportsProvider : MainAPI() {
 
                             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                                 super.onPageFinished(view, pageUrl)
-                                if (found || playerUrlExtracted) return
+                                if (found) return
 
-                                if (pageUrl?.contains("embedindia.st") == true) {
-                                    view?.evaluateJavascript("""
-                                        (function() {
-                                            try {
-                                                var matches = document.body.innerHTML.match(/switchPlayer\(['"](https?:\/\/[^'"]+)['"]/);
-                                                if (matches && matches[1]) {
-                                                    window.location.href = matches[1];
+                                view?.evaluateJavascript("""
+                                    (function() {
+                                        try {
+                                            var scripts = document.querySelectorAll('script[src]');
+                                            for (var i = 0; i < scripts.length; i++) {
+                                                var src = scripts[i].src;
+                                                if (src.indexOf('bundle') >= 0) {
+                                                    console.log('Found player bundle: ' + src);
                                                 }
-                                            } catch(e) {}
-                                        })();
-                                    """.trimIndent(), null)
-                                    playerUrlExtracted = true
-                                }
+                                            }
+                                            var player = document.querySelector('video, audio, [data-player], #player, .jwplayer, .video-js');
+                                            if (player) {
+                                                console.log('Found player element: ' + player.tagName);
+                                                if (player.src) console.log('Player src: ' + player.src);
+                                            }
+                                        } catch(e) {
+                                            console.log('Page check error: ' + e);
+                                        }
+                                    })();
+                                """.trimIndent(), null)
                             }
                         }
 
