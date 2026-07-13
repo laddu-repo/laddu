@@ -21,20 +21,28 @@ private const val BASE_URL = "https://anisnatch.top"
 private const val PAGE_LOAD_TIMEOUT = 90_000L
 
 class JSBridge {
-    @Volatile
+    val resultLock = Object()
     var result: String? = null
 
-    @Volatile
+    val readyLock = Object()
     var ready: Boolean = false
 
     @JavascriptInterface
     fun onResult(value: String) {
-        result = value
+        synchronized(resultLock) {
+            result = value
+            (resultLock as Object).notifyAll()
+        }
+        Log.d(TAG, "JSBridge.onResult called, length=${value.length}")
     }
 
     @JavascriptInterface
     fun onReady() {
-        ready = true
+        synchronized(readyLock) {
+            ready = true
+            (readyLock as Object).notifyAll()
+        }
+        Log.d(TAG, "JSBridge.onReady called")
     }
 
     @JavascriptInterface
@@ -43,7 +51,23 @@ class JSBridge {
     }
 
     fun reset() {
-        result = null
+        synchronized(resultLock) { result = null }
+        synchronized(readyLock) { ready = false }
+    }
+
+    fun waitForResult(timeoutMs: Long): String? {
+        synchronized(resultLock) {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (result == null && System.currentTimeMillis() < deadline) {
+                try {
+                    (resultLock as Object).wait(timeoutMs)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+            return result
+        }
     }
 }
 
@@ -156,13 +180,15 @@ class AniSnatchWebView {
 
                                 private fun pollForReady(view: WebView?, count: Int) {
                                     if (resumed || count > 80) return
-                                    if (bridge.ready) {
-                                        CookieManager.getInstance().flush()
-                                        Log.d(TAG, "Page ready after $count polls")
-                                        pageReady.set(true)
-                                        resumed = true
-                                        if (cont.isActive) cont.resume(true)
-                                        return
+                                    synchronized(bridge.readyLock) {
+                                        if (bridge.ready) {
+                                            CookieManager.getInstance().flush()
+                                            Log.d(TAG, "Page ready after $count polls")
+                                            pageReady.set(true)
+                                            resumed = true
+                                            if (cont.isActive) cont.resume(true)
+                                            return
+                                        }
                                     }
                                     view?.evaluateJavascript("""
                                         (function() {
@@ -175,7 +201,7 @@ class AniSnatchWebView {
                                             } catch(e) {}
                                         })();
                                     """.trimIndent(), null)
-                                    view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
+                                    view?.postDelayed({ pollForReady(view, count + 1) }, 500)
                                 }
                             }
 
@@ -252,9 +278,53 @@ class AniSnatchWebView {
         while (bridge.result == null && wait < 75) {
             delay(200)
             wait++
+            if (wait % 10 == 0) {
+                Log.d(TAG, "encryptData waiting... (poll $wait)")
+            }
         }
 
         val result = bridge.result
+        if (result != null) {
+            Log.d(TAG, "encryptData got result: ${result.take(300)}")
+        } else {
+            Log.e(TAG, "encryptData timed out after 15s")
+        }
+        return result
+    }
+
+    suspend fun encryptDataV2(data: String): String? {
+        if (!ensurePageLoaded()) {
+            Log.e(TAG, "encryptData: ensurePageLoaded returned false")
+            return null
+        }
+
+        bridge.reset()
+        Log.d(TAG, "encryptData: calling str2ArrayEnc via JS bridge")
+
+        withContext(Dispatchers.Main) {
+            webViewRef?.evaluateJavascript("""
+                (function() {
+                    try {
+                        if (typeof str2ArrayEnc !== 'function') {
+                            AndroidBridge.onResult(JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc}));
+                            return;
+                        }
+                        var ir = str2ArrayEnc($data);
+                        var str = JSON.stringify(ir);
+                        if (!str || str === 'undefined') {
+                            AndroidBridge.onResult(JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir}));
+                            return;
+                        }
+                        AndroidBridge.log('encryptData success, length=' + str.length);
+                        AndroidBridge.onResult(str);
+                    } catch(e) {
+                        AndroidBridge.onResult(JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'}));
+                    }
+                })();
+            """.trimIndent(), null)
+        }
+
+        val result = bridge.waitForResult(15_000)
         if (result != null) {
             Log.d(TAG, "encryptData got result: ${result.take(300)}")
         } else {
