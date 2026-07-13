@@ -1,12 +1,10 @@
-package com.laddu100
+package com.laddu100.raghavanime
 
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
-import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.SubtitleFile
@@ -15,11 +13,9 @@ import com.lagradost.cloudstream3.addDubStatus
 import com.lagradost.cloudstream3.addEpisodes
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.fixUrl
-import com.lagradost.cloudstream3.mainPageOf
 import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
-import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -31,25 +27,14 @@ import org.jsoup.nodes.Document
 import java.net.URL
 import java.net.URLDecoder
 
-class AniDaoProvider : MainAPI() {
+class RaghavAniDao : MainAPI() {
     override var mainUrl = "https://anidao.to"
     override var name = "AniDao"
     override var lang = "en"
-    override val hasMainPage = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    override val mainPage = mainPageOf(
-        "trending" to "Top Trending",
-        "recent" to "Recent Added",
-        "ongoing" to "Ongoing Anime"
-    )
-
     private val baseHeaders = mapOf("Referer" to "$mainUrl/")
-
-    @Volatile private var homeCache: Document? = null
-    private var homeTime = 0L
-    private val homeTtl = 5 * 60 * 1000L
 
     private data class AnimeEntry(val url: String, val title: String, val poster: String)
     @Volatile private var indexCache: List<AnimeEntry>? = null
@@ -62,54 +47,7 @@ class AniDaoProvider : MainAPI() {
 
     private val m3u8Regex = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""")
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) return newHomePageResponse(request.name, emptyList())
-
-        val doc = homeDocument()
-        val sectionId = when (request.data) {
-            "trending" -> "an-top-trending-title"
-            "recent" -> "an-recent-added-title"
-            "ongoing" -> "an-ongoing-title"
-            else -> return newHomePageResponse(request.name, emptyList())
-        }
-        val section = doc.selectFirst("""section[aria-labelledby="$sectionId"]""")
-            ?: return newHomePageResponse(request.name, emptyList())
-
-        val home = mutableListOf<SearchResponse>()
-        for (item in section.select(".an-home-list-item, article.an-anime-card")) {
-            val href = item.attr("href").ifEmpty {
-                item.selectFirst("""a[href*="/watch-online/"]""")?.attr("href") ?: ""
-            }
-            if (!href.contains("/watch-online/")) continue
-            val title = item.selectFirst("[data-an-name-en]")?.attr("data-an-name-en")?.trim()
-                ?.ifEmpty { null }
-                ?: item.selectFirst("img")?.attr("alt")?.trim()?.ifEmpty { null }
-                ?: item.selectFirst(".an-anime-card__title a")?.text()?.trim()?.ifEmpty { null }
-                ?: item.selectFirst("strong")?.text()?.trim()?.ifEmpty { null }
-                ?: continue
-            val poster = item.selectFirst("img")?.let {
-                it.attr("data-src").ifEmpty { it.attr("src") }
-            } ?: ""
-
-            home.add(newAnimeSearchResponse(title, fixUrl(toAnimePath(href)), TvType.Anime) {
-                this.posterUrl = poster
-                addDubStatus(dubExist = true, subExist = true)
-            })
-        }
-        return newHomePageResponse(request.name, home)
-    }
-
-    private suspend fun homeDocument(): Document {
-        val now = System.currentTimeMillis()
-        val cached = homeCache
-        if (cached != null && now - homeTime < homeTtl) return cached
-        val doc = app.get(mainUrl, headers = baseHeaders).document
-        homeCache = doc
-        homeTime = now
-        return doc
-    }
-
-    // /search sits behind Cloudflare; scrape the animelist catalog and filter locally.
+    // /search sits behind Cloudflare, so scrape the animelist catalog and filter locally.
     override suspend fun search(query: String): List<SearchResponse> {
         val q = query.lowercase().trim()
         if (q.isEmpty()) return emptyList()
@@ -227,9 +165,7 @@ class AniDaoProvider : MainAPI() {
             val hasSub = row.select(".an-badge--sub").isNotEmpty()
             val hasDub = row.select(".an-badge--dub").isNotEmpty()
 
-            // Stash the requested DubStatus in the data string so loadLinks only
-            // fetches the matching panel. Hardsub lives in its own "hsub" panel
-            // but is surfaced under the Subbed tab.
+            // Stash the DubStatus in the data string so loadLinks only fetches the matching panel.
             if (hasSub || hasHsub) {
                 subEpisodes.add(newEpisode("$href|sub") {
                     this.name = epName
@@ -295,15 +231,13 @@ class AniDaoProvider : MainAPI() {
         SUB("Sub"), DUB("Dub"), HARDSUB("Hardsub")
     }
 
-    // AniDao soft-404s episode-1 URLs of long anime (e.g. one-piece-100-episode-1);
-    // the real URL drops the "-100-" segment, so retry with it stripped.
+    // AniDao soft-404s episode-1 URLs of long anime (e.g. one-piece-100-episode-1); retry with the "-100-" segment stripped.
     private suspend fun fetchWatchDoc(url: String): Document {
         val doc = app.get(url, headers = baseHeaders).document
         if (hasAnyPanel(doc)) return doc
 
         val altUrl = url.replace(Regex("-100-episode-"), "-episode-")
         if (altUrl != url) {
-            Log.d("AniDao", "soft-404 retry: $url -> $altUrl")
             val altDoc = app.get(altUrl, headers = baseHeaders).document
             if (hasAnyPanel(altDoc)) return altDoc
         }
@@ -383,116 +317,4 @@ class AniDaoProvider : MainAPI() {
             "unknown"
         }
     }
-
-    private fun toAnimePath(watchHref: String): String {
-        val slug = watchHref.substringAfter("/watch-online/", "")
-            // Strip "-episode-N" (and any stray "-100-" on episode-1 URLs) to map
-            // a /watch-online/<slug>-episode-N link to /anime/<slug>.
-            .replace(Regex("-100-episode-\\d+.*"), "")
-            .replace(Regex("-episode-\\d+.*"), "")
-            .trim()
-        return if (slug.isEmpty()) watchHref else "/anime/$slug"
-    }
-}
-
-// Unpacks eval(function(p,a,c,k,e,d){...}) payloads used by otakuhg/otakuvid embeds.
-object JsPacker {
-    private const val CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-    private fun baseN(num: Int, base: Int): String {
-        if (num == 0) return CHARS[0].toString()
-        var temp = num
-        val sb = StringBuilder()
-        while (temp > 0) {
-            sb.append(CHARS[temp % base])
-            temp /= base
-        }
-        return sb.reverse().toString()
-    }
-
-    fun unpack(p: String, a: Int, c: Int, k: List<String>): String {
-        var payload = p
-        for (i in c - 1 downTo 0) {
-            if (i < k.size && k[i].isNotEmpty()) {
-                payload = payload.replace(Regex("\\b${baseN(i, a)}\\b"), k[i])
-            }
-        }
-        return payload
-    }
-
-    fun parseAndUnpack(html: String): String? {
-        val markerIdx = html.indexOf("function(p,a,c,k,e,d)")
-        if (markerIdx == -1) return null
-
-        val openBrace = html.indexOf("{", markerIdx)
-        if (openBrace == -1) return null
-
-        var i = openBrace + 1
-        var depth = 1
-        while (i < html.length && depth > 0) {
-            when (html[i]) {
-                '{' -> depth++
-                '}' -> depth--
-            }
-            i++
-        }
-
-        val argsStart = html.indexOf("(", i - 1)
-        if (argsStart == -1) return null
-
-        var j = argsStart + 1
-        depth = 1
-        while (j < html.length && depth > 0) {
-            when (html[j]) {
-                '(' -> depth++
-                ')' -> depth--
-            }
-            j++
-        }
-
-        val argsStr = html.substring(argsStart + 1, j - 1).trim()
-        if (argsStr.isEmpty()) return null
-
-        val startChar = argsStr.first()
-        val (payload, payloadEnd) = readQuoted(argsStr, 0, startChar) ?: return null
-
-        val rest = argsStr.substring(payloadEnd + 1)
-        val restQuote = Regex("[\"']").find(rest) ?: return null
-        val quotePos = restQuote.range.first
-        val quoteChar = restQuote.value
-
-        val ints = Regex("\\b\\d+\\b")
-            .findAll(rest.substring(0, quotePos))
-            .map { it.value.toInt() }
-            .toList()
-        if (ints.size < 2) return null
-
-        val (keysStr, _) = readQuoted(rest, quotePos, quoteChar) ?: return null
-        val keys = keysStr.split("|")
-
-        return unpack(payload, ints[0], ints[1], keys)
-    }
-
-    // Reads a JS-style quoted string at src[start] (must equal `quote`).
-    // Returns the unescaped value and the index of the closing quote.
-    private fun readQuoted(src: String, start: Int, quote: Char): Pair<String, Int>? {
-        if (start >= src.length || src[start] != quote) return null
-        val sb = StringBuilder()
-        var i = start + 1
-        while (i < src.length) {
-            val ch = src[i]
-            if (ch == quote) {
-                var bs = 0
-                var k = i - 1
-                while (k >= 0 && src[k] == '\\') { bs++; k-- }
-                if (bs % 2 == 0) return unescape(sb.toString(), quote) to i
-            }
-            sb.append(ch)
-            i++
-        }
-        return null
-    }
-
-    private fun unescape(s: String, quote: Char): String =
-        s.replace("\\$quote", quote.toString()).replace("\\\\", "\\")
 }

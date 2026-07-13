@@ -89,9 +89,6 @@ class RaghavAnime : MainAPI() {
             }
         }
 
-        // Robust error handling — NEVER throw, always return something.
-        // AniList rate-limits at 90 req/min; transient failures must not
-        // cause an empty home screen. Cache successful results for fallback.
         val home = try {
             val responseText = anilistQuery(query, variables)
             val response = parseJson<AniListResponse>(responseText)
@@ -111,10 +108,8 @@ class RaghavAnime : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("RaghavAnime: getMainPage failed for ${request.data} - ${e.message}")
             val cached = homePageCache[request.data]
             if (cached != null) {
-                println("RaghavAnime: Using cached data for ${request.data}")
                 cached.mapNotNull { media ->
                     val id = media.id ?: return@mapNotNull null
                     val title = media.title?.english ?: media.title?.romaji ?: return@mapNotNull null
@@ -149,7 +144,6 @@ class RaghavAnime : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("RaghavAnime: search failed - ${e.message}")
             emptyList()
         }
     }
@@ -157,20 +151,14 @@ class RaghavAnime : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val anilistId = Regex("""/info/(\d+)""").find(url)?.groupValues?.get(1)?.toIntOrNull() ?: return null
 
-        com.lagradost.api.Log.d("RaghavAnime", "load START: anilistId=$anilistId")
-
-        // Fetch anime details from AniList
         val media = try {
             val infoText = anilistQuery(INFO_QUERY, mapOf("id" to anilistId))
             val infoResponse = parseJson<AniListResponse>(infoText)
             infoResponse.data?.Media
         } catch (e: Exception) {
-            com.lagradost.api.Log.e("RaghavAnime", "load: AniList query failed: ${e.message}")
+            com.lagradost.api.Log.e("RaghavAnime", "AniList query failed: ${e.message}")
             return null
-        } ?: run {
-            com.lagradost.api.Log.e("RaghavAnime", "load: AniList returned null Media for id=$anilistId")
-            return null
-        }
+        } ?: return null
 
         val title = media.title?.english ?: media.title?.romaji ?: "Unknown"
         val jpTitle = media.title?.romaji
@@ -180,8 +168,6 @@ class RaghavAnime : MainAPI() {
         val year = media.seasonYear
         val tags = media.genres ?: emptyList()
         val animeScore = media.averageScore
-
-        com.lagradost.api.Log.d("RaghavAnime", "load: title='$title', format=${media.format}, status=${media.status}, episodes=${media.episodes}, nextAiring=${media.nextAiringEpisode?.episode}")
 
         val tvType = when (media.format) {
             "MOVIE" -> TvType.Anime
@@ -194,18 +180,12 @@ class RaghavAnime : MainAPI() {
             else -> null
         }
 
-        // Fetch episode metadata from ani.zip (for episode titles, descriptions, thumbnails)
         val syncMetaData = try {
             app.get("https://api.ani.zip/mappings?anilist_id=$anilistId").text
         } catch (_: Exception) { null }
         val animeMetaData = syncMetaData?.let { parseAnimeData(it) }
 
-        // Determine total episodes:
-        // 1. AniList episodes field (works for most anime)
-        // 2. ani.zip numeric episode count (filter out non-numeric keys like S1, P91)
-        // 3. nextAiringEpisode.episode - 1 (if next episode is 1169, there are 1168 aired)
-        // CRITICAL: ani.zip includes specials (S1, S2, P91, P101) which inflate the count.
-        // Only count NUMERIC keys, and cap at nextAiringEpisode - 1 for ongoing series.
+        // ani.zip lists specials as non-numeric keys (S1, P91, etc); only count numeric ones.
         val anizipNumericCount = animeMetaData?.episodes?.keys
             ?.filterNotNull()
             ?.filter { it.toIntOrNull() != null }
@@ -215,7 +195,6 @@ class RaghavAnime : MainAPI() {
             ?: anizipNumericCount
             ?: 0
 
-        // For ongoing series, cap at nextAiringEpisode - 1 (aired episodes only)
         media.nextAiringEpisode?.episode?.let { nextEp ->
             if (totalEps >= nextEp) {
                 totalEps = nextEp - 1
@@ -224,8 +203,6 @@ class RaghavAnime : MainAPI() {
 
         if (media.format == "MOVIE" && totalEps == 0) totalEps = 1
         if (totalEps == 0) totalEps = 1 // Always at least 1 episode
-
-        com.lagradost.api.Log.d("RaghavAnime", "load: totalEps=$totalEps (anilist=${media.episodes}, anizip_numeric=$anizipNumericCount, nextAiring=${media.nextAiringEpisode?.episode})")
 
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
@@ -252,8 +229,6 @@ class RaghavAnime : MainAPI() {
                 this.posterUrl = epPoster
             })
         }
-
-        com.lagradost.api.Log.d("RaghavAnime", "load: built ${subEpisodes.size} sub + ${dubEpisodes.size} dub episodes")
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = posterUrl
@@ -313,11 +288,9 @@ class RaghavAnime : MainAPI() {
                     val aniWaves = AniWaves()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
                     val aniWavesTargets = listOfNotNull(title, jpTitle).map { cleanTitle(it) }
-                    // AniWaves encodes sub/dub in the data string — always load from Subbed list and flip the prefix
                     var matchedData: String? = null
                     for (t in searchTitles) {
                         val searchResults = try { aniWaves.search(t) } catch (_: Throwable) { continue }
-                        // Only consider results with at least a partial title match (score >= 1)
                         val candidates = searchResults.mapNotNull { r ->
                             val c = cleanTitle(r.name)
                             val score = when {
@@ -448,10 +421,21 @@ class RaghavAnime : MainAPI() {
                         doLoad = { animo.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) {
-                        // Inject isDub flag into AnimoEpData so loadLinks knows which type to fetch
                         val animoEpData = parseJson<com.laddu100.raghavanime.RaghavAnimo.AnimoEpData>(epData).copy(isDub = isDub)
                         animo.loadLinks(animoEpData.toJson(), false, subtitleCallback, callback)
                     }
+                } catch (_: Throwable) {}
+            },
+            {
+                // 13. AniDao
+                try {
+                    val anidao = RaghavAniDao()
+                    val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                        doSearch = { q -> anidao.search(q) },
+                        doLoad = { u -> anidao.load(u) as? com.lagradost.cloudstream3.AnimeLoadResponse }
+                    )
+                    if (epData != null) anidao.loadLinks(epData, false, subtitleCallback, callback)
                 } catch (_: Throwable) {}
             }
         )
@@ -466,33 +450,6 @@ class RaghavAnime : MainAPI() {
             .trim()
     }
 
-    private fun matchSearchResult(searchResults: List<SearchResponse>, targetTitles: List<String>): SearchResponse? {
-        val cleanedTargets = targetTitles.map { cleanTitle(it) }
-        // Pass 1: exact match
-        for (res in searchResults) {
-            val cleanedRes = cleanTitle(res.name)
-            if (cleanedTargets.contains(cleanedRes)) {
-                return res
-            }
-        }
-        // Pass 2: substring match
-        for (res in searchResults) {
-            val cleanedRes = cleanTitle(res.name)
-            if (cleanedTargets.any { target -> target.contains(cleanedRes) || cleanedRes.contains(target) }) {
-                return res
-            }
-        }
-        // No match — return null so the caller truly skips this result
-        return null
-    }
-
-    /**
-     * Exhaustively search all results from all titles for an episode match.
-     * Pass 1: try exact title matches only (score 2) across all search titles.
-     * Pass 2: if no exact match found, try partial matches (score 1).
-     * This prevents wrong-season anime from loading when a partial title match
-     * returns a different season (e.g. "Bleach" matching "Bleach TYBW").
-     */
     private suspend fun findEpisodeData(
         searchTitles: List<String>,
         targetTitles: List<String>,
@@ -554,7 +511,6 @@ class RaghavAnime : MainAPI() {
 
     companion object {
         var hasShownThisSession = false
-        // Cache for home page data — used as fallback when AniList fails
         private val homePageCache = mutableMapOf<String, List<AniListMedia>>()
     }
 }
