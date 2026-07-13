@@ -159,54 +159,52 @@ class AniSnatchWebView {
                         return@suspendCancellableCoroutine
                     }
 
+                    val callId = System.currentTimeMillis()
                     val js = """
                         (function() {
                             try {
-                                window.__anisnatch_enc_$callId = null;
-                                console.log('AS_ENC: str2ArrayEnc type=' + typeof str2ArrayEnc);
+                                window['AS_ENC_$callId'] = null;
                                 if (typeof str2ArrayEnc !== 'function') {
-                                    window.__anisnatch_enc_$callId = JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc});
+                                    window['AS_ENC_$callId'] = JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc});
                                     return;
                                 }
                                 var ir = str2ArrayEnc($data);
-                                console.log('AS_ENC: ir type=' + typeof ir + ' keys=' + (ir ? Object.keys(ir).join(',') : 'null'));
                                 var str = JSON.stringify(ir);
-                                console.log('AS_ENC: str length=' + (str ? str.length : 'null'));
                                 if (!str || str === 'undefined') {
-                                    window.__anisnatch_enc_$callId = JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir});
+                                    window['AS_ENC_$callId'] = JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir});
                                     return;
                                 }
-                                window.__anisnatch_enc_$callId = str;
+                                window['AS_ENC_$callId'] = str;
                             } catch(e) {
-                                window.__anisnatch_enc_$callId = JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'});
+                                window['AS_ENC_$callId'] = JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'});
                             }
                         })();
                     """.trimIndent()
 
                     webView.evaluateJavascript(js, null)
 
-                    val pollCount = intArrayOf(0)
+                    var pollCount = 0
                     val pollRunnable = object : Runnable {
                         override fun run() {
                             if (resumed) return
-                            pollCount[0]++
+                            pollCount++
                             webView.evaluateJavascript(
-                                "window.__anisnatch_enc_$callId || null"
+                                "window['AS_ENC_$callId']"
                             ) { res ->
-                                if (res != null && res != "null" && !resumed) {
+                                if (res != null && res != "null" && res != "\"null\"" && !resumed) {
                                     resumed = true
-                                    Log.d(TAG, "encryptData got result (poll ${pollCount[0]}): ${res.take(300)}")
+                                    Log.d(TAG, "encryptData got result (poll $pollCount): ${res.take(300)}")
                                     if (cont.isActive) cont.resume(res)
                                 } else {
-                                    if (pollCount[0] % 10 == 0) {
-                                        Log.d(TAG, "encryptData still waiting (poll ${pollCount[0]})...")
+                                    if (pollCount % 10 == 0) {
+                                        Log.d(TAG, "encryptData poll $pollCount: $res")
                                     }
                                     webView.postDelayed(this, 200)
                                 }
                             }
                         }
                     }
-                    webView.postDelayed(pollRunnable, 200)
+                    webView.postDelayed(pollRunnable, 100)
 
                     cont.invokeOnCancellation { resumed = true }
                 }
@@ -231,7 +229,6 @@ class AniSnatchWebView {
                     val js = """
                         (function() {
                             try {
-                                window.__anisnatch_dec_$callId = null;
                                 var hex = "$encryptedHex";
                                 var token = "$token";
                                 var bytes = new Uint8Array(hex.length / 2);
@@ -248,39 +245,29 @@ class AniSnatchWebView {
                                     if (match) { e = i + marker.length; break; }
                                 }
                                 if (e === -1) {
-                                    window.__anisnatch_dec_$callId = new TextDecoder().decode(bytes);
-                                    return;
+                                    return new TextDecoder().decode(bytes);
                                 }
                                 var decrypted = new Uint8Array(bytes.length - e);
                                 for (var k = 0; k < decrypted.length; k++) {
                                     decrypted[k] = bytes[e + k] ^ token.charCodeAt(k % token.length);
                                 }
                                 var inflated = pako.inflate(decrypted);
-                                window.__anisnatch_dec_$callId = new TextDecoder().decode(inflated);
+                                return new TextDecoder().decode(inflated);
                             } catch(e) {
-                                window.__anisnatch_dec_$callId = JSON.stringify({error: String(e)});
+                                return JSON.stringify({error: String(e)});
                             }
                         })();
                     """.trimIndent()
 
-                    webView.evaluateJavascript(js, null)
-
-                    val pollRunnable = object : Runnable {
-                        override fun run() {
-                            if (resumed) return
-                            webView.evaluateJavascript(
-                                "window.__anisnatch_dec_$callId || null"
-                            ) { res ->
-                                if (res != null && res != "null" && !resumed) {
-                                    resumed = true
-                                    if (cont.isActive) cont.resume(res)
-                                } else {
-                                    webView.postDelayed(this, 200)
-                                }
+                    webView.evaluateJavascript(js) { res ->
+                        if (!resumed) {
+                            resumed = true
+                            Log.d(TAG, "decryptResponse result: ${res?.take(300)}")
+                            if (cont.isActive) {
+                                cont.resume(res)
                             }
                         }
                     }
-                    webView.postDelayed(pollRunnable, 200)
 
                     cont.invokeOnCancellation { resumed = true }
                 }
