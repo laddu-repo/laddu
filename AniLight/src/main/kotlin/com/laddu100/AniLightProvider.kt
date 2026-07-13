@@ -144,6 +144,31 @@ class AniLightProvider : MainAPI() {
         val title: String? = null
     )
 
+    private data class MalWatchResponse(
+        val hostBase: String? = null,
+        val stream: MalStream? = null,
+        val tracks: List<Track>? = null,
+        val chapters: List<Chapter>? = null
+    )
+
+    private data class MalStream(
+        val sub: MalStreamData? = null,
+        val dub: MalStreamData? = null
+    )
+
+    private data class MalStreamData(
+        val success: Boolean = false,
+        val originalMasterUrl: String? = null,
+        val masterUrl: String? = null,
+        val qualities: List<MalQuality> = emptyList(),
+        val headers: Map<String, String>? = null
+    )
+
+    private data class MalQuality(
+        val quality: String = "",
+        val url: String = ""
+    )
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(request.name, emptyList())
 
@@ -263,8 +288,9 @@ class AniLightProvider : MainAPI() {
             val epDesc = ep.description?.takeIf { it.isNotBlank() }
             val fillerStr = if (ep.isFiller) " (Filler)" else null
 
-            val subData = "$mainUrl|$anilistId|$epNum|sub|${subProviders.joinToString(",") { it.id }}|${subProviders.joinToString(";") { it.tip ?: "" }}"
-            val dubData = "$mainUrl|$anilistId|$epNum|dub|${dubProviders.joinToString(",") { it.id }}|${dubProviders.joinToString(";") { it.tip ?: "" }}"
+            val malId = detail.idMal ?: 0
+            val subData = "$mainUrl|$anilistId|$malId|$epNum|sub|${subProviders.joinToString(",") { it.id }}|${subProviders.joinToString(";") { it.tip ?: "" }}"
+            val dubData = "$mainUrl|$anilistId|$malId|$epNum|dub|${dubProviders.joinToString(",") { it.id }}|${dubProviders.joinToString(";") { it.tip ?: "" }}"
 
             if (subProviders.isNotEmpty()) {
                 subEpisodes.add(newEpisode(subData) {
@@ -310,19 +336,68 @@ class AniLightProvider : MainAPI() {
             Log.d("AniLight", "loadLinks: bad data='$data'")
             return false
         }
-        // parts[0] = mainUrl (prevents CloudStream from prepending it)
         val anilistId = parts[1]
-        val epNum = parts[2]
-        val type = parts[3]
-        val providerIds = parts.getOrNull(4)?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
-        val tips = parts.getOrNull(5)?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
+        val malId = parts[2]
+        val epNum = parts[3]
+        val type = parts[4]
+        val providerIds = parts.getOrNull(5)?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        val tips = parts.getOrNull(6)?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
 
-        Log.d("AniLight", "loadLinks: id=$anilistId ep=$epNum type=$type providers=$providerIds")
+        Log.d("AniLight", "loadLinks: malId=$malId ep=$epNum type=$type providers=$providerIds")
 
         var found = false
         val typeLabel = type.replaceFirstChar { it.uppercase() }
 
+        try {
+            val malResponse = app.get(
+                "$apiUrl/watch/mal?id=$malId&epNum=$epNum",
+                headers = apiHeaders
+            ).parsedSafe<MalWatchResponse>()
+
+            val streamData = if (type == "dub") malResponse?.stream?.dub else malResponse?.stream?.sub
+
+            if (streamData != null && streamData.success) {
+                val headers = streamData.headers ?: emptyMap()
+
+                streamData.originalMasterUrl?.takeIf { it.isNotBlank() }?.let { masterUrl ->
+                    callback(newExtractorLink(
+                        source = name,
+                        name = "AniLight - Light ($typeLabel, Hardsub, Auto)",
+                        url = masterUrl,
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.headers = headers
+                    })
+                    found = true
+                }
+
+                streamData.qualities.forEach { q ->
+                    if (q.url.isNotBlank()) {
+                        callback(newExtractorLink(
+                            source = name,
+                            name = "AniLight - Light ($typeLabel, Hardsub, ${q.quality})",
+                            url = q.url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.headers = headers
+                        })
+                        found = true
+                    }
+                }
+
+                malResponse.tracks?.forEach { track ->
+                    if (track.url.isNotBlank() && (track.kind == "captions" || track.kind == "subtitles")) {
+                        subtitleCallback.invoke(SubtitleFile(track.label ?: "English", track.url))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("AniLight", "watch/mal error: ${e.message}")
+        }
+
         for ((index, providerId) in providerIds.withIndex()) {
+            if (providerId == "light") continue
+
             val tip = tips.getOrNull(index)?.trim() ?: ""
             val subLabel = when {
                 tip.contains("soft", ignoreCase = true) -> "Soft Sub"
