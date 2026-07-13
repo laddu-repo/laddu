@@ -359,24 +359,29 @@ class AniLightProvider : MainAPI() {
             if (streamData != null && streamData.success) {
                 val headers = streamData.headers ?: emptyMap()
 
-                streamData.originalMasterUrl?.takeIf { it.isNotBlank() }?.let { masterUrl ->
-                    callback(newExtractorLink(
-                        source = name,
-                        name = "AniLight - Light ($typeLabel, Hardsub, Auto)",
-                        url = masterUrl,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        this.headers = headers
-                    })
-                    found = true
-                }
-
+                // Only use nanobyte quality variants — the vibeplayer.site
+                // "originalMasterUrl" consistently fails with Source error.
                 streamData.qualities.forEach { q ->
                     if (q.url.isNotBlank()) {
                         callback(newExtractorLink(
                             source = name,
                             name = "AniLight - Light ($typeLabel, Hardsub, ${q.quality})",
                             url = q.url,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.headers = headers
+                        })
+                        found = true
+                    }
+                }
+
+                // If no quality variants, fall back to masterUrl (nanobyte mirror)
+                if (streamData.qualities.isEmpty()) {
+                    streamData.masterUrl?.takeIf { it.isNotBlank() }?.let { masterUrl ->
+                        callback(newExtractorLink(
+                            source = name,
+                            name = "AniLight - Light ($typeLabel, Hardsub)",
+                            url = masterUrl,
                             type = ExtractorLinkType.M3U8
                         ) {
                             this.headers = headers
@@ -422,6 +427,12 @@ class AniLightProvider : MainAPI() {
                 for (source in sourcesResponse.sources) {
                     val url = source.url
                     if (url.isBlank()) continue
+
+                    // vibeplayer.site master.m3u8 consistently fails with Source
+                    // error — skip it. Only nanobyte quality variants work.
+                    if (url.contains("vibeplayer.site")) continue
+                    // streamzone1.site is Cloudflare-protected, 403s from app — skip.
+                    if (url.contains("streamzone1.site")) continue
 
                     val qualityLabel = source.quality.takeIf { it != "auto" && it.isNotBlank() } ?: ""
                     val label = buildString {
