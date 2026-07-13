@@ -1,7 +1,7 @@
 package com.laddu100.anisnatch
 
 import android.annotation.SuppressLint
-import android.content.Context
+import android.webkit.JavascriptInterface
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.CommonActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -19,10 +20,38 @@ private const val TAG = "AniSnatch"
 private const val BASE_URL = "https://anisnatch.top"
 private const val PAGE_LOAD_TIMEOUT = 90_000L
 
+class JSBridge {
+    @Volatile
+    var result: String? = null
+
+    @Volatile
+    var ready: Boolean = false
+
+    @JavascriptInterface
+    fun onResult(value: String) {
+        result = value
+    }
+
+    @JavascriptInterface
+    fun onReady() {
+        ready = true
+    }
+
+    @JavascriptInterface
+    fun log(msg: String) {
+        Log.d(TAG, "JS: $msg")
+    }
+
+    fun reset() {
+        result = null
+    }
+}
+
 class AniSnatchWebView {
     private var webViewRef: WebView? = null
     private var pageReady = AtomicBoolean(false)
     private var loadingPage = AtomicBoolean(false)
+    private val bridge = JSBridge()
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePageLoaded(): Boolean {
@@ -32,14 +61,14 @@ class AniSnatchWebView {
             Log.d(TAG, "ensurePageLoaded: waiting for other load")
             var wait = 0
             while (!pageReady.get() && wait < 90) {
-                kotlinx.coroutines.delay(1000)
+                delay(1000)
                 wait++
             }
-            Log.d(TAG, "ensurePageLoaded: wait done, pageReady=${pageReady.get()}")
             return pageReady.get()
         }
 
         pageReady.set(false)
+        bridge.ready = false
         val context = CommonActivity.activity ?: run {
             Log.e(TAG, "ensurePageLoaded: CommonActivity.activity is null")
             loadingPage.set(false)
@@ -68,6 +97,8 @@ class AniSnatchWebView {
                             blockNetworkImage = true
                         }
 
+                        webView.addJavascriptInterface(bridge, "AndroidBridge")
+
                         webView.webChromeClient = object : android.webkit.WebChromeClient() {
                             override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
                                 Log.d(TAG, "JS: ${consoleMessage?.message()}")
@@ -85,25 +116,52 @@ class AniSnatchWebView {
                                 super.onPageFinished(view, url)
                                 if (url == null || resumed) return
                                 Log.d(TAG, "onPageFinished: $url title=${view?.title}")
+
+                                view?.evaluateJavascript("""
+                                    (function() {
+                                        try {
+                                            var t = document.title || '';
+                                            if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) {
+                                                AndroidBridge.log('CF challenge: ' + t);
+                                                return;
+                                            }
+                                            if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
+                                                AndroidBridge.log('Page ready, str2ArrayEnc and pako available');
+                                                AndroidBridge.onReady();
+                                            } else {
+                                                AndroidBridge.log('Waiting for JS: str2ArrayEnc=' + typeof str2ArrayEnc + ' pako=' + typeof pako);
+                                            }
+                                        } catch(e) {
+                                            AndroidBridge.log('Ready check error: ' + e);
+                                        }
+                                    })();
+                                """.trimIndent(), null)
+
                                 pollForReady(view, 0)
                             }
 
                             private fun pollForReady(view: WebView?, count: Int) {
                                 if (resumed || count > 80) return
-                                view?.evaluateJavascript(
-                                    "(function(){ try{ var t=document.title||''; var x=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t.substring(0,30); if(x==='undefined') return 'NOJS:'+t.substring(0,30); return 'READY:'+t.substring(0,40); }catch(e){ return 'ERR:'+e; } })();"
-                                ) { res ->
-                                    Log.d(TAG, "poll $count: $res")
-                                    if (res != null && res.contains("READY:") && !resumed) {
-                                        CookieManager.getInstance().flush()
-                                        Log.d(TAG, "Page ready after $count polls")
-                                        pageReady.set(true)
-                                        resumed = true
-                                        if (cont.isActive) cont.resume(true)
-                                    } else {
-                                        view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
-                                    }
+                                if (bridge.ready) {
+                                    CookieManager.getInstance().flush()
+                                    Log.d(TAG, "Page ready after $count polls")
+                                    pageReady.set(true)
+                                    resumed = true
+                                    if (cont.isActive) cont.resume(true)
+                                    return
                                 }
+                                view?.evaluateJavascript("""
+                                    (function() {
+                                        try {
+                                            var t = document.title || '';
+                                            if (t.indexOf('Just a moment') >= 0 || t.indexOf('Attention') >= 0) return;
+                                            if (typeof str2ArrayEnc === 'function' && typeof pako !== 'undefined') {
+                                                AndroidBridge.onReady();
+                                            }
+                                        } catch(e) {}
+                                    })();
+                                """.trimIndent(), null)
+                                view?.postDelayed({ pollForReady(view, count + 1) }, 1000)
                             }
                         }
 
@@ -147,132 +205,103 @@ class AniSnatchWebView {
             return null
         }
 
-        val callId = System.currentTimeMillis()
-        Log.d(TAG, "encryptData: calling str2ArrayEnc")
-        return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(15_000L) {
-                suspendCancellableCoroutine<String?> { cont ->
-                    var resumed = false
-                    val webView = webViewRef
-                    if (webView == null) {
-                        if (cont.isActive) cont.resume(null)
-                        return@suspendCancellableCoroutine
-                    }
+        bridge.reset()
+        Log.d(TAG, "encryptData: calling str2ArrayEnc via JS bridge")
 
-                    val callId = System.currentTimeMillis()
-                    val js = """
-                        (function() {
-                            try {
-                                window['AS_ENC_$callId'] = null;
-                                if (typeof str2ArrayEnc !== 'function') {
-                                    window['AS_ENC_$callId'] = JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc});
-                                    return;
-                                }
-                                var ir = str2ArrayEnc($data);
-                                var str = JSON.stringify(ir);
-                                if (!str || str === 'undefined') {
-                                    window['AS_ENC_$callId'] = JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir});
-                                    return;
-                                }
-                                window['AS_ENC_$callId'] = str;
-                            } catch(e) {
-                                window['AS_ENC_$callId'] = JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'});
-                            }
-                        })();
-                    """.trimIndent()
-
-                    webView.evaluateJavascript(js, null)
-
-                    var pollCount = 0
-                    val pollRunnable = object : Runnable {
-                        override fun run() {
-                            if (resumed) return
-                            pollCount++
-                            webView.evaluateJavascript(
-                                "window['AS_ENC_$callId']"
-                            ) { res ->
-                                if (res != null && res != "null" && res != "\"null\"" && !resumed) {
-                                    resumed = true
-                                    Log.d(TAG, "encryptData got result (poll $pollCount): ${res.take(300)}")
-                                    if (cont.isActive) cont.resume(res)
-                                } else {
-                                    if (pollCount % 10 == 0) {
-                                        Log.d(TAG, "encryptData poll $pollCount: $res")
-                                    }
-                                    webView.postDelayed(this, 200)
-                                }
-                            }
+        withContext(Dispatchers.Main) {
+            webViewRef?.evaluateJavascript("""
+                (function() {
+                    try {
+                        if (typeof str2ArrayEnc !== 'function') {
+                            AndroidBridge.onResult(JSON.stringify({error: 'str2ArrayEnc not a function: ' + typeof str2ArrayEnc}));
+                            return;
                         }
+                        var ir = str2ArrayEnc($data);
+                        var str = JSON.stringify(ir);
+                        if (!str || str === 'undefined') {
+                            AndroidBridge.onResult(JSON.stringify({error: 'str2ArrayEnc returned ' + typeof ir}));
+                            return;
+                        }
+                        AndroidBridge.log('encryptData success, length=' + str.length);
+                        AndroidBridge.onResult(str);
+                    } catch(e) {
+                        AndroidBridge.onResult(JSON.stringify({error: String(e), stack: e.stack ? e.stack.substring(0,300) : 'no stack'}));
                     }
-                    webView.postDelayed(pollRunnable, 100)
-
-                    cont.invokeOnCancellation { resumed = true }
-                }
-            }
+                })();
+            """.trimIndent(), null)
         }
+
+        var wait = 0
+        while (bridge.result == null && wait < 75) {
+            delay(200)
+            wait++
+        }
+
+        val result = bridge.result
+        if (result != null) {
+            Log.d(TAG, "encryptData got result: ${result.take(300)}")
+        } else {
+            Log.e(TAG, "encryptData timed out after 15s")
+        }
+        return result
     }
 
     suspend fun decryptResponse(encryptedHex: String, token: String): String? {
         if (!ensurePageLoaded()) return null
 
-        val callId = System.currentTimeMillis()
-        return withContext(Dispatchers.Main) {
-            withTimeoutOrNull(15_000L) {
-                suspendCancellableCoroutine<String?> { cont ->
-                    var resumed = false
-                    val webView = webViewRef
-                    if (webView == null) {
-                        if (cont.isActive) cont.resume(null)
-                        return@suspendCancellableCoroutine
-                    }
+        bridge.reset()
+        Log.d(TAG, "decryptResponse: calling pako.inflate via JS bridge")
 
-                    val js = """
-                        (function() {
-                            try {
-                                var hex = "$encryptedHex";
-                                var token = "$token";
-                                var bytes = new Uint8Array(hex.length / 2);
-                                for (var i = 0; i < bytes.length; i++) {
-                                    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-                                }
-                                var marker = [65,110,105,83,110,97,116,99,104];
-                                var e = -1;
-                                for (var i = 0; i <= bytes.length - marker.length; i++) {
-                                    var match = true;
-                                    for (var j = 0; j < marker.length; j++) {
-                                        if (bytes[i+j] !== marker[j]) { match = false; break; }
-                                    }
-                                    if (match) { e = i + marker.length; break; }
-                                }
-                                if (e === -1) {
-                                    return new TextDecoder().decode(bytes);
-                                }
-                                var decrypted = new Uint8Array(bytes.length - e);
-                                for (var k = 0; k < decrypted.length; k++) {
-                                    decrypted[k] = bytes[e + k] ^ token.charCodeAt(k % token.length);
-                                }
-                                var inflated = pako.inflate(decrypted);
-                                return new TextDecoder().decode(inflated);
-                            } catch(e) {
-                                return JSON.stringify({error: String(e)});
-                            }
-                        })();
-                    """.trimIndent()
-
-                    webView.evaluateJavascript(js) { res ->
-                        if (!resumed) {
-                            resumed = true
-                            Log.d(TAG, "decryptResponse result: ${res?.take(300)}")
-                            if (cont.isActive) {
-                                cont.resume(res)
-                            }
+        withContext(Dispatchers.Main) {
+            webViewRef?.evaluateJavascript("""
+                (function() {
+                    try {
+                        var hex = "$encryptedHex";
+                        var token = "$token";
+                        var bytes = new Uint8Array(hex.length / 2);
+                        for (var i = 0; i < bytes.length; i++) {
+                            bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
                         }
+                        var marker = [65,110,105,83,110,97,116,99,104];
+                        var e = -1;
+                        for (var i = 0; i <= bytes.length - marker.length; i++) {
+                            var match = true;
+                            for (var j = 0; j < marker.length; j++) {
+                                if (bytes[i+j] !== marker[j]) { match = false; break; }
+                            }
+                            if (match) { e = i + marker.length; break; }
+                        }
+                        if (e === -1) {
+                            AndroidBridge.onResult(new TextDecoder().decode(bytes));
+                            return;
+                        }
+                        var decrypted = new Uint8Array(bytes.length - e);
+                        for (var k = 0; k < decrypted.length; k++) {
+                            decrypted[k] = bytes[e + k] ^ token.charCodeAt(k % token.length);
+                        }
+                        var inflated = pako.inflate(decrypted);
+                        AndroidBridge.log('decryptResponse success, length=' + inflated.length);
+                        AndroidBridge.onResult(new TextDecoder().decode(inflated));
+                    } catch(e) {
+                        AndroidBridge.onResult(JSON.stringify({error: String(e)}));
                     }
-
-                    cont.invokeOnCancellation { resumed = true }
-                }
-            }
+                })();
+            """.trimIndent(), null)
         }
+
+        var wait = 0
+        while (bridge.result == null && wait < 75) {
+            delay(200)
+            wait++
+        }
+
+        val result = bridge.result
+        if (result != null) {
+            Log.d(TAG, "decryptResponse got result: ${result?.take(500)}")
+        } else {
+            Log.e(TAG, "decryptResponse timed out after 15s")
+        }
+        return result
     }
 
     suspend fun fetchStreamUrl(videoPath: String): String? {
