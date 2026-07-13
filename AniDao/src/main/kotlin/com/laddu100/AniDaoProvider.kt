@@ -353,7 +353,7 @@ class AniDaoProvider : MainAPI() {
 
     private fun extractM3u8(html: String): String? = m3u8Regex.find(html)?.value
 
-    private fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
+    private suspend fun m3u8Link(label: String, m3u8: String, referer: String) = newExtractorLink(
         source = name,
         name = label,
         url = m3u8,
@@ -467,7 +467,7 @@ object JsPacker {
             .toList()
         if (ints.size < 2) return null
 
-        val (keysStr, _) = readQuoted(rest, quotePos, quoteChar) ?: return null
+        val (keysStr, _) = readQuoted(rest, quotePos, quoteChar.first()) ?: return null
         val keys = keysStr.split("|")
 
         return unpack(payload, ints[0], ints[1], keys)
