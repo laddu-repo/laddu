@@ -26,18 +26,22 @@ class AniSnatchWebView {
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePageLoaded(): Boolean {
+        Log.d(TAG, "ensurePageLoaded: called, pageReady=${pageReady.get()} webViewRef=${webViewRef != null}")
         if (pageReady.get() && webViewRef != null) return true
         if (!loadingPage.compareAndSet(false, true)) {
+            Log.d(TAG, "ensurePageLoaded: waiting for other load")
             var wait = 0
             while (!pageReady.get() && wait < 90) {
                 kotlinx.coroutines.delay(1000)
                 wait++
             }
+            Log.d(TAG, "ensurePageLoaded: wait done, pageReady=${pageReady.get()}")
             return pageReady.get()
         }
 
         pageReady.set(false)
         val context = CommonActivity.activity ?: run {
+            Log.e(TAG, "ensurePageLoaded: CommonActivity.activity is null")
             loadingPage.set(false)
             return false
         }
@@ -131,9 +135,13 @@ class AniSnatchWebView {
     }
 
     suspend fun encryptData(data: String): String? {
-        if (!ensurePageLoaded()) return null
+        if (!ensurePageLoaded()) {
+            Log.e(TAG, "encryptData: ensurePageLoaded returned false")
+            return null
+        }
 
         val callId = System.currentTimeMillis()
+        Log.d(TAG, "encryptData: calling str2ArrayEnc")
         return withContext(Dispatchers.Main) {
             withTimeoutOrNull(15_000L) {
                 suspendCancellableCoroutine<String?> { cont ->
