@@ -1,10 +1,12 @@
 package com.laddu100.anisnatch
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.net.http.SslError
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.lagradost.api.Log
@@ -15,13 +17,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import kotlin.coroutines.resume
 
 private const val TAG = "AniSnatch"
 private const val BASE_URL = "https://anisnatch.top"
 private const val PAGE_LOAD_TIMEOUT = 90_000L
-private const val API_CALL_TIMEOUT = 45_000L
+private const val API_CALL_TIMEOUT = 60_000L
 
 class AniSnatchWebView {
     private var webViewRef: WebView? = null
@@ -30,31 +40,39 @@ class AniSnatchWebView {
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePageLoaded(): Boolean {
-        if (pageReady.get() && webViewRef != null) return true
+        if (pageReady.get() && webViewRef != null) {
+            Log.d(TAG, "ensurePageLoaded: using cached ready state")
+            return true
+        }
         if (!loadingPage.compareAndSet(false, true)) {
             var wait = 0
-            while (!pageReady.get() && wait < 60) {
-                delay(500)
+            while (!pageReady.get() && wait < 90) {
+                delay(1000)
                 wait++
             }
             return pageReady.get()
         }
 
+        pageReady.set(false)
         val context = CommonActivity.activity ?: run {
             loadingPage.set(false)
             return false
         }
 
+        Log.d(TAG, "ensurePageLoaded: starting fresh page load")
+
         val success = withContext(Dispatchers.Main) {
             withTimeoutOrNull(PAGE_LOAD_TIMEOUT) {
                 suspendCancellableCoroutine<Boolean> { cont ->
                     var resumed = false
-                    var pollCount = 0
                     val webView = WebView(context)
                     webViewRef = webView
                     try {
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+                        CookieManager.getInstance().removeAllCookies(null)
+                        CookieManager.getInstance().flush()
+
                         webView.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -62,7 +80,7 @@ class AniSnatchWebView {
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
                             blockNetworkImage = true
-                            blockNetworkLoads = false
+                            cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                         }
 
                         webView.webViewClient = object : WebViewClient() {
@@ -76,8 +94,19 @@ class AniSnatchWebView {
                                 handler: SslErrorHandler?,
                                 error: SslError?
                             ) {
-                                Log.d(TAG, "SSL error ${error?.primaryError} — proceeding anyway")
+                                Log.d(TAG, "SSL error ${error?.primaryError} — proceeding")
                                 handler?.proceed()
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: android.webkit.WebResourceError?
+                            ) {
+                                if (request?.url?.toString()?.contains("anisnatch") == true) {
+                                    Log.e(TAG, "WebView error: ${error?.description} for ${request.url}")
+                                }
+                                super.onReceivedError(view, request, error)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -88,14 +117,14 @@ class AniSnatchWebView {
                             }
 
                             private fun pollForReady(view: WebView?, count: Int) {
-                                if (resumed || count > 60) return
+                                if (resumed || count > 80) return
                                 view?.evaluateJavascript(
-                                    "(function(){ var t=document.title||''; var x=typeof xhrAjax; var s=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t; if(x==='undefined'||s==='undefined') return 'NOJS:'+t; return 'READY:'+t; })();"
+                                    "(function(){ try{ var t=document.title||''; var x=typeof xhrAjax; var s=typeof str2ArrayEnc; if(t.indexOf('Just a moment')>=0||t.indexOf('Attention')>=0||t==='') return 'CF:'+t.substring(0,30); if(x==='undefined'||s==='undefined') return 'NOJS:'+t.substring(0,30); return 'READY:'+t.substring(0,40); }catch(e){ return 'ERR:'+e; } })();"
                                 ) { res ->
                                     Log.d(TAG, "poll $count: $res")
                                     if (res != null && res.contains("READY:") && !resumed) {
                                         CookieManager.getInstance().flush()
-                                        Log.d(TAG, "Page ready after $count polls: $res")
+                                        Log.d(TAG, "Page ready after $count polls")
                                         pageReady.set(true)
                                         resumed = true
                                         if (cont.isActive) cont.resume(true)
@@ -106,6 +135,7 @@ class AniSnatchWebView {
                             }
                         }
 
+                        Log.d(TAG, "Loading URL: $BASE_URL/home")
                         webView.loadUrl("$BASE_URL/home")
 
                         cont.invokeOnCancellation {
@@ -134,6 +164,7 @@ class AniSnatchWebView {
         loadingPage.set(false)
         if (!success) {
             pageReady.set(false)
+            Log.e(TAG, "ensurePageLoaded FAILED — pageReady reset")
         }
         return success
     }
@@ -236,6 +267,7 @@ class AniSnatchWebView {
     suspend fun fetchStreamUrl(videoPath: String): String? {
         val context = CommonActivity.activity ?: return null
         val fullUrl = if (videoPath.startsWith("http")) videoPath else "$BASE_URL$videoPath"
+        Log.d(TAG, "fetchStreamUrl: $fullUrl")
 
         return withContext(Dispatchers.Main) {
             withTimeoutOrNull(30_000L) {
@@ -273,6 +305,7 @@ class AniSnatchWebView {
                                     (url.contains(".m3u8") || url.contains(".mp4"))
                                 ) {
                                     foundUrl = url
+                                    Log.d(TAG, "fetchStreamUrl found: $url")
                                     if (cont.isActive) cont.resume(url)
                                 }
                             }
@@ -280,10 +313,11 @@ class AniSnatchWebView {
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?
-                            ): android.webkit.WebResourceResponse? {
+                            ): WebResourceResponse? {
                                 val url = request?.url?.toString() ?: return null
                                 if (url.contains(".m3u8") && foundUrl == null) {
                                     foundUrl = url
+                                    Log.d(TAG, "fetchStreamUrl intercepted: $url")
                                     if (cont.isActive) cont.resume(url)
                                 }
                                 return null
