@@ -23,8 +23,10 @@ import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import com.lagradost.nicehttp.RequestBodyTypes
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class AniKageProvider : MainAPI() {
     override var mainUrl = "https://anikage.cc"
@@ -167,7 +169,7 @@ class AniKageProvider : MainAPI() {
         val body = mapOf(
             "query" to query,
             "variables" to variables
-        ).toJson()
+        ).toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
         return app.post(
             anilistGraphql,
             headers = mapOf("Content-Type" to "application/json", "Accept" to "application/json"),
