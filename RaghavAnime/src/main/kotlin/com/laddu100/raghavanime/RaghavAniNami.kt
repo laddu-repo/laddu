@@ -76,7 +76,7 @@ class RaghavAniNami : MainAPI() {
             ?: return null
 
         val epsText = try {
-            app.get("$mainUrl/api/episodes/$anilistId", headers = apiHeaders).text
+            app.get("$mainUrl/api/episodes/$anilistId", headers = apiHeaders).textLarge
         } catch (e: Exception) {
             Log.d("AniNami", "load: ${e.message}")
             return null

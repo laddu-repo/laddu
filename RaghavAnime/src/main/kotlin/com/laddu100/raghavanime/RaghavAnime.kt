@@ -413,8 +413,7 @@ class RaghavAnime : MainAPI() {
                         doLoad = { animo.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) {
-                        val animoEpData = parseJson<com.laddu100.raghavanime.RaghavAnimo.AnimoEpData>(epData).copy(isDub = isDub)
-                        animo.loadLinks(animoEpData.toJson(), false, subtitleCallback, callback)
+                        animo.loadLinks(epData, false, subtitleCallback, callback)
                     }
                 } catch (e: Throwable) { Log.d("RaghavAnime", "Animo: ${e.message}") }
             },

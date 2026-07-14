@@ -1,5 +1,6 @@
 package com.laddu100.raghavanime
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
@@ -183,8 +184,8 @@ class AnikageProvider : MainAPI() {
                         sourceData.embeds?.amap { embed ->
                             loadExtractor(embed.url, "$mainUrl/", subtitleCallback, callback)
                         }
-                    } catch (_: Exception) {
-                        // Ignore failed providers
+                    } catch (e: Exception) {
+                        com.lagradost.api.Log.d("RaghavAnime", "Anikage $provider: ${e.message}")
                     }
                 }
         }.awaitAll()
@@ -204,15 +205,18 @@ class AnikageProvider : MainAPI() {
 
     data class EpisodeData(val slug: String, val number: Int, val isDub: Boolean = false)
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class AnikageResponse(
         val hasNextPage: Boolean,
         val results: List<AnimeResult>
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class AnimeDetailsResponse(
         val anime: AnimeResult
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class AnimeResult(
         val slug: String,
         val title: AnimeTitle,
@@ -228,16 +232,19 @@ class AnikageProvider : MainAPI() {
         val bannerImage: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class AnimeTitle(
         val romaji: String,
         val english: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class CoverImage(
         val large: String?,
         val extraLarge: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class EpisodeResult(
         val number: Int,
         val title: String?,
@@ -247,26 +254,31 @@ class AnikageProvider : MainAPI() {
         val airDate: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class EpisodeSource(
         val sources: List<SourceData>?,
         val subtitles: List<SubtitleData>?,
         val embeds: List<EmbedData>?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class ServerData(val id: String)
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class EmbedData(
         val url: String,
         val type: String?,
         val server: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SourceData(
         val url: String,
         val quality: String?,
         val isM3U8: Boolean?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SubtitleData(
         val file: String,
         val label: String?

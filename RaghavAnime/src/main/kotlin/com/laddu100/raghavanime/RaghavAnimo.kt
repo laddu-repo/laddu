@@ -14,16 +14,11 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.api.Log
 import java.net.URLEncoder
 
-/**
- * Animo source for RaghavAnime aggregator.
- * Uses api.kryzox.xyz (NO Cloudflare) for search + episodes.
- * Uses cdn.4animo.xyz/stream/getSources for stream URLs.
- */
 class RaghavAnimo : MainAPI() {
     override var mainUrl = "https://4animo.xyz"
     override var name = "Animo"
     override var lang = "en"
-    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
+    override var supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     private val apiUrl = "https://api.kryzox.xyz"
     private val cdnUrl = "https://cdn.4animo.xyz"
@@ -71,11 +66,12 @@ class RaghavAnimo : MainAPI() {
             episodes.forEach { ep ->
                 val num = ep.number ?: return@forEach
                 val epName = ep.titles?.en ?: ep.titles?.romaji ?: "Episode $num"
-                val epData = AnimoEpData(animeId, num, ep.sub == true, ep.dub == true).toJson()
                 if (ep.sub == true) {
+                    val epData = AnimoEpData(animeId, num, false).toJson()
                     subEps.add(newEpisode(epData) { this.episode = num; this.name = epName })
                 }
                 if (ep.dub == true) {
+                    val epData = AnimoEpData(animeId, num, true).toJson()
                     dubEps.add(newEpisode(epData) { this.episode = num; this.name = epName })
                 }
             }
@@ -109,8 +105,6 @@ class RaghavAnimo : MainAPI() {
         val playHeaders = mapOf("Referer" to "$mainUrl/", "Origin" to mainUrl, "User-Agent" to ua)
         var found = false
 
-        // Use the user's sub/dub selection — don't mix them
-        // If isDub=true, only fetch dub. If isDub=false, only fetch sub.
         val type = if (epData.isDub) "dub" else "sub"
         for (hd in 1..4) {
             try {
@@ -139,7 +133,6 @@ class RaghavAnimo : MainAPI() {
                         found = true
                     }
                 }
-                // Forward subtitles from hd=1 only
                 if (hd == 1) {
                     sources.tracks?.forEach { t ->
                         val file = t.file ?: return@forEach
@@ -147,14 +140,13 @@ class RaghavAnimo : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl))
                     }
                 }
-            } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
+            } catch (e: Exception) { Log.d("RaghavAnime", "Animo: ${e.message}") }
             if (found) break
         }
         return found
     }
 
-    // Data classes
-    data class AnimoEpData(val animeId: Int, val episodeNum: Int, val sub: Boolean, val dub: Boolean, val isDub: Boolean = false)
+    data class AnimoEpData(val animeId: Int, val episodeNum: Int, val isDub: Boolean)
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class SearchResp(val success: Boolean? = null, val data: List<SearchItem>? = null)
