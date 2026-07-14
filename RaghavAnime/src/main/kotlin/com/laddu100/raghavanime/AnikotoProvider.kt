@@ -1,5 +1,5 @@
 package com.laddu100.raghavanime
-import android.util.Log
+import com.lagradost.api.Log
 
 import android.util.Base64
 import com.google.gson.JsonParser
@@ -353,7 +353,7 @@ class RaghavAnikoto : MainAPI() {
         )
 
         try {
-            // 1. Fetch embed page to get data-id
+            // Fetch embed page to get data-id
             val doc = app.get(url, headers = pageHeaders).document
             val playerEl = doc.selectFirst("#megaplay-player")
             val streamId = playerEl?.attr("data-id")
@@ -362,7 +362,7 @@ class RaghavAnikoto : MainAPI() {
                 ?: return false
             if (streamId.isBlank()) return false
 
-            // 2. Fetch getSources
+            // Fetch getSources
             val sourcesText = app.get("$host/stream/getSources?id=$streamId&type=$type",
                 headers = ajaxHeaders, referer = url).text
             val root = JsonParser.parseString(sourcesText).asJsonObject
@@ -381,7 +381,7 @@ class RaghavAnikoto : MainAPI() {
                 return false
             }
 
-            // 3. Generate m3u8 links
+            // Generate m3u8 links
             val displayType = if (type == "dub") "DUB" else "SUB"
             val generated = M3u8Helper.generateM3u8(
                 "AniKoto $serverName $displayType", m3u8, host, headers = playbackHeaders
@@ -402,7 +402,7 @@ class RaghavAnikoto : MainAPI() {
                 )
             }
 
-            // 4. Subtitles
+            // Subtitles
             try {
                 val tracks = root.getAsJsonArray("tracks")
                 if (tracks != null) {
@@ -415,7 +415,7 @@ class RaghavAnikoto : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(label, file))
                     }
                 }
-            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+            } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
 
             return true
         } catch (e: Exception) {

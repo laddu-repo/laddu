@@ -147,7 +147,7 @@ class RaghavAnimo : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl))
                     }
                 }
-            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+            } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
             if (found) break
         }
         return found

@@ -1,5 +1,5 @@
 package com.laddu100.raghavanime
-import android.util.Log
+import com.lagradost.api.Log
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -151,7 +151,7 @@ class AnimetsuProvider : MainAPI() {
                             hasDub = true
                             break
                         }
-                    } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+                    } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
                 }
             } catch (e: Exception) {
             }

@@ -1,5 +1,5 @@
 package com.laddu100.raghavanime
-import android.util.Log
+import com.lagradost.api.Log
 
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
@@ -209,7 +209,7 @@ class Miruro : MainAPI() {
                     }
                 }
             }
-        } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+        } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = posterUrl
@@ -377,7 +377,7 @@ class Miruro : MainAPI() {
                             }
                         }
                     }
-                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
             }
 
             // Subtitles

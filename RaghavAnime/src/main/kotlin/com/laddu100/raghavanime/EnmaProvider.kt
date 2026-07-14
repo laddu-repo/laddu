@@ -1,5 +1,5 @@
 package com.laddu100.raghavanime
-import android.util.Log
+import com.lagradost.api.Log
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -451,7 +451,7 @@ class RaghavEnma : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(label, fullSub))
                     }
                 }
-            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+            } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
             return true
         } catch (e: Exception) {
             return false
@@ -554,7 +554,7 @@ class RaghavEnma : MainAPI() {
                 "Referer" to "$mainUrl/",
             )
 
-            // 1. Fetch the megaplay page to get data-id
+            // Fetch the megaplay page to get data-id
             val doc = app.get(iframeUrl, headers = pageHeaders).document
             val playerEl = doc.selectFirst("#megaplay-player")
             val streamId = playerEl?.attr("data-id")
@@ -562,7 +562,7 @@ class RaghavEnma : MainAPI() {
                 ?: return false
             if (streamId.isBlank()) return false
 
-            // 2. Fetch getSources
+            // Fetch getSources
             val ajaxHeaders = mapOf(
                 "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
                 "Accept" to "*/*",
@@ -589,7 +589,7 @@ class RaghavEnma : MainAPI() {
                 return false
             }
 
-            // 3. Generate m3u8 links
+            // Generate m3u8 links
             val displayType = if (type == "dub") "DUB" else "SUB"
             val m3u8Headers = mapOf(
                 "Referer" to "$host/",
@@ -616,7 +616,7 @@ class RaghavEnma : MainAPI() {
                 )
             }
 
-            // 4. Subtitles
+            // Subtitles
             try {
                 val tracks = root.getAsJsonArray("tracks")
                 if (tracks != null) {
@@ -629,7 +629,7 @@ class RaghavEnma : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(label, file))
                     }
                 }
-            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
+            } catch (e: Exception) { e.message?.let { Log.d("RaghavAnime", it) } }
 
             return true
         } catch (e: Exception) {

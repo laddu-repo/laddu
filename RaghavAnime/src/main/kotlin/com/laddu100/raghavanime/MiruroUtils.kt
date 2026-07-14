@@ -36,9 +36,6 @@ fun encodePipeRequest(payload: Map<String, Any?>): String {
     )
 }
 
-/**
- * Decode a base64url + gzip response (old format, no XOR).
- */
 fun decodePipeResponse(responseBody: String): String {
     val trimmed = responseBody.trim()
     val padded = trimmed + "=".repeat((4 - trimmed.length % 4) % 4)
@@ -46,10 +43,6 @@ fun decodePipeResponse(responseBody: String): String {
     return decompress(compressed)
 }
 
-/**
- * Decompress data that may be gzip, zlib, or raw deflate.
- * Mirrors the JS Kr() function: checks magic bytes to determine format.
- */
 private fun decompress(data: ByteArray): String {
     // gzip: magic bytes 1f 8b 08
     if (data.size > 2 && data[0] == 0x1f.toByte() && data[1] == 0x8b.toByte()) {
@@ -86,13 +79,6 @@ private fun xorDecrypt(data: ByteArray): ByteArray {
     return result
 }
 
-/**
- * Decode pipe response based on x-obfuscated header value.
- *
- * - No header / null  → plain JSON text, return as-is
- * - Header present, value != "2" → base64url + gzip
- * - Header === "2" → base64url + XOR + gzip
- */
 fun decodePipeResponseWithHeader(responseBody: String, obfuscatedHeader: String?): String {
     if (obfuscatedHeader == null) {
         // Plain JSON response
@@ -110,14 +96,10 @@ fun decodePipeResponseWithHeader(responseBody: String, obfuscatedHeader: String?
     return decompress(decoded)
 }
 
-/**
- * Auto-detect response format (for WebView fallback where we can't read headers).
- * Tries: plain JSON → base64url+decompress → base64url+XOR+decompress
- */
 fun decodePipeResponseAuto(responseBody: String): String {
     val trimmed = responseBody.trim()
 
-    // 1. Plain JSON?
+    // Plain JSON?
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
         return trimmed
     }
@@ -129,12 +111,12 @@ fun decodePipeResponseAuto(responseBody: String): String {
         throw Exception("Cannot base64-decode pipe response")
     }
 
-    // 2. base64url + decompress (gzip/zlib/deflate)?
+    // base64url + decompress?
     try {
         return decompress(decoded)
     } catch (_: Exception) {}
 
-    // 3. base64url + XOR + decompress?
+    // base64url + XOR + decompress
     try {
         val xored = xorDecrypt(decoded)
         return decompress(xored)
@@ -163,9 +145,6 @@ val MIRURO_DOMAINS = listOf(
 const val CF_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
-/**
- * Cloudflare bypass via WebView + JS fetch() injection.
- */
 object MiruroCloudflare {
     private val cookieCache = ConcurrentHashMap<String, String>()
     private val workingDomain = AtomicReference<String?>(MIRURO_DOMAINS[0])
@@ -192,10 +171,6 @@ object MiruroCloudflare {
         return false
     }
 
-    /**
-     * Fetch the pipe API response via WebView.
-     * Loads homepage → waits for CF solve → injects fetch() → returns response text.
-     */
     suspend fun fetchPipeViaWebView(
         context: Context?,
         domain: String,

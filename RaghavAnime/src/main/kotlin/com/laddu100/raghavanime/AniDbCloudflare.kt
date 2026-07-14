@@ -167,7 +167,7 @@ class AniDbCFDialog(
                     else scheduleNextPoll()
                 }
                 pollElapsedMs >= POLL_TIMEOUT_MS -> {
-                    updateStatus("⏱️ Timed out. Try solving the CAPTCHA then tap Bypass again.")
+                    updateStatus("Timed out. Try solving the CAPTCHA then tap Bypass again.")
                 }
                 else -> scheduleNextPoll()
             }
@@ -176,7 +176,7 @@ class AniDbCFDialog(
 
     private fun scheduleNextPoll() {
         pollElapsedMs += POLL_INTERVAL_MS
-        updateStatus("⏳ Waiting for cookies… (${pollElapsedMs / 1000}s)")
+        updateStatus("Waiting for cookies… (${pollElapsedMs / 1000}s)")
         handler.postDelayed(cookiePollRunnable, POLL_INTERVAL_MS)
     }
 
@@ -215,7 +215,7 @@ class AniDbCFDialog(
 
         // Title
         root.addView(TextView(requireContext()).apply {
-            text = "🛡️ AniDB – Cloudflare Bypass"
+            text = "AniDB – Cloudflare Bypass"
             textSize = 18f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -305,7 +305,7 @@ class AniDbCFDialog(
                         return
                     }
 
-                    updateStatus("✏️ Page loaded – checking cookies…")
+                    updateStatus("Page loaded – checking cookies…")
                     CookieManager.getInstance().flush()
 
                     // Check cookies from both the target host and the current URL
@@ -340,7 +340,7 @@ class AniDbCFDialog(
         val ua = webView?.settings?.userAgentString ?: ""
         AniDbCFStore.save(cookieStr, ua, targetHost)
 
-        updateStatus("✅ Done! Cookies saved.")
+        updateStatus("Done! Cookies saved.")
 
         webView?.postDelayed({
             if (isAdded) {
@@ -362,7 +362,7 @@ class AniDbCFDialog(
         activity?.runOnUiThread {
             statusText?.apply {
                 text = msg
-                if (msg.startsWith("✅")) {
+                if (msg.startsWith("Done")) {
                     setTextColor(Color.parseColor("#4CAF50"))
                     progressBar?.visibility = View.GONE
                 } else {

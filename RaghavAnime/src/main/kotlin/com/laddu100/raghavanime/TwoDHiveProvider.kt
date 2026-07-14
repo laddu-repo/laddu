@@ -244,7 +244,7 @@ class RaghavTwoDHive : MainAPI() {
         val props = mapper.readTree(propsStr)
         val decoded = decodeAstro(props)
 
-        // Robust MAL ID parsing with fallback to epUrl query parameter
+        // MAL ID parsing with fallback
         val malId = decoded.get("animeIdOrName")?.let { node ->
             if (node.isNumber) node.asInt() else node.asText().toIntOrNull()
         } ?: epUrl.substringAfter("anime=").substringBefore("&").toIntOrNull()
@@ -254,7 +254,7 @@ class RaghavTwoDHive : MainAPI() {
 
         val loadedResults = mutableListOf<Deferred<Boolean>>()
 
-        // 1. Process parsed servers from page props
+        // Process parsed servers from page props
         if (serversList != null && serversList.isArray) {
             serversList.forEach { serverItem ->
                 val serverName = serverItem.get("server_name")?.asText()?.trim() ?: ""
@@ -360,7 +360,7 @@ class RaghavTwoDHive : MainAPI() {
             }
         }
 
-        // 2. Extra servers if MAL ID is available
+        // Extra servers if MAL ID is available
         if (malId != null) {
             // MegaPlay (Sub / Dub depending on the selected tab)
             loadedResults.add(async {
@@ -413,7 +413,7 @@ class RaghavTwoDHive : MainAPI() {
                         if (!m3u8Url.isNullOrEmpty()) {
                             val displayName = if (type == "sub") "MegaPlay Sub" else "MegaPlay Dub"
 
-                            // 1. Direct link
+                            // Direct link
                             callback(
                                 newExtractorLink(
                                     source = displayName,
@@ -430,7 +430,7 @@ class RaghavTwoDHive : MainAPI() {
                                 }
                             )
 
-                            // 2. Proxy link
+                            // Proxy link
                             val proxyPrefix = getProxyUrl(malId, epNum)
                             val encodedTarget = URLEncoder.encode(m3u8Url, "UTF-8")
                             val encodedHeaders = URLEncoder.encode("{\"referer\":\"https://megaplay.buzz/\"}", "UTF-8")

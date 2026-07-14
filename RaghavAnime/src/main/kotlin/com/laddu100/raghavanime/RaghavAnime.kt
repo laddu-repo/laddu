@@ -1,5 +1,5 @@
 package com.laddu100.raghavanime
-import android.util.Log
+import com.lagradost.api.Log
 
 import com.lagradost.cloudstream3.CommonActivity.activity
 import android.content.Context
@@ -23,6 +23,7 @@ class RaghavAnime : MainAPI() {
     override val hasMainPage = true
     override var lang = "en"
     override val hasDownloadSupport = true
+    override val instantLinkLoading = true
     override val supportedTypes = setOf(
         TvType.Anime,
         TvType.AnimeMovie,
@@ -90,9 +91,6 @@ class RaghavAnime : MainAPI() {
             }
         }
 
-        // Robust error handling — NEVER throw, always return something.
-        // AniList rate-limits at 90 req/min; transient failures must not
-        // cause an empty home screen. Cache successful results for fallback.
         val home = try {
             val responseText = anilistQuery(query, variables)
             val response = parseJson<AniListResponse>(responseText)
@@ -155,16 +153,15 @@ class RaghavAnime : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val anilistId = Regex("""/info/(\d+)""").find(url)?.groupValues?.get(1)?.toIntOrNull() ?: return null
 
-        // Fetch anime details from AniList
         val media = try {
             val infoText = anilistQuery(INFO_QUERY, mapOf("id" to anilistId))
             val infoResponse = parseJson<AniListResponse>(infoText)
             infoResponse.data?.Media
         } catch (e: Exception) {
-            com.lagradost.api.Log.e("RaghavAnime", "load: AniList query failed: ${e.message}")
+            Log.e("RaghavAnime", "load: ${e.message}")
             return null
         } ?: run {
-            com.lagradost.api.Log.e("RaghavAnime", "load: AniList returned null Media for id=$anilistId")
+            Log.e("RaghavAnime", "load: null Media for id=$anilistId")
             return null
         }
 
@@ -188,7 +185,6 @@ class RaghavAnime : MainAPI() {
             else -> null
         }
 
-        // Fetch episode metadata from ani.zip (for episode titles, descriptions, thumbnails)
         val syncMetaData = try {
             app.get("https://api.ani.zip/mappings?anilist_id=$anilistId").text
         } catch (_: Exception) { null }
@@ -203,7 +199,6 @@ class RaghavAnime : MainAPI() {
             ?: anizipNumericCount
             ?: 0
 
-        // For ongoing series, cap at nextAiringEpisode - 1 (aired episodes only)
         media.nextAiringEpisode?.episode?.let { nextEp ->
             if (totalEps >= nextEp) {
                 totalEps = nextEp - 1
@@ -211,9 +206,7 @@ class RaghavAnime : MainAPI() {
         }
 
         if (media.format == "MOVIE" && totalEps == 0) totalEps = 1
-        if (totalEps == 0) totalEps = 1 // Always at least 1 episode
-
-        com.lagradost.api.Log.d("RaghavAnime", "load: totalEps=$totalEps (anilist=${media.episodes}, anizip_numeric=$anizipNumericCount, nextAiring=${media.nextAiringEpisode?.episode})")
+        if (totalEps == 0) totalEps = 1
 
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
@@ -240,8 +233,6 @@ class RaghavAnime : MainAPI() {
                 this.posterUrl = epPoster
             })
         }
-
-        com.lagradost.api.Log.d("RaghavAnime", "load: built ${subEpisodes.size} sub + ${dubEpisodes.size} dub episodes")
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = posterUrl
@@ -272,7 +263,6 @@ class RaghavAnime : MainAPI() {
 
         runAllAsync(
             {
-                // 1. Miruro
                 try {
                     val miruro = Miruro()
                     val loadResult = miruro.load("${miruro.mainUrl}/info/$aniId") as? com.lagradost.cloudstream3.AnimeLoadResponse
@@ -281,10 +271,9 @@ class RaghavAnime : MainAPI() {
                     if (matchedEp != null) {
                         miruro.loadLinks(matchedEp.data, false, subtitleCallback, callback)
                     }
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Miruro: ${e.message}") }
             },
             {
-                // 2. AniSuge
                 try {
                     val aniSuge = AniSugeProvider()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -293,19 +282,16 @@ class RaghavAnime : MainAPI() {
                         doLoad = { aniSuge.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) aniSuge.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniSuge: ${e.message}") }
             },
             {
-                // 3. AniWaves
                 try {
                     val aniWaves = AniWaves()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
                     val aniWavesTargets = listOfNotNull(title, jpTitle).map { cleanTitle(it) }
-                    // AniWaves encodes sub/dub in the data string — always load from Subbed list and flip the prefix
                     var matchedData: String? = null
                     for (t in searchTitles) {
                         val searchResults = try { aniWaves.search(t) } catch (_: Throwable) { continue }
-                        // Only consider results with at least a partial title match (score >= 1)
                         val candidates = searchResults.mapNotNull { r ->
                             val c = cleanTitle(r.name)
                             val score = when {
@@ -328,10 +314,9 @@ class RaghavAnime : MainAPI() {
                         if (matchedData != null) break
                     }
                     if (matchedData != null) aniWaves.loadLinks(matchedData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniWaves: ${e.message}") }
             },
             {
-                // 4. Anikai
                 try {
                     val anikai = Anikai()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -340,10 +325,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { anikai.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anikai.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Anikai: ${e.message}") }
             },
             {
-                // 5. AniDb
                 try {
                     val aniDb = AniDb()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -352,10 +336,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { aniDb.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) aniDb.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniDb: ${e.message}") }
             },
             {
-                // 6. Anikage
                 try {
                     val anikage = AnikageProvider()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -364,10 +347,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { anikage.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anikage.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Anikage: ${e.message}") }
             },
             {
-                // 7. Anineko
                 try {
                     val anineko = Anineko()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -376,10 +358,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { anineko.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anineko.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Anineko: ${e.message}") }
             },
             {
-                // 8. Animetsu
                 try {
                     val animetsu = AnimetsuProvider()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -388,10 +369,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { animetsu.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) animetsu.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Animetsu: ${e.message}") }
             },
             {
-                // 9. 2DHive
                 try {
                     val twoDHive = RaghavTwoDHive()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -400,10 +380,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { twoDHive.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) twoDHive.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "2DHive: ${e.message}") }
             },
             {
-                // 10. AniKoto
                 try {
                     val anikoto = RaghavAnikoto()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -412,10 +391,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { anikoto.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anikoto.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniKoto: ${e.message}") }
             },
             {
-                // 11. Enma
                 try {
                     val enma = RaghavEnma()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -424,10 +402,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { enma.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) enma.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Enma: ${e.message}") }
             },
             {
-                // 12. Animo (4animo.xyz)
                 try {
                     val animo = RaghavAnimo()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -436,14 +413,12 @@ class RaghavAnime : MainAPI() {
                         doLoad = { animo.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) {
-                        // Inject isDub flag into AnimoEpData so loadLinks knows which type to fetch
                         val animoEpData = parseJson<com.laddu100.raghavanime.RaghavAnimo.AnimoEpData>(epData).copy(isDub = isDub)
                         animo.loadLinks(animoEpData.toJson(), false, subtitleCallback, callback)
                     }
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Animo: ${e.message}") }
             },
             {
-                // 13. Anidap (anidap.se) — sub/dub with per-anime providers
                 try {
                     val anidap = RaghavAnidap()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -452,10 +427,9 @@ class RaghavAnime : MainAPI() {
                         doLoad = { anidap.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anidap.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Anidap: ${e.message}") }
             },
             {
-                // 14. Senshi (senshi.live) — mostly sub, some dub
                 try {
                     val senshi = RaghavSenshi()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
@@ -464,7 +438,18 @@ class RaghavAnime : MainAPI() {
                         doLoad = { senshi.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) senshi.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "Senshi: ${e.message}") }
+            },
+            {
+                try {
+                    val aniNami = RaghavAniNami()
+                    val loadResult = aniNami.load("${aniNami.mainUrl}/anime/$aniId") as? com.lagradost.cloudstream3.AnimeLoadResponse
+                    val epList = if (isDub) loadResult?.episodes?.get(DubStatus.Dubbed) else loadResult?.episodes?.get(DubStatus.Subbed)
+                    val matchedEp = epList?.find { it.episode == episode }
+                    if (matchedEp != null) {
+                        aniNami.loadLinks(matchedEp.data, false, subtitleCallback, callback)
+                    }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniNami: ${e.message}") }
             }
         )
 
@@ -478,33 +463,6 @@ class RaghavAnime : MainAPI() {
             .trim()
     }
 
-    private fun matchSearchResult(searchResults: List<SearchResponse>, targetTitles: List<String>): SearchResponse? {
-        val cleanedTargets = targetTitles.map { cleanTitle(it) }
-        // Pass 1: exact match
-        for (res in searchResults) {
-            val cleanedRes = cleanTitle(res.name)
-            if (cleanedTargets.contains(cleanedRes)) {
-                return res
-            }
-        }
-        // Pass 2: substring match
-        for (res in searchResults) {
-            val cleanedRes = cleanTitle(res.name)
-            if (cleanedTargets.any { target -> target.contains(cleanedRes) || cleanedRes.contains(target) }) {
-                return res
-            }
-        }
-        // No match — return null so the caller truly skips this result
-        return null
-    }
-
-    /**
-     * Exhaustively search all results from all titles for an episode match.
-     * Pass 1: try exact title matches only (score 2) across all search titles.
-     * Pass 2: if no exact match found, try partial matches (score 1).
-     * This prevents wrong-season anime from loading when a partial title match
-     * returns a different season (e.g. "Bleach" matching "Bleach TYBW").
-     */
     private suspend fun findEpisodeData(
         searchTitles: List<String>,
         targetTitles: List<String>,
@@ -566,7 +524,6 @@ class RaghavAnime : MainAPI() {
 
     companion object {
         var hasShownThisSession = false
-        // Cache for home page data — used as fallback when AniList fails
         private val homePageCache = mutableMapOf<String, List<AniListMedia>>()
     }
 }

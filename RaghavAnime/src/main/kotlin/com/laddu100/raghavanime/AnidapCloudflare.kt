@@ -174,7 +174,7 @@ class AnidapCFDialog(
                     else scheduleNextPoll()
                 }
                 pollElapsedMs >= POLL_TIMEOUT_MS -> {
-                    updateStatus("⏱️ Timed out. Try opening anidap.se in a browser, then tap Bypass again.")
+                    updateStatus("Timed out. Try opening anidap.se in a browser, then tap Bypass again.")
                 }
                 else -> scheduleNextPoll()
             }
@@ -183,7 +183,7 @@ class AnidapCFDialog(
 
     private fun scheduleNextPoll() {
         pollElapsedMs += POLL_INTERVAL_MS
-        updateStatus("⏳ Loading anidap.se in browser… (${pollElapsedMs / 1000}s)")
+        updateStatus("Loading anidap.se in browser… (${pollElapsedMs / 1000}s)")
         handler.postDelayed(cookiePollRunnable, POLL_INTERVAL_MS)
     }
 
@@ -222,7 +222,7 @@ class AnidapCFDialog(
 
         // Title
         root.addView(TextView(requireContext()).apply {
-            text = "🛡️ Anidap – Anti-Bot Bypass"
+            text = "Anidap – Anti-Bot Bypass"
             textSize = 18f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -309,7 +309,7 @@ class AnidapCFDialog(
                     val title = view?.title ?: ""
                     Log.d(TAG, "onPageFinished title='$title' url=$url")
 
-                    updateStatus("✏️ Page loaded – checking cookies…")
+                    updateStatus("Page loaded – checking cookies…")
                     CookieManager.getInstance().flush()
 
                     // Check cookies from the target host
@@ -347,7 +347,7 @@ class AnidapCFDialog(
         val ua = webView?.settings?.userAgentString ?: ""
         AnidapCFStore.save(cookieStr, ua, targetHost)
 
-        updateStatus("✅ Done! Cookie captured.")
+        updateStatus("Done! Cookie captured.")
 
         webView?.postDelayed({
             if (isAdded) {

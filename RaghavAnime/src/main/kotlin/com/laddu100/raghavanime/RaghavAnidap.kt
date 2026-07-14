@@ -173,7 +173,7 @@ class RaghavAnidap : MainAPI() {
         val animeId = url.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
 
         return try {
-            // 1. Fetch anime detail
+            // Fetch anime detail
             val detailRes = app.get("$mainUrl/api/anime/$animeId", headers = baseHeaders, timeout = 30_000L)
             val detailRoot = parseJson<com.fasterxml.jackson.databind.JsonNode>(detailRes.text)
             val dataNode = detailRoot.path("data")
@@ -186,7 +186,7 @@ class RaghavAnidap : MainAPI() {
 
             Log.d(TAG, "load: title='$title' slug=$slug eps=$totalEps")
 
-            // 2. Fetch servers via cfAppGet (handles _amx_id anti-bot bypass)
+            // Fetch servers via cfAppGet
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
             val serversRes = cfAppGetAnidap(
                 serversUrl,
@@ -302,7 +302,7 @@ class RaghavAnidap : MainAPI() {
                     }
                 }
 
-                // Process sources — ALWAYS use direct ExtractorLink with full headers
+                // Use direct ExtractorLink with full headers
                 for (source in sources) {
                     val sourceUrl = source.url ?: continue
                     if (sourceUrl.isBlank()) continue
