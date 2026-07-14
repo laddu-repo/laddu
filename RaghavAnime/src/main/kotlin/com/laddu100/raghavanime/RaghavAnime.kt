@@ -341,12 +341,7 @@ class RaghavAnime : MainAPI() {
             {
                 try {
                     val anikage = RaghavAniKage()
-                    val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
-                        doSearch = { anikage.search(it) },
-                        doLoad = { anikage.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
-                    )
-                    if (epData != null) anikage.loadLinks(epData, false, subtitleCallback, callback)
+                    anikage.loadLinksByAnilistId(aniId, title, jpTitle, episode, isDub, subtitleCallback, callback)
                 } catch (e: Throwable) { Log.d("RaghavAnime", "AniKage: ${e.message}") }
             },
             {
@@ -443,10 +438,17 @@ class RaghavAnime : MainAPI() {
                 try {
                     val aniNami = RaghavAniNami()
                     val loadResult = aniNami.load("${aniNami.mainUrl}/anime/$aniId") as? com.lagradost.cloudstream3.AnimeLoadResponse
-                    val epList = if (isDub) loadResult?.episodes?.get(DubStatus.Dubbed) else loadResult?.episodes?.get(DubStatus.Subbed)
-                    val matchedEp = epList?.find { it.episode == episode }
-                    if (matchedEp != null) {
-                        aniNami.loadLinks(matchedEp.data, false, subtitleCallback, callback)
+                    if (loadResult == null) {
+                        Log.d("RaghavAnime", "AniNami: load returned null for $aniId")
+                    } else {
+                        val epList = if (isDub) loadResult.episodes?.get(DubStatus.Dubbed) else loadResult.episodes?.get(DubStatus.Subbed)
+                        Log.d("RaghavAnime", "AniNami: ${epList?.size ?: 0} eps for $aniId dub=$isDub looking for ep $episode")
+                        val matchedEp = epList?.find { it.episode == episode }
+                        if (matchedEp != null) {
+                            aniNami.loadLinks(matchedEp.data, false, subtitleCallback, callback)
+                        } else {
+                            Log.d("RaghavAnime", "AniNami: ep $episode not found in list")
+                        }
                     }
                 } catch (e: Throwable) { Log.d("RaghavAnime", "AniNami: ${e.message}") }
             },

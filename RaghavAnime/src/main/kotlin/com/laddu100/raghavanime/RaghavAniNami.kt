@@ -78,40 +78,46 @@ class RaghavAniNami : MainAPI() {
         val epsText = try {
             app.get("$mainUrl/api/episodes/$anilistId", headers = apiHeaders).textLarge
         } catch (e: Exception) {
-            Log.d("AniNami", "load: ${e.message}")
+            Log.d("RaghavAnime", "AniNami load $anilistId: ${e.message}")
             return null
         }
         val providers = try {
             parseJson<EpisodesResponse>(epsText).results?.providers ?: emptyMap()
         } catch (e: Exception) {
-            Log.d("AniNami", "parse: ${e.message}")
+            Log.d("RaghavAnime", "AniNami parse $anilistId: ${e.message}")
             return null
         }
 
-        val subByNumber = sortedMapOf<Int, String>()
-        val dubByNumber = sortedMapOf<Int, String>()
+        Log.d("RaghavAnime", "AniNami: $anilistId has ${providers.size} providers")
 
-        for ((_, prov) in providers) {
-            prov.episodes?.sub?.forEach { ep ->
-                val num = ep.number ?: return@forEach
-                val id = ep.id ?: return@forEach
-                if (!subByNumber.containsKey(num)) subByNumber[num] = id
-            }
-            prov.episodes?.dub?.forEach { ep ->
-                val num = ep.number ?: return@forEach
-                val id = ep.id ?: return@forEach
-                if (!dubByNumber.containsKey(num)) dubByNumber[num] = id
-            }
+        val subIdsByNumber = sortedMapOf<Int, MutableList<String>>()
+        val dubIdsByNumber = sortedMapOf<Int, MutableList<String>>()
+
+        for ((provName, prov) in providers) {
+            try {
+                prov.episodes?.sub?.forEach { ep ->
+                    val num = ep.number ?: return@forEach
+                    val id = ep.id ?: return@forEach
+                    subIdsByNumber.getOrPut(num) { mutableListOf() }.add(id)
+                }
+                prov.episodes?.dub?.forEach { ep ->
+                    val num = ep.number ?: return@forEach
+                    val id = ep.id ?: return@forEach
+                    dubIdsByNumber.getOrPut(num) { mutableListOf() }.add(id)
+                }
+            } catch (_: Throwable) { }
         }
 
-        val subEpisodes = subByNumber.map { (num, id) ->
-            newEpisode("sub|$id") {
+        Log.d("RaghavAnime", "AniNami: $anilistId sub=${subIdsByNumber.size} dub=${dubIdsByNumber.size} eps")
+
+        val subEpisodes = subIdsByNumber.map { (num, ids) ->
+            newEpisode("sub|${ids.joinToString(";;")}") {
                 this.episode = num
                 this.name = "Episode $num"
             }
         }
-        val dubEpisodes = dubByNumber.map { (num, id) ->
-            newEpisode("dub|$id") {
+        val dubEpisodes = dubIdsByNumber.map { (num, ids) ->
+            newEpisode("dub|${ids.joinToString(";;")}") {
                 this.episode = num
                 this.name = "Episode $num"
             }
@@ -130,71 +136,88 @@ class RaghavAniNami : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val pipeIdx = data.indexOf("|")
-        if (pipeIdx < 0) return false
-        val audioType = data.substring(0, pipeIdx)
-        val epId = data.substring(pipeIdx + 1)
-        if (epId.isBlank()) return false
-
-        val parts = epId.split("/")
-        if (parts.size < 5 || parts[0] != "watch") return false
-        val provider = parts[1]
-        val anilistId = parts[2]
-        val slug = parts.drop(4).joinToString("/")
-        if (provider.isEmpty() || slug.isEmpty()) return false
-
-        val watchUrl = "$mainUrl/api/watch/$provider/$anilistId/$audioType/$slug"
-        val streamsText = try {
-            app.get(watchUrl, headers = apiHeaders).text
-        } catch (e: Exception) {
-            Log.d("AniNami", "watch: ${e.message}")
+        if (pipeIdx < 0) {
+            Log.d("RaghavAnime", "AniNami: no pipe in data")
             return false
         }
-        val streams = try {
-            parseJson<StreamResponse>(streamsText).results?.streams
-        } catch (e: Exception) {
-            Log.d("AniNami", "parse: ${e.message}")
+        val requestedAudio = data.substring(0, pipeIdx)
+        val epIds = data.substring(pipeIdx + 1).split(";;").filter { it.isNotEmpty() }
+        if (epIds.isEmpty()) {
+            Log.d("RaghavAnime", "AniNami: no epIds in data")
             return false
-        } ?: return false
+        }
+
+        Log.d("RaghavAnime", "AniNami: loadLinks ${epIds.size} ids audio=$requestedAudio")
 
         var found = false
         val seenUrls = mutableSetOf<String>()
 
-        for (stream in streams) {
-            val streamUrl = stream.url ?: continue
-            if (streamUrl.isBlank() || !seenUrls.add(streamUrl)) continue
-            val referer = stream.referer?.takeIf { it.isNotBlank() } ?: "$mainUrl/"
-            val qualityLabel = stream.quality?.takeIf { it.isNotBlank() } ?: "Auto"
-            val label = "AniNami $qualityLabel"
+        for (epId in epIds) {
+            val parts = epId.split("/")
+            if (parts.size < 5 || parts[0] != "watch") {
+                Log.d("RaghavAnime", "AniNami: bad epId format: $epId")
+                continue
+            }
+            val provider = parts[1]
+            val anilistId = parts[2]
+            val audioType = parts[3]
+            val slug = parts.drop(4).joinToString("/")
+            if (provider.isEmpty() || slug.isEmpty()) continue
 
-            when (stream.type?.lowercase()) {
-                "hls" -> {
-                    callback.invoke(
-                        newExtractorLink(label, label, streamUrl, ExtractorLinkType.M3U8) {
-                            this.quality = parseQuality(stream.quality)
-                            this.headers = mapOf("Referer" to referer)
-                        }
-                    )
-                    found = true
-                }
-                "embed" -> {
-                    try {
-                        loadExtractor(streamUrl, referer, subtitleCallback, callback)
+            val watchUrl = "$mainUrl/api/watch/$provider/$anilistId/$audioType/$slug"
+            val streamsText = try {
+                app.get(watchUrl, headers = apiHeaders).text
+            } catch (e: Exception) {
+                Log.d("RaghavAnime", "AniNami watch $provider: ${e.message}")
+                continue
+            }
+            val streams = try {
+                parseJson<StreamResponse>(streamsText).results?.streams
+            } catch (e: Exception) {
+                Log.d("RaghavAnime", "AniNami parse $provider: ${e.message}")
+                continue
+            } ?: continue
+
+            Log.d("RaghavAnime", "AniNami: $provider returned ${streams.size} streams")
+
+            for (stream in streams) {
+                val streamUrl = stream.url ?: continue
+                if (streamUrl.isBlank() || !seenUrls.add(streamUrl)) continue
+                val referer = stream.referer?.takeIf { it.isNotBlank() } ?: "$mainUrl/"
+                val qualityLabel = stream.quality?.takeIf { it.isNotBlank() } ?: "Auto"
+                val label = "AniNami $qualityLabel"
+
+                when (stream.type?.lowercase()) {
+                    "hls" -> {
+                        callback.invoke(
+                            newExtractorLink(label, label, streamUrl, ExtractorLinkType.M3U8) {
+                                this.quality = parseQuality(stream.quality)
+                                this.headers = mapOf("Referer" to referer)
+                            }
+                        )
                         found = true
-                    } catch (e: Exception) {
-                        Log.d("AniNami", "embed: ${e.message}")
                     }
-                }
-                else -> {
-                    try {
-                        loadExtractor(streamUrl, referer, subtitleCallback, callback)
-                        found = true
-                    } catch (e: Exception) {
-                        Log.d("AniNami", "fallback: ${e.message}")
+                    "embed" -> {
+                        try {
+                            loadExtractor(streamUrl, referer, subtitleCallback, callback)
+                            found = true
+                        } catch (e: Exception) {
+                            Log.d("RaghavAnime", "AniNami embed: ${e.message}")
+                        }
+                    }
+                    else -> {
+                        try {
+                            loadExtractor(streamUrl, referer, subtitleCallback, callback)
+                            found = true
+                        } catch (e: Exception) {
+                            Log.d("RaghavAnime", "AniNami fallback: ${e.message}")
+                        }
                     }
                 }
             }
         }
 
+        Log.d("RaghavAnime", "AniNami: loadLinks found=$found")
         return found
     }
 

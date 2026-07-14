@@ -1,5 +1,6 @@
 package com.laddu100.raghavanime
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
@@ -18,6 +19,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.newAnimeSearchResponse
+import java.net.URLEncoder
 
 class RaghavAniKage : MainAPI() {
     override var mainUrl = "https://anikage.cc"
@@ -31,11 +33,14 @@ class RaghavAniKage : MainAPI() {
     private val apiHeaders = mapOf("Accept" to "application/json")
     private val proxyHeaders = mapOf("Origin" to mainUrl, "Referer" to "$mainUrl/")
 
-    private val subProviders = listOf("koto", "neko", "miko", "megg", "dib", "wave")
-    private val dubProvider = "koto"
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class BrowseResponse(
+        val count: Long = 0,
+        val data: List<AnimeResult> = emptyList()
+    )
 
-    private data class BrowseResponse(val count: Long = 0, val data: List<AnimeResult> = emptyList())
-    private data class AnimeResult(
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class AnimeResult(
         val slug: String = "",
         val anilistId: Int? = null,
         val title: AnimeTitle? = null,
@@ -47,11 +52,25 @@ class RaghavAniKage : MainAPI() {
         val totalEpisodes: Int? = null,
         val genres: List<String>? = null
     )
-    private data class AnimeTitle(val romaji: String? = null, val english: String? = null, val native: String? = null)
-    private data class CoverImage(val large: String? = null, val extraLarge: String? = null)
 
-    private data class AnimeDetailResponse(val anime: AnimeDetail? = null)
-    private data class AnimeDetail(
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class AnimeTitle(
+        val romaji: String? = null,
+        val english: String? = null,
+        val native: String? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class CoverImage(
+        val large: String? = null,
+        val extraLarge: String? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class AnimeDetailResponse(val anime: AnimeDetail? = null)
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class AnimeDetail(
         val slug: String = "",
         val anilistId: Int? = null,
         val malId: Int? = null,
@@ -65,8 +84,14 @@ class RaghavAniKage : MainAPI() {
         val seasonYear: Int? = null
     )
 
-    private data class EpisodesResponse(val total: Int = 0, val episodes: List<EpisodeInfo> = emptyList())
-    private data class EpisodeInfo(
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EpisodesResponse(
+        val total: Int = 0,
+        val episodes: List<EpisodeInfo> = emptyList()
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EpisodeInfo(
         val number: Int,
         val title: String? = null,
         val description: String? = null,
@@ -74,30 +99,61 @@ class RaghavAniKage : MainAPI() {
         val isFiller: Boolean = false
     )
 
-    private data class SourcesResponse(
-        val sources: List<SourceInfo> = emptyList(),
-        val subtitles: List<SubtitleInfo>? = null
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class ServersResponse(
+        val servers: List<ServerInfo> = emptyList()
     )
-    private data class SourceInfo(
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class ServerInfo(
+        val id: String = "",
+        val name: String? = null,
+        val subTypes: List<String> = emptyList()
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class SourcesResponse(
+        val sources: List<SourceInfo> = emptyList(),
+        val subtitles: List<SubtitleInfo>? = null,
+        val embeds: List<EmbedInfo>? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class SourceInfo(
         val url: String = "",
         val quality: String? = null,
         val isM3U8: Boolean? = null,
         val embedUrl: String? = null,
         val type: String? = null
     )
-    private data class SubtitleInfo(
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class SubtitleInfo(
         val file: String = "",
         val label: String? = null,
         val embedUrl: String? = null
     )
 
-    private data class MegaPlayResponse(val tracks: List<MegaPlayTrack>? = null)
-    private data class MegaPlayTrack(val file: String? = null, val label: String? = null, val kind: String? = null)
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EmbedInfo(
+        val url: String? = null,
+        val type: String? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class MegaPlayResponse(val tracks: List<MegaPlayTrack>? = null)
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class MegaPlayTrack(
+        val file: String? = null,
+        val label: String? = null,
+        val kind: String? = null
+    )
 
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
 
-        val url = "$apiUrl/browse?search=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=25&adult=true&page=1"
+        val url = "$apiUrl/browse?q=${URLEncoder.encode(query, "UTF-8")}&sort=popularity&page=1&limit=25&adult=true"
         val response = try {
             app.get(url, headers = apiHeaders).text
         } catch (e: Exception) {
@@ -217,22 +273,88 @@ class RaghavAniKage : MainAPI() {
         val epNum = parts[1]
         val type = parts[2]
 
+        return fetchSources(slug, epNum, type, subtitleCallback, callback)
+    }
+
+    suspend fun loadLinksByAnilistId(
+        anilistId: Int,
+        title: String,
+        jpTitle: String?,
+        episode: Int,
+        isDub: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val searchQueries = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
+        if (searchQueries.isEmpty()) {
+            Log.d("RaghavAnime", "AniKage: no search titles for anilistId=$anilistId")
+            return false
+        }
+
+        var slug: String? = null
+        for (query in searchQueries) {
+            slug = findSlugByAnilistId(query, anilistId)
+            if (slug != null) break
+        }
+
+        if (slug == null) {
+            Log.d("RaghavAnime", "AniKage: no match for anilistId=$anilistId (searched ${searchQueries.size} titles)")
+            return false
+        }
+
+        Log.d("RaghavAnime", "AniKage: matched anilistId=$anilistId slug=$slug ep=$episode dub=$isDub")
+        val type = if (isDub) "dub" else "sub"
+        return fetchSources(slug, episode.toString(), type, subtitleCallback, callback)
+    }
+
+    private suspend fun findSlugByAnilistId(query: String, anilistId: Int): String? {
+        val url = "$apiUrl/browse?q=${URLEncoder.encode(query, "UTF-8")}&sort=popularity&page=1&limit=25&adult=true"
+        val response = try {
+            app.get(url, headers = apiHeaders).text
+        } catch (e: Exception) {
+            Log.d("RaghavAnime", "AniKage findSlug: ${e.message}")
+            return null
+        }
+
+        val parsed = try {
+            parseJson<BrowseResponse>(response)
+        } catch (e: Exception) {
+            Log.d("RaghavAnime", "AniKage findSlug parse: ${e.message}")
+            return null
+        }
+
+        return parsed.data.firstOrNull { it.anilistId == anilistId }?.slug?.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun fetchSources(
+        slug: String,
+        epNum: String,
+        type: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val lang = if (type == "dub") "dub" else "sub"
-        val providers = if (type == "dub") listOf(dubProvider) else subProviders
+
+        val serverIds = getServerIds(slug, epNum)
+        if (serverIds.isEmpty()) {
+            Log.d("RaghavAnime", "AniKage: no servers for slug=$slug ep=$epNum")
+            return false
+        }
+
+        Log.d("RaghavAnime", "AniKage: ${serverIds.size} servers for slug=$slug ep=$epNum lang=$lang")
 
         var found = false
-
-        for (providerId in providers) {
+        for (serverId in serverIds) {
             try {
                 val responseText = app.get(
-                    "$apiUrl/$slug/episodes/$epNum/sources?lang=$lang&provider=$providerId",
+                    "$apiUrl/$slug/episodes/$epNum/sources?lang=$lang&provider=$serverId",
                     headers = apiHeaders
                 ).text
 
                 val sourcesResponse = try {
                     parseJson<SourcesResponse>(responseText)
                 } catch (e: Exception) {
-                    Log.d("RaghavAnime", "AniKage $providerId parse: ${e.message}")
+                    Log.d("RaghavAnime", "AniKage $serverId parse: ${e.message}")
                     continue
                 }
 
@@ -254,7 +376,7 @@ class RaghavAniKage : MainAPI() {
                         else -> "Sub"
                     }
 
-                    val label = "AniKage ${providerId.replaceFirstChar { it.uppercase() }} ($quality $subLabel)"
+                    val label = "AniKage ${serverId.replaceFirstChar { it.uppercase() }} ($quality $subLabel)"
 
                     val proxiedUrl = if (isM3u8) {
                         "$proxyUrl/m3u8/$sourceUrl"
@@ -283,11 +405,31 @@ class RaghavAniKage : MainAPI() {
                     }
                 }
             } catch (e: Exception) {
-                Log.d("RaghavAnime", "AniKage $providerId: ${e.message}")
+                Log.d("RaghavAnime", "AniKage $serverId: ${e.message}")
             }
         }
 
+        Log.d("RaghavAnime", "AniKage: fetchSources found=$found")
         return found
+    }
+
+    private suspend fun getServerIds(slug: String, epNum: String): List<String> {
+        val url = "$apiUrl/$slug/episodes/$epNum/servers"
+        val response = try {
+            app.get(url, headers = apiHeaders).text
+        } catch (e: Exception) {
+            Log.d("RaghavAnime", "AniKage servers: ${e.message}")
+            return emptyList()
+        }
+
+        val parsed = try {
+            parseJson<ServersResponse>(response)
+        } catch (e: Exception) {
+            Log.d("RaghavAnime", "AniKage servers parse: ${e.message}")
+            return emptyList()
+        }
+
+        return parsed.servers.mapNotNull { it.id.takeIf { id -> id.isNotBlank() } }
     }
 
     private suspend fun fetchMegaPlaySubtitles(
