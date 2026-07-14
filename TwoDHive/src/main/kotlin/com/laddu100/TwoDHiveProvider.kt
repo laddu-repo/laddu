@@ -48,10 +48,10 @@ class TwoDHiveProvider : MainAPI() {
         val results = mutableListOf<SearchResponse>()
         soup.select("a[href*=\"/anime?anime=\"]").forEach { a ->
             val href = a.attr("href")
-            val title = a.selectFirst("h3")?.text()?.trim() 
+            val title = a.selectFirst("h3")?.text()?.trim()
                 ?: a.text().trim().replace("Play Now", "").trim()
             val img = a.selectFirst("img")
-            val posterUrl = img?.attr("src")?.takeIf { it.isNotBlank() } 
+            val posterUrl = img?.attr("src")?.takeIf { it.isNotBlank() }
                 ?: img?.attr("data-src")
 
             results.add(newAnimeSearchResponse(title, href, TvType.Anime) {
@@ -65,14 +65,14 @@ class TwoDHiveProvider : MainAPI() {
         val header = soup.select("h2").firstOrNull { it.text().contains(sectionName, ignoreCase = true) }
         val headerDiv = header?.parent()?.parent() // Outer container flex div
         val grid = headerDiv?.nextElementSibling()
-        
+
         val results = mutableListOf<SearchResponse>()
         grid?.select("a[href*=\"/anime?anime=\"]")?.forEach { a ->
             val href = a.attr("href")
-            val title = a.selectFirst("h3")?.text()?.trim() 
+            val title = a.selectFirst("h3")?.text()?.trim()
                 ?: a.text().trim().replace("Play Now", "").trim()
             val img = a.selectFirst("img")
-            val posterUrl = img?.attr("src")?.takeIf { it.isNotBlank() } 
+            val posterUrl = img?.attr("src")?.takeIf { it.isNotBlank() }
                 ?: img?.attr("data-src")
 
             results.add(newAnimeSearchResponse(title, href, TvType.Anime) {
@@ -90,14 +90,14 @@ class TwoDHiveProvider : MainAPI() {
         }
         val html = quickGet(url)
         val soup = Jsoup.parse(html)
-        
+
         val items = if (page == 1) {
             val sectionName = if (request.data == "completed") "Completed Classics" else "Top Rated Anime"
             parseSection(soup, sectionName)
         } else {
             parseGrid(soup)
         }
-        
+
         return newHomePageResponse(request.name, items)
     }
 
@@ -112,12 +112,12 @@ class TwoDHiveProvider : MainAPI() {
         val html = quickGet(url)
         val soup = Jsoup.parse(html)
 
-        val title = soup.selectFirst("h1")?.text()?.trim() 
+        val title = soup.selectFirst("h1")?.text()?.trim()
             ?: soup.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
             ?: "Unknown"
 
-        val poster = soup.select("img.object-cover").firstOrNull { 
-            it.attr("src").contains("myanimelist.net", ignoreCase = true) 
+        val poster = soup.select("img.object-cover").firstOrNull {
+            it.attr("src").contains("myanimelist.net", ignoreCase = true)
         }?.attr("src") ?: soup.selectFirst("meta[property=og:image]")?.attr("content")
 
         val summary = soup.selectFirst("p.text-zinc-300")?.text()?.trim() ?: ""
@@ -150,7 +150,7 @@ class TwoDHiveProvider : MainAPI() {
             val epNumMatch = Regex("""ep_num=(\d+)""").find(href)
             val epNum = epNumMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
             val epTitle = "Episode $epNum"
-            
+
             episodes.add(newEpisode("$mainUrl$href") {
                 this.episode = epNum
                 this.name = epTitle
@@ -401,7 +401,7 @@ class TwoDHiveProvider : MainAPI() {
                             sources?.get("file")?.asText()
                         }
 
-                        // Handle subtitles — megaplay VTT files require Referer header
+                        // Handle subtitles
                         val tracks = sourcesJson.get("tracks")
                         if (tracks != null && tracks.isArray) {
                             tracks.forEach { track ->

@@ -1,4 +1,5 @@
 package com.laddu100.raghavanime
+import android.util.Log
 
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
@@ -46,7 +47,6 @@ class Miruro : MainAPI() {
     )
 
     private val providerOrder = listOf("kiwi", "pewe", "bonk", "bee", "ally", "hop", "moo", "nun", "bun", "twin", "cog")
-
 
     // Display names for providers
     private val providerDisplayNames = mapOf(
@@ -144,8 +144,6 @@ class Miruro : MainAPI() {
             val episodesData = parseJson<MiruroEpisodesResponse>(episodesJson)
             val providers = episodesData.providers ?: emptyMap()
 
-            // ── Sub episodes ──
-            // Find provider with most sub/ssub episodes for the episode list
             var bestSubProvider: String? = null
             var bestSubCount = 0
             for (provName in providerOrder) {
@@ -163,7 +161,6 @@ class Miruro : MainAPI() {
                     val parts = mutableListOf("sub", anilistId.toString())
                     for (provName in providerOrder) {
                         val provEps = providers[provName]?.episodes ?: continue
-                        // For sub mode, determine which category this provider actually has data in
                         val subMatch = provEps.sub?.firstOrNull { it.number == epNum }
                         val ssubMatch = provEps.ssub?.firstOrNull { it.number == epNum }
                         if (subMatch?.id != null) {
@@ -181,8 +178,6 @@ class Miruro : MainAPI() {
                 }
             }
 
-            // ── Dub episodes ──
-            // Find provider with most dub episodes
             var bestDubProvider: String? = null
             var bestDubCount = 0
             for (provName in providerOrder) {
@@ -214,7 +209,7 @@ class Miruro : MainAPI() {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = posterUrl
@@ -382,7 +377,7 @@ class Miruro : MainAPI() {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
             }
 
             // Subtitles

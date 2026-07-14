@@ -55,7 +55,6 @@ class ReplayZoneProvider : MainAPI() {
     private suspend fun fetchReplays(): List<Replay> {
         cachedReplays?.let { return it }
         return try {
-            Log.d(TAG, "fetchReplays: fetching $dataUrl")
             val res = app.get(dataUrl, timeout = 30_000L)
             Log.d(TAG, "fetchReplays: HTTP ${res.code}, size=${res.text.length}")
             val text = res.text
@@ -111,8 +110,6 @@ class ReplayZoneProvider : MainAPI() {
             emptyList()
         }
     }
-
-    // ==================== getMainPage ====================
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         Log.d(TAG, "getMainPage START: section='${request.name}' page=$page")
@@ -175,8 +172,6 @@ class ReplayZoneProvider : MainAPI() {
         }
     }
 
-    // ==================== search ====================
-
     override suspend fun search(query: String): List<SearchResponse> {
         Log.d(TAG, "search START: query='$query'")
         if (query.isBlank()) return emptyList()
@@ -192,8 +187,6 @@ class ReplayZoneProvider : MainAPI() {
             emptyList()
         }
     }
-
-    // ==================== load ====================
 
     override suspend fun load(url: String): LoadResponse? {
         Log.d(TAG, "load START: url='$url'")
@@ -212,15 +205,12 @@ class ReplayZoneProvider : MainAPI() {
         }
     }
 
-    // ==================== loadLinks ====================
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d(TAG, "loadLinks START")
 
         val loadData = try {
             parseJson<LoadData>(data)
@@ -229,7 +219,6 @@ class ReplayZoneProvider : MainAPI() {
             return false
         }
 
-        Log.d(TAG, "loadLinks: title='${loadData.title}' embeds=${loadData.embeds.size}")
         if (loadData.embeds.isEmpty()) {
             Log.e(TAG, "loadLinks: no embeds")
             return false
@@ -237,7 +226,6 @@ class ReplayZoneProvider : MainAPI() {
 
         var found = false
         for (embed in loadData.embeds) {
-            Log.d(TAG, "loadLinks: processing '${embed.label}' type=${embed.type} url=${embed.url}")
             try {
                 when {
                     // HLS type — direct m3u8 (may be soccerfull proxied through worker)
@@ -248,7 +236,6 @@ class ReplayZoneProvider : MainAPI() {
                         } else {
                             embed.url
                         }
-                        Log.d(TAG, "loadLinks: '${embed.label}' HLS -> $m3u8Url")
                         callback.invoke(
                             newExtractorLink(
                                 source = "$name - ${embed.label}",
@@ -264,7 +251,6 @@ class ReplayZoneProvider : MainAPI() {
 
                     // soccerfull.net/play/ — scrape the play page for m3u8 URL
                     embed.url.contains("soccerfull.net/play/") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' soccerfull play page — scraping for m3u8")
                         try {
                             val playRes = app.get(embed.url, timeout = 15_000L)
                             val playHtml = playRes.text
@@ -279,7 +265,6 @@ class ReplayZoneProvider : MainAPI() {
                                 }
                                 // Proxy through worker since soccerfull.net returns 403 directly
                                 val proxiedUrl = "$workerUrl/hls?u=${java.net.URLEncoder.encode(fullM3u8Url, "UTF-8")}"
-                                Log.d(TAG, "loadLinks: '${embed.label}' scraped m3u8 -> $proxiedUrl")
                                 callback.invoke(
                                     newExtractorLink(
                                         source = "$name - ${embed.label}",
@@ -301,14 +286,12 @@ class ReplayZoneProvider : MainAPI() {
 
                     // ok.ru — built-in extractor
                     embed.url.contains("ok.ru") || embed.url.contains("ok.ru/videoembed") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' ok.ru — loadExtractor")
                         val realUrl = if (embed.url.contains("videoembed")) {
                             embed.url.replace("videoembed/", "video/")
                         } else embed.url
                         val loaded = loadExtractor(realUrl, "$mainUrl/", subtitleCallback, callback)
                         if (loaded) {
                             found = true
-                            Log.d(TAG, "loadLinks: '${embed.label}' ok.ru resolved")
                         } else {
                             Log.e(TAG, "loadLinks: '${embed.label}' ok.ru loadExtractor failed")
                         }
@@ -316,14 +299,12 @@ class ReplayZoneProvider : MainAPI() {
 
                     // dailymotion — extract video ID and build direct URL
                     embed.url.contains("dailymotion.com") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' dailymotion")
                         val videoId = Regex("""video=([a-zA-Z0-9]+)""").find(embed.url)?.groupValues?.get(1)
                         if (videoId != null) {
                             val dmUrl = "https://www.dailymotion.com/video/$videoId"
                             val loaded = loadExtractor(dmUrl, "$mainUrl/", subtitleCallback, callback)
                             if (loaded) {
                                 found = true
-                                Log.d(TAG, "loadLinks: '${embed.label}' dailymotion resolved (id=$videoId)")
                             } else {
                                 Log.e(TAG, "loadLinks: '${embed.label}' dailymotion loadExtractor failed")
                             }
@@ -334,11 +315,9 @@ class ReplayZoneProvider : MainAPI() {
 
                     // bysesukior.com — try loadExtractor
                     embed.url.contains("bysesukior.com") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' bysesukior — loadExtractor")
                         val loaded = loadExtractor(embed.url, "$mainUrl/", subtitleCallback, callback)
                         if (loaded) {
                             found = true
-                            Log.d(TAG, "loadLinks: '${embed.label}' bysesukior resolved")
                         } else {
                             Log.e(TAG, "loadLinks: '${embed.label}' bysesukior loadExtractor failed")
                         }
@@ -346,7 +325,6 @@ class ReplayZoneProvider : MainAPI() {
 
                     // Direct m3u8 URLs
                     embed.url.contains(".m3u8") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' direct m3u8")
                         callback.invoke(
                             newExtractorLink(
                                 source = "$name - ${embed.label}",
@@ -360,7 +338,6 @@ class ReplayZoneProvider : MainAPI() {
 
                     // Direct mp4 URLs
                     embed.url.contains(".mp4") -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' direct mp4")
                         callback.invoke(
                             newExtractorLink(
                                 source = "$name - ${embed.label}",
@@ -374,7 +351,6 @@ class ReplayZoneProvider : MainAPI() {
 
                     // Fallback — try loadExtractor for any other URL
                     else -> {
-                        Log.d(TAG, "loadLinks: '${embed.label}' unknown — loadExtractor fallback")
                         val loaded = loadExtractor(embed.url, "$mainUrl/", subtitleCallback, callback)
                         if (loaded) {
                             found = true

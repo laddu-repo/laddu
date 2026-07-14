@@ -18,7 +18,7 @@ import kotlin.coroutines.resume
 
 class BinTVProvider : MainAPI() {
 
-    override var mainUrl = "https://www.bintv.net"
+    override var mainUrl = "https://www.bintv.cc"
     override var name = "BinTV"
     override var lang = "en"
     override val hasMainPage = true
@@ -146,7 +146,7 @@ class BinTVProvider : MainAPI() {
                         override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
                             super.onPageFinished(view, pageUrl)
                             if (resumed) return
-                            
+
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 if (!resumed) {
                                     webView.evaluateJavascript("(function() { return document.body ? document.body.innerText : document.documentElement.outerHTML; })()") { result ->
@@ -161,7 +161,7 @@ class BinTVProvider : MainAPI() {
                                             } else {
                                                 result
                                             }
-                                            
+
                                             try {
                                                 webView.destroy()
                                             } catch (e: Exception) {}
@@ -199,7 +199,6 @@ class BinTVProvider : MainAPI() {
                         }
                     }, 8000)
                 } catch (e: Exception) {
-                    println("BinTV: loadUrlViaWebView exception: ${e.message}")
                     try {
                         continuation.resume(null)
                     } catch (ex: Exception) {}
@@ -226,7 +225,6 @@ class BinTVProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("BinTV: failed to load extras - ${e.message}")
         }
 
         // Fetch BinTV matches
@@ -270,7 +268,6 @@ class BinTVProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            println("BinTV: failed to load bintvjson - ${e.message}")
         }
 
         // Apply extras
@@ -291,17 +288,13 @@ class BinTVProvider : MainAPI() {
         val ppvMatches = mutableListOf<EventLoadData>()
         val ppvHeaders = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-            "Referer" to "https://www.bintv.net/",
-            "Origin" to "https://www.bintv.net"
+            "Referer" to "https://www.bintv.cc/",
+            "Origin" to "https://www.bintv.cc"
         )
 
-        println("BinTV: Fetching PPV matches via loadUrlViaWebView...")
         val ppvText = loadUrlViaWebView("https://api.ppv.to/api/streams") ?: ""
-        println("BinTV: loadUrlViaWebView response length: ${ppvText.length}")
         if (ppvText.length > 500) {
-            println("BinTV: loadUrlViaWebView response snippet: ${ppvText.substring(0, 500)}")
         } else {
-            println("BinTV: loadUrlViaWebView response snippet: $ppvText")
         }
 
         if (ppvText.isNotBlank()) {
@@ -367,7 +360,6 @@ class BinTVProvider : MainAPI() {
                     }
                 }
             } catch (e: Exception) {
-                println("BinTV: failed to parse PPV JSON - ${e.message}")
             }
         }
 
@@ -612,22 +604,20 @@ class BinTVProvider : MainAPI() {
                                 val extractor = com.laddu100.EmbedIndiaExtractor(ctx)
                                 extractor.getUrl(
                                     url = embedUrl,
-                                    referer = "${embedHost ?: "https://bintv.net"}/",
+                                    referer = "${embedHost ?: "https://bintv.cc"}/",
                                     subtitleCallback = subtitleCallback,
                                     callback = callback
                                 )
                                 foundAny = true
                             } else {
-                                println("BinTV: EmbedIndiaExtractor failed - static context is null")
                             }
                         } catch (e: Exception) {
-                            println("BinTV: EmbedIndiaExtractor failed for $embedUrl - ${e.message}")
                         }
                     } else {
                         val fetchHeaders = mapOf(
                             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                            "Referer" to "${embedHost ?: "https://bintv.net"}/",
-                            "Origin" to (embedHost ?: "https://bintv.net")
+                            "Referer" to "${embedHost ?: "https://bintv.cc"}/",
+                            "Origin" to (embedHost ?: "https://bintv.cc")
                         )
 
                         var embedHtml = ""
@@ -638,11 +628,9 @@ class BinTVProvider : MainAPI() {
                                 embedHtml = app.get(embedUrl, headers = fetchHeaders, interceptor = cfInterceptor, timeout = 20L).text
                             }
                         } catch (fetchErr: Exception) {
-                            println("BinTV: Failed to fetch embed page $embedUrl - ${fetchErr.message}")
                             try {
                                 embedHtml = app.get(embedUrl, headers = fetchHeaders, interceptor = cfInterceptor, timeout = 20L).text
                             } catch (cfErr: Exception) {
-                                println("BinTV: Failed to fetch embed page with CloudflareKiller - ${cfErr.message}")
                             }
                         }
 
@@ -682,16 +670,14 @@ class BinTVProvider : MainAPI() {
                         // Fallback to loadExtractor
                         if (!foundM3u8) {
                             try {
-                                loadExtractor(embedUrl, "${embedHost ?: "https://bintv.net"}/", subtitleCallback, callback)
+                                loadExtractor(embedUrl, "${embedHost ?: "https://bintv.cc"}/", subtitleCallback, callback)
                                 foundAny = true
                             } catch (e: Exception) {
-                                println("BinTV: fallback loadExtractor failed for $embedUrl - ${e.message}")
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
-                println("BinTV: Failed to load stream link - ${e.message}")
             }
         }
 
@@ -719,7 +705,6 @@ class BinTVProvider : MainAPI() {
                             }
                         }
                     } catch (e: Exception) {
-                        println("BinTV: Proxy accept loop error - ${e.message}")
                     } finally {
                         try {
                             serverSocket?.close()
@@ -727,9 +712,7 @@ class BinTVProvider : MainAPI() {
                         serverSocket = null
                     }
                 }
-                println("BinTV: LocalProxy started on port $port")
             } catch (e: Exception) {
-                println("BinTV: LocalProxy start failed: ${e.message}")
             }
         }
 
@@ -899,7 +882,6 @@ class BinTVProvider : MainAPI() {
                     out.flush()
                 }
             } catch (e: Exception) {
-                println("BinTV: Proxy error - ${e.message}")
             } finally {
                 try {
                     socket.shutdownOutput()

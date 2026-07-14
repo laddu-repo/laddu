@@ -40,23 +40,6 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.coroutines.resume
 
-// ════════════════════════════════════════════════════════════════════════════
-//  Senshi Cloudflare Bypass — Safety Net
-//  ════════════════════════════════════════════════════════════════════════════
-//
-//  Architecture (phisher/CinemaCity/AnimePhare method, improved):
-//
-//  1. SenshiCFStore     — persistent cookie/UA storage with TTL (SharedPreferences)
-//  2. SenshiCFDialog    — BottomSheet WebView that solves the CF challenge
-//  3. cfGet()/cfPost()  — request wrappers: try → detect block → bypass → retry
-//  4. cfBypassMutex     — prevents multiple concurrent bypass dialogs
-//
-//  NOTE: senshi.live APIs are normally NOT Cloudflare-protected (GET endpoints
-//  return 200 directly, POST search works with browser headers). This bypass
-//  is a SAFETY NET that triggers only when CF actually blocks (rate-limit or
-//  future protection tightening). On normal phone usage it never fires.
-// ════════════════════════════════════════════════════════════════════════════
-
 private const val CF_TAG = "Senshi_CFBypass"
 
 // Phrases that indicate a Cloudflare challenge page
@@ -71,8 +54,6 @@ private val CF_CHALLENGE_TITLES = listOf(
     "just a moment", "just a moment...", "checking your browser",
     "attention required", "ddos-guard", "one more step", "senshi.live"
 )
-
-// ─── Persistent Cookie/UA Storage with TTL ─────────────────────────────────
 
 private object SenshiCFStore {
     private const val PREFS_NAME = "SenshiCFBypass"
@@ -95,14 +76,12 @@ private object SenshiCFStore {
             cachedUA = prefs?.getString(KEY_UA, null)
             cachedHost = prefs?.getString(KEY_HOST, null)
             cachedTimestamp = prefs?.getLong(KEY_TIMESTAMP, 0L) ?: 0L
-            Log.d(CF_TAG, "Init: stored cookies present=${!cachedCookies.isNullOrBlank()}, host=$cachedHost")
         }
     }
 
     fun getCookies(): String? {
         if (cachedCookies.isNullOrBlank()) return null
         if (System.currentTimeMillis() - cachedTimestamp > COOKIE_TTL_MS) {
-            Log.d(CF_TAG, "Stored cookies expired (age=${(System.currentTimeMillis() - cachedTimestamp) / 1000}s)")
             clear()
             return null
         }
@@ -123,7 +102,6 @@ private object SenshiCFStore {
             putString(KEY_HOST, host)
             putLong(KEY_TIMESTAMP, cachedTimestamp)
         }?.apply()
-        Log.d(CF_TAG, "Saved CF cookies for $host (UA=${userAgent.take(40)}...)")
     }
 
     fun clear() {
@@ -134,8 +112,6 @@ private object SenshiCFStore {
         prefs?.edit()?.clear()?.apply()
     }
 }
-
-// ─── Cloudflare Detection ──────────────────────────────────────────────────
 
 fun isCloudflareBlocked(response: NiceResponse): Boolean {
     if (response.code != 403 && response.code != 503) return false
@@ -148,11 +124,7 @@ private fun isChallengeTitle(title: String): Boolean {
     return CF_CHALLENGE_TITLES.any { lower.contains(it) }
 }
 
-// ─── Mutex (prevent multiple concurrent bypass dialogs) ────────────────────
-
 private val cfBypassMutex = Mutex()
-
-// ─── Cloudflare WebView Dialog (phisher/CinemaCity method) ─────────────────
 
 class SenshiCFDialog(
     private val targetUrl: String,
@@ -185,7 +157,6 @@ class SenshiCFDialog(
             if (cookiesSaved || !isAdded) return
             CookieManager.getInstance().flush()
             val cookieStr = CookieManager.getInstance().getCookie(targetHost) ?: ""
-            Log.d(CF_TAG, "Poll [${pollElapsedMs}ms] cookies for $targetHost -> ${cookieStr.take(80)}")
 
             when {
                 cookieStr.contains("cf_clearance") -> saveCookiesAndDismiss(cookieStr)
@@ -365,7 +336,6 @@ class SenshiCFDialog(
         val ua = webView?.settings?.userAgentString ?: ""
         SenshiCFStore.save(cookieStr, ua, targetHost)
 
-        Log.d(CF_TAG, "Saved cookies: ${cookieStr.take(80)}")
         updateStatus("Done! Cookies saved.")
 
         webView?.postDelayed({
@@ -407,8 +377,6 @@ class SenshiCFDialog(
     }
 }
 
-// ─── Show CF Bypass Dialog (suspend) ───────────────────────────────────────
-
 private suspend fun showCFBypassDialogAndWait(url: String): Boolean = withContext(Dispatchers.Main) {
     val activity = CommonActivity.activity as? AppCompatActivity
     if (activity == null || activity.isFinishing || activity.isDestroyed) {
@@ -428,8 +396,6 @@ private suspend fun showCFBypassDialogAndWait(url: String): Boolean = withContex
         cont.invokeOnCancellation { dialog.dismissAllowingStateLoss() }
     }
 }
-
-// ─── Build headers with stored CF cookies + browser fingerprint ────────────
 
 internal fun buildSenshiHeaders(extra: Map<String, String> = emptyMap()): Map<String, String> {
     val h = extra.toMutableMap()
@@ -453,15 +419,6 @@ internal fun buildSenshiHeaders(extra: Map<String, String> = emptyMap()): Map<St
     }
     return h
 }
-
-// ─── Main Entry Point: cfGet() ─────────────────────────────────────────────
-//
-//  Wraps app.get() with automatic Cloudflare bypass:
-//  1. Use stored CF cookies + UA if available
-//  2. If response is CF-blocked -> show bypass dialog -> retry
-//  3. Mutex ensures only one dialog shows at a time
-//  4. Up to 2 retry attempts after bypass
-// ════════════════════════════════════════════════════════════════════════════
 
 internal suspend fun cfGet(
     url: String,
@@ -488,7 +445,6 @@ internal suspend fun cfGet(
         // Double-check: another coroutine may have bypassed while we waited
         val cachedCookies = SenshiCFStore.getCookies()
         if (cachedCookies != null && SenshiCFStore.getHost() == targetHost) {
-            Log.d(CF_TAG, "Cookies refreshed by another coroutine -> retrying")
             response = try { app.get(url, headers = buildSenshiHeaders(headers), timeout = timeout) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) return response
         }
@@ -504,7 +460,6 @@ internal suspend fun cfGet(
 
         // Retry with new cookies (up to 2 attempts)
         for (attempt in 1..2) {
-            Log.d(CF_TAG, "Retrying with new CF cookies (attempt $attempt)")
             response = try { app.get(url, headers = buildSenshiHeaders(headers), timeout = timeout) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) {
                 Log.d(CF_TAG, "Request succeeded after CF bypass (attempt $attempt)")
@@ -516,8 +471,6 @@ internal suspend fun cfGet(
 
     return response
 }
-
-// ─── cfPost() for the search endpoint (POST /anime/filter) ─────────────────
 
 internal suspend fun cfPost(
     url: String,
@@ -551,7 +504,6 @@ internal suspend fun cfPost(
     cfBypassMutex.withLock {
         val cachedCookies = SenshiCFStore.getCookies()
         if (cachedCookies != null && SenshiCFStore.getHost() == targetHost) {
-            Log.d(CF_TAG, "Cookies refreshed by another coroutine -> retrying POST")
             response = try {
                 val reqBody = body.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
                 app.post(url, requestBody = reqBody, headers = fullHeaders, timeout = timeout)
@@ -568,7 +520,6 @@ internal suspend fun cfPost(
         }
 
         for (attempt in 1..2) {
-            Log.d(CF_TAG, "Retrying POST with new CF cookies (attempt $attempt)")
             // Rebuild headers to pick up new cookies
             val retryHeaders = buildSenshiHeaders(headers).toMutableMap().apply {
                 if (!containsKey("Content-Type")) {
@@ -589,8 +540,6 @@ internal suspend fun cfPost(
 
     return response
 }
-
-// ─── Initialization ────────────────────────────────────────────────────────
 
 internal fun initSenshiCFBypass(context: Context) {
     try {

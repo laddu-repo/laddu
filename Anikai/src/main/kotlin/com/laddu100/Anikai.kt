@@ -236,8 +236,6 @@ class Anikai : MainAPI() {
     //  completely separate streams on the host (different m3u8, different
     //  audio track — verified by extracting and comparing audio MD5s).
     //
-    //  FIX: We use a DIRECT CSS ATTRIBUTE SELECTOR — the same pattern used
-    //  by the working AnimeKai.to reference plugin:
     //    doc.select("div.server-items[data-id=$type] span.server-video")
     //
     //  This is more reliable in Jsoup than .select().filter{} because it
@@ -284,7 +282,6 @@ class Anikai : MainAPI() {
             val isDub = type == "dub"
             val label = "$serverName (${if (isDub) "Dub" else "Sub"})"
 
-            // Step 1: extract subtitle URL from embed query string
             try {
                 val urlObj = URL(embedUrl)
                 val query = urlObj.query ?: ""
@@ -297,7 +294,6 @@ class Anikai : MainAPI() {
                 }
             } catch (_: Exception) {}
 
-            // Step 2: resolve the embed URL to a playable m3u8/mp4
             try {
                 when {
                     embedUrl.contains("vivibebe.site") || embedUrl.contains("bibiemb.xyz") -> {

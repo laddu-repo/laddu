@@ -99,7 +99,7 @@ open class AnizenMegaPlay(private val sourceName: String = "MegaPlay") : Extract
                 ?: return@runCatching
             val response = app.get("$domain/stream/getSources?id=$id", headers = headers).parsedSafe<Response>()
                 ?: return@runCatching
-            
+
             val sourcesNode = response.sources
             val m3u8 = when {
                 sourcesNode == null -> null
@@ -211,4 +211,4 @@ open class AnizenAbyss : ExtractorApi() {
 class AnizenRyzex : AnizenAbyss() {
     override var name = "Ryzex"
     override var mainUrl = "https://ryzex.top"
-} 
+}

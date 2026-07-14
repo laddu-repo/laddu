@@ -1,5 +1,7 @@
 package com.laddu100
 
+import com.lagradost.api.Log
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
@@ -68,12 +70,10 @@ class AnimetsuProvider : MainAPI() {
         "upcoming" to "Upcoming"
     )
 
-    // ── API helper ──────────────────────────────────────────────────────────
     private suspend fun apiGet(url: String): String {
         return app.get(url, headers = headers).text
     }
 
-    // ── Homepage ────────────────────────────────────────────────────────────
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val items = try {
             if (request.data == "recent") {
@@ -94,14 +94,13 @@ class AnimetsuProvider : MainAPI() {
                 list?.mapNotNull { it.toSearchResponse() } ?: emptyList()
             }
         } catch (e: Exception) {
-            println("Animetsu: getMainPage '${request.data}' failed - ${e.message}")
+            Log.d("Animetsu", "Animetsu: getMainPage '${request.data}' failed - ${e.message}")
             emptyList()
         }
         val hasNext = request.data == "recent" // only recent is paginated
         return newHomePageResponse(request.name, items, hasNext = hasNext)
     }
 
-    // ── Search ──────────────────────────────────────────────────────────────
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
         return try {
@@ -109,22 +108,19 @@ class AnimetsuProvider : MainAPI() {
             val resp = parseJson<PaginatedResponse>(apiGet("$apiBase/search/?query=$encoded"))
             resp.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
         } catch (e: Exception) {
-            println("Animetsu: search '$query' failed - ${e.message}")
+            Log.d("Animetsu", "Animetsu: search '$query' failed - ${e.message}")
             emptyList()
         }
     }
 
-    // ── Load ────────────────────────────────────────────────────────────────
     override suspend fun load(url: String): LoadResponse? {
         // Extract anime ID from URL. CloudStream may pass the full URL or just the ID.
         val animeId = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: return null
-        println("Animetsu: load animeId=$animeId")
 
         // Fetch anime info
         val info = try {
             parseJson<AnimeInfo>(apiGet("$apiBase/info/$animeId"))
         } catch (e: Exception) {
-            println("Animetsu: info fetch failed - ${e.message}")
             return null
         }
 
@@ -140,10 +136,10 @@ class AnimetsuProvider : MainAPI() {
         val eps = try {
             parseJson<List<EpisodeItem>>(apiGet("$apiBase/eps/$animeId"))
         } catch (e: Exception) {
-            println("Animetsu: episodes fetch failed - ${e.message}")
+            Log.d("Animetsu", "Animetsu: episodes fetch failed - ${e.message}")
             emptyList()
         }
-        println("Animetsu: ${eps.size} episodes found")
+        Log.d("Animetsu", "Animetsu: ${eps.size} episodes found")
 
         // PERF: Skip the dub-availability check during load().
         // Previously this made 1 + N sequential API calls (servers + oppai per
@@ -185,7 +181,6 @@ class AnimetsuProvider : MainAPI() {
         }
     }
 
-    // ── Load Links ──────────────────────────────────────────────────────────
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -206,16 +201,12 @@ class AnimetsuProvider : MainAPI() {
         val epNum = parts[2]
         val sourceType = parts[3] // "sub" or "dub"
 
-        println("Animetsu: loadLinks animeId=$animeId ep=$epNum type=$sourceType")
-
         // Fetch available servers (kite, dio, sage, meg)
         val servers = try {
             parseJson<List<ServerItem>>(apiGet("$apiBase/servers/$animeId/$epNum"))
         } catch (e: Exception) {
-            println("Animetsu: servers fetch failed - ${e.message}")
             return false
         }
-        println("Animetsu: ${servers.size} servers available")
 
         var found = false
         val displayType = if (sourceType == "dub") "DUB" else "SUB"
@@ -316,16 +307,14 @@ class AnimetsuProvider : MainAPI() {
                     subtitleCallback.invoke(newSubtitleFile(sub.lang ?: "English", fullSubUrl))
                 }
             } catch (e: Exception) {
-                println("Animetsu: server ${server.id} failed - ${e.message}")
+                Log.d("Animetsu", "Animetsu: server ${server.id} failed - ${e.message}")
             }
         }
 
-        println("Animetsu: loadLinks result found=$found")
+        Log.d("Animetsu", "Animetsu: loadLinks result found=$found")
         return found
     }
 
-
-    // ── Search response helper ──────────────────────────────────────────────
     private fun AnimeItem.toSearchResponse(): SearchResponse? {
         val name = title?.english ?: title?.romaji ?: title?.native ?: return null
         val poster = coverImage?.large ?: coverImage?.medium ?: coverImage?.small
@@ -334,7 +323,6 @@ class AnimetsuProvider : MainAPI() {
         }
     }
 
-    // ── Data classes ────────────────────────────────────────────────────────
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class Title(
         @JsonProperty("romaji") val romaji: String? = null,

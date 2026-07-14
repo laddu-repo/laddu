@@ -1,4 +1,5 @@
 package com.laddu100
+import android.util.Log
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
@@ -40,8 +41,6 @@ class MovishProvider : MainAPI() {
         }
         throw exception ?: Exception("Retry failed")
     }
-
-    // ==================== HOME PAGE CATEGORIES ====================
 
     override val mainPage = mainPageOf(
         // Core Feeds
@@ -91,7 +90,7 @@ class MovishProvider : MainAPI() {
         val items = document.select("div.relative.group.overflow-hidden").mapNotNull { div ->
             val link = div.selectFirst("a[href]") ?: return@mapNotNull null
             val href = fixUrl(link.attr("href"))
-            
+
             val img = link.selectFirst("img") ?: return@mapNotNull null
             val title = img.attr("alt").trim().ifEmpty {
                 div.selectFirst("h3")?.text()?.trim() ?: ""
@@ -112,8 +111,6 @@ class MovishProvider : MainAPI() {
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
-    // ==================== SEARCH ====================
-
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=${URLEncoder.encode(query, "UTF-8")}"
         val document = retry { app.get(url, headers = headersMap, timeout = 60L).document }
@@ -121,7 +118,7 @@ class MovishProvider : MainAPI() {
         return document.select("div.relative.group.overflow-hidden").mapNotNull { div ->
             val link = div.selectFirst("a[href]") ?: return@mapNotNull null
             val href = fixUrl(link.attr("href"))
-            
+
             val img = link.selectFirst("img") ?: return@mapNotNull null
             val title = img.attr("alt").trim().ifEmpty {
                 div.selectFirst("h3")?.text()?.trim() ?: ""
@@ -140,17 +137,14 @@ class MovishProvider : MainAPI() {
         }
     }
 
-    // ==================== LOAD DETAILS ====================
-
     override suspend fun load(url: String): LoadResponse {
-        // --- Standard VOD handling ---
         val document = retry { app.get(url, headers = headersMap, timeout = 60L).document }
         val isSeries = url.contains("/tv-show/")
 
         // Retrieve local details
         val title = document.selectFirst("h1")?.text()?.trim()
             ?: document.selectFirst("h2")?.text()?.trim().orEmpty()
-        
+
         val plotLocal = document.selectFirst("p.text-gray-300")?.text()?.trim().orEmpty()
         val posterLocal = document.selectFirst("div.movie-showcase img")?.attr("src")
             ?: document.selectFirst("img[alt=\"$title\"]")?.attr("src").orEmpty()
@@ -174,7 +168,7 @@ class MovishProvider : MainAPI() {
                         val match = Regex("""moviebox-embed/tv/(\d+)""").find(epIframeSrc)
                         tmdbId = match?.groupValues?.get(1)
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
             }
         }
 
@@ -211,7 +205,7 @@ class MovishProvider : MainAPI() {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
             }
         }
 
@@ -281,8 +275,6 @@ class MovishProvider : MainAPI() {
             }
         }
     }
-
-    // ==================== LOAD LINKS ====================
 
     override suspend fun loadLinks(
         data: String,
@@ -371,10 +363,10 @@ class MovishProvider : MainAPI() {
                                             )
                                         )
                                     }
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                             }
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                 } else {
                     // Call standard extractor for external sources (Shadow -> vidlink.pro, Cine -> cinesrc.st)
                     try {
@@ -382,7 +374,7 @@ class MovishProvider : MainAPI() {
                         if (loaded) {
                             count++
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                 }
             }
         }
@@ -426,14 +418,14 @@ class MovishProvider : MainAPI() {
                                 }
                             }
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                 } else {
                     try {
                         val loaded = loadExtractor(embedUrl, "https://movish.net/", subtitleCallback, callback)
                         if (loaded) {
                             count++
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                 }
             }
         }
@@ -441,11 +433,9 @@ class MovishProvider : MainAPI() {
         return count > 0
     }
 
-    // ==================== METADATA RESOLUTION HELPERS ====================
-
     private suspend fun fetchImdbId(tmdbId: String, isSeries: Boolean): String? {
         val type = if (isSeries) "tv" else "movie"
-        val apiKey = "1865f43a0549ca50d341dd9ab8b29f49"
+        val apiKey = BuildConfig.TMDB_KEY
         val url = "https://api.themoviedb.org/3/$type/$tmdbId/external_ids?api_key=$apiKey"
         return try {
             val res = retry { app.get(url, headers = headersMap, timeout = 30L) }

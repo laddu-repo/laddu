@@ -1,4 +1,5 @@
 package com.torrentsv1
+import android.util.Log
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -17,12 +18,10 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 private const val ANILIST_URL = "https://graphql.anilist.co"
 private const val ANIZIP_API = "https://api.ani.zip"
 private const val TMDB_API = "https://api.themoviedb.org/3"
-private const val TMDB_KEY = "1865f43a0549ca50d341dd9ab8b29f49"
+private val TMDB_KEY get() = BuildConfig.TMDB_KEY
 private const val TMDB_IMG = "https://image.tmdb.org/t/p/w500"
 private const val TMDB_IMG_ORIG = "https://image.tmdb.org/t/p/original"
 private const val CINEMETA = "https://cinemeta-catalogs.strem.io"
@@ -55,14 +54,14 @@ internal fun getSetting(key: String, default: Boolean): Boolean =
     try { CloudStreamApp.getKey(key) ?: default } catch (_: Throwable) { default }
 
 internal fun setSetting(key: String, value: Boolean) {
-    try { CloudStreamApp.setKey(key, value) } catch (_: Throwable) {}
+    try { CloudStreamApp.setKey(key, value) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
 }
 
 internal fun getStringSetting(key: String): String =
     try { CloudStreamApp.getKey<String>(key) ?: "" } catch (_: Throwable) { "" }
 
 internal fun setStringSetting(key: String, value: String) {
-    try { CloudStreamApp.setKey(key, value) } catch (_: Throwable) {}
+    try { CloudStreamApp.setKey(key, value) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
 }
 
 internal fun getStremioAddons(): List<StremioAddon> {
@@ -76,12 +75,10 @@ internal fun getStremioAddons(): List<StremioAddon> {
 
 internal fun saveStremioAddons(addons: List<StremioAddon>) {
     val raw = if (addons.isEmpty()) "" else addons.joinToString("\n") { "${it.name}|${it.url}|${it.type}" }
-    try { CloudStreamApp.setKey(KEY_STREMIO_ADDONS, raw) } catch (_: Throwable) {}
+    try { CloudStreamApp.setKey(KEY_STREMIO_ADDONS, raw) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
 }
 
 data class StremioAddon(val name: String, val url: String, val type: String)
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 private fun buildMagnet(infoHash: String?, fileIdx: Int?, sourceTrackers: List<String>?): String? {
     if (infoHash.isNullOrBlank()) return null
@@ -135,8 +132,6 @@ private suspend fun tmdbGet(path: String): String {
     val sep = if (path.contains("?")) "&" else "?"
     return app.get("$TMDB_API$path${sep}api_key=$TMDB_KEY").text
 }
-
-// ─── Data Classes ────────────────────────────────────────────────────────────
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class StremioStreamResponse(val streams: List<StremioStream>? = null)
@@ -220,8 +215,6 @@ data class LinkData(
     val season: Int? = null, val year: Int? = null, val format: String? = null
 )
 
-// ─── Queries ─────────────────────────────────────────────────────────────────
-
 private val ANILIST_HOMEPAGE = """
     query (${'$'}page: Int, ${'$'}perPage: Int, ${'$'}sort: [MediaSort], ${'$'}genreIn: [String], ${'$'}format: MediaFormat) {
         Page(page: ${'$'}page, perPage: ${'$'}perPage) {
@@ -253,8 +246,6 @@ private val ANILIST_INFO = """
         }
     }
 """.trimIndent()
-
-// ─── Provider ────────────────────────────────────────────────────────────────
 
 class TorrentsV1 : MainAPI() {
     override var mainUrl = "https://graphql.anilist.co"
@@ -323,7 +314,6 @@ class TorrentsV1 : MainAPI() {
                 else -> emptyList()
             }
         } catch (e: Exception) {
-            println("TorrentsV1: getMainPage ${request.data} failed - ${e.message}")
             emptyList()
         }
         return newHomePageResponse(request.name, items)
@@ -423,7 +413,7 @@ class TorrentsV1 : MainAPI() {
                             anilistQuery(ANILIST_SEARCH, mapOf("search" to query, "page" to 1, "perPage" to 15))
                         )
                         response.data?.Page?.media?.mapNotNull { it.toSearchResponse() }?.let { results.addAll(it) }
-                    } catch (_: Throwable) {}
+                    } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
                 }
             },
             {
@@ -436,7 +426,7 @@ class TorrentsV1 : MainAPI() {
                                 item.toSearchResponse(type)?.let { results.add(it) }
                             }
                         }
-                    } catch (_: Throwable) {}
+                    } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
                 }
             }
         )
@@ -627,8 +617,6 @@ class TorrentsV1 : MainAPI() {
         }
     }
 
-    // ── Load Links ───────────────────────────────────────────────────────────
-
     override suspend fun loadLinks(
         data: String, isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -652,10 +640,10 @@ class TorrentsV1 : MainAPI() {
         val hasDebrid = debridProvider.isNotBlank() && debridKey.isNotBlank() && debridProvider != "None"
 
         runAllAsync(
-            { if (torrentioOn) try { invokeTorrentio(stremioId, linkData, isMovie, hasDebrid, debridProvider, debridKey, callback) } catch (_: Throwable) {} },
-            { if (torrentsDbOn) try { invokeTorrentsDB(stremioId, linkData, isMovie, callback) } catch (_: Throwable) {} },
-            { if (animetoshoOn && linkData.source == "anilist") try { invokeAnimetosho(linkData, callback) } catch (_: Throwable) {} },
-            { try { invokeCustomStremioAddons(addons, stremioId, linkData, isMovie, subtitleCallback, callback) } catch (_: Throwable) {} }
+            { if (torrentioOn) try { invokeTorrentio(stremioId, linkData, isMovie, hasDebrid, debridProvider, debridKey, callback) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } } },
+            { if (torrentsDbOn) try { invokeTorrentsDB(stremioId, linkData, isMovie, callback) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } } },
+            { if (animetoshoOn && linkData.source == "anilist") try { invokeAnimetosho(linkData, callback) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } } },
+            { try { invokeCustomStremioAddons(addons, stremioId, linkData, isMovie, subtitleCallback, callback) } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } } }
         )
         return true
     }
@@ -728,7 +716,7 @@ class TorrentsV1 : MainAPI() {
                     "$base/stream/series/$id:${linkData.season ?: 1}:${linkData.episode}.json"
                 }
                 fetchStremioStreamsUniversal(addon.name, url, subtitleCallback, callback)
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
         }
     }
 
@@ -802,7 +790,7 @@ class TorrentsV1 : MainAPI() {
                                 streamUrl = location
                             }
                         }
-                    } catch (_: Throwable) {}
+                    } catch (e: Throwable) { e.message?.let { Log.d("Plugin", it) } }
                 }
                 val bh = stream.behaviorHints
                 val headers = mutableMapOf<String, String>()

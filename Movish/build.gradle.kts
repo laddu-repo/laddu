@@ -20,4 +20,7 @@ android {
         buildConfig = true
         viewBinding = false
     }
+    defaultConfig {
+        buildConfigField("String", "TMDB_KEY", "\"1865f43a0549ca50d341dd9ab8b29f49\"")
+    }
 }

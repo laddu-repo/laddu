@@ -34,8 +34,8 @@ class NineAnime : MainAPI() {
         val anime = items.mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
             val href = a.attr("href")
-            val title = element.selectFirst(".entry-title")?.text() 
-                ?: element.selectFirst("h2")?.text() 
+            val title = element.selectFirst(".entry-title")?.text()
+                ?: element.selectFirst("h2")?.text()
                 ?: a.text()
             val posterUrl = element.selectFirst("img")?.attr("src")
 
@@ -54,8 +54,8 @@ class NineAnime : MainAPI() {
         return items.mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
             val href = a.attr("href")
-            val title = element.selectFirst(".entry-title")?.text() 
-                ?: element.selectFirst("h2")?.text() 
+            val title = element.selectFirst(".entry-title")?.text()
+                ?: element.selectFirst("h2")?.text()
                 ?: a.text()
             val posterUrl = element.selectFirst("img")?.attr("src")
 
@@ -80,10 +80,10 @@ class NineAnime : MainAPI() {
         }
 
         val doc = app.get(detailUrl).document
-        val title = doc.selectFirst("h1.entry-title")?.text() 
-            ?: doc.selectFirst("h1")?.text() 
+        val title = doc.selectFirst("h1.entry-title")?.text()
+            ?: doc.selectFirst("h1")?.text()
             ?: "Unknown"
-        
+
         // Poster
         val posterUrl = doc.selectFirst(".thumb img")?.attr("src")
             ?: doc.selectFirst(".poster img")?.attr("src")
@@ -96,7 +96,7 @@ class NineAnime : MainAPI() {
 
         // Metadata
         val tags = doc.select(".genxed a").map { it.text() }
-        
+
         val statusText = doc.selectFirst(".info-content")?.text() ?: ""
         val showStatus = when {
             statusText.contains("Ongoing", ignoreCase = true) -> ShowStatus.Ongoing
@@ -142,13 +142,13 @@ class NineAnime : MainAPI() {
         episodesList.reverse()
 
         val isDub = title.contains("(Dub)", ignoreCase = true) || detailUrl.contains("-dub", ignoreCase = true)
-        
+
         return newAnimeLoadResponse(title, detailUrl, tvType) {
             this.posterUrl = posterUrl
             this.plot = plot
             this.tags = tags
             this.showStatus = showStatus
-            
+
             if (isDub) {
                 addEpisodes(DubStatus.Dubbed, episodesList)
             } else {

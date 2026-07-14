@@ -43,7 +43,6 @@ class StreamEastProvider : MainAPI() {
             }
             isUrlLoaded = true
         } catch (e: Exception) {
-            println("StreamEast: Failed to load Firebase URL - ${e.message}")
         }
     }
 
@@ -114,7 +113,6 @@ class StreamEastProvider : MainAPI() {
             .build()
     }
 
-    // ── Helper to resolve IPs dynamically using Cloudflare DoH (directly via 1.1.1.1 IP) ────
     private fun resolveDnsDoH(hostname: String): List<InetAddress> {
         try {
             val request = Request.Builder()
@@ -134,7 +132,6 @@ class StreamEastProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("StreamEast: DoH resolution failed for $hostname - ${e.message}")
         }
 
         return emptyList()
@@ -168,9 +165,7 @@ class StreamEastProvider : MainAPI() {
                 if (validate(html)) {
                     return html
                 }
-                println("StreamEast: Validation failed on attempt ${attempts + 1} for $url")
             } catch (e: Exception) {
-                println("StreamEast: Attempt ${attempts + 1} failed for $url - ${e.message}")
             }
             attempts++
             if (attempts < maxAttempts) {
@@ -210,8 +205,6 @@ class StreamEastProvider : MainAPI() {
         }
     }
 
-    // ── Data classes ──────────────────────────────────────────────────────────
-
     data class EventLoadData(
         val title: String,
         val url: String,
@@ -229,8 +222,6 @@ class StreamEastProvider : MainAPI() {
         val url: String // Represents stream ID
     )
 
-    // ── Main Page ─────────────────────────────────────────────────────────────
-
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
@@ -242,7 +233,7 @@ class StreamEastProvider : MainAPI() {
 
         try {
             val html = customGetWithRetry("$mainUrl/v52") { it.contains("f1-podium--link") }
-            
+
             // Extract event links matching f1-podium--link class in a robust way
             val aTagRegex = """<a\s+([^>]+)>(.*?)</a>""".toRegex(RegexOption.DOT_MATCHES_ALL)
             val hrefRegex = """href="([^"]+)"""".toRegex()
@@ -256,7 +247,7 @@ class StreamEastProvider : MainAPI() {
                     val hrefMatch = hrefRegex.find(attrs)
                     val href = hrefMatch?.groupValues?.get(1) ?: return@forEach
                     val cleanUrl = if (href.startsWith("http")) href else "$mainUrl${if (href.startsWith("/")) "" else "/"}$href"
-                    
+
                     val cleanText = stripHtml(body)
 
                     if (cleanText.isNotBlank()) {
@@ -307,7 +298,6 @@ class StreamEastProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("StreamEast: Failed to load main page - ${e.message}")
         }
 
         if (liveItems.isNotEmpty()) {
@@ -337,8 +327,6 @@ class StreamEastProvider : MainAPI() {
         return newHomePageResponse(lists, hasNext = false)
     }
 
-    // ── Search ────────────────────────────────────────────────────────────────
-
     override suspend fun search(query: String): List<SearchResponse> {
         loadFirebaseUrl()
         val results = mutableListOf<SearchResponse>()
@@ -352,12 +340,9 @@ class StreamEastProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("StreamEast: Search failed - ${e.message}")
         }
         return results
     }
-
-    // ── Load ──────────────────────────────────────────────────────────────────
 
     override suspend fun load(url: String): LoadResponse {
         loadFirebaseUrl()
@@ -395,7 +380,6 @@ class StreamEastProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("StreamEast: Load failed to query event page - ${e.message}")
         }
 
         val streamData = StreamLoadData(title, streamsList)
@@ -405,8 +389,6 @@ class StreamEastProvider : MainAPI() {
             this.dataUrl = streamData.toJson()
         }
     }
-
-    // ── Load Links ────────────────────────────────────────────────────────────
 
     override suspend fun loadLinks(
         data: String,
@@ -418,7 +400,6 @@ class StreamEastProvider : MainAPI() {
         val streamData = try {
             parseJson<StreamLoadData>(data)
         } catch (e: Exception) {
-            println("StreamEast: loadLinks parse error - ${e.message}")
             return false
         }
 
@@ -429,9 +410,9 @@ class StreamEastProvider : MainAPI() {
                 // Fetch the master playlist using custom OkHttp client (supporting DoH)
                 val playlistUrl = "https://chatgpt.hereisman.net/playlist/${stream.url}/load-playlist"
                 val refererUrl = "https://gooz.aapmains.net/new-stream-embed/${stream.url}?ad=111"
-                
+
                 val responseText = customGet(playlistUrl, referer = refererUrl)
-                
+
                 // Parse the sub-stream playlist URL from the master playlist response
                 val subStreamMatch = """(https?://[^\s]+)""".toRegex().find(responseText)
                 val finalUrl = subStreamMatch?.groupValues?.get(1) ?: playlistUrl
@@ -447,7 +428,6 @@ class StreamEastProvider : MainAPI() {
                     }
                 )
             } catch (e: Exception) {
-                println("StreamEast: Failed to resolve link for ${stream.name} - ${e.message}")
             }
         }
 

@@ -505,9 +505,6 @@ class TheMoviesFlix : MainAPI() {
     // ============================================================
     //  Helper: Fetch nexdrive page and extract download links for a SPECIFIC episode
     // ============================================================
-    //  The nexdrive page has h4 headings like "-:Episodes: N:-" followed by
-    //  a <p> tag with download links. This function finds the links for the
-    //  requested episode number.
     //
     private suspend fun resolveNexdriveEpisodeLinks(url: String, episodeNum: Int): List<String> {
         return try {
@@ -564,11 +561,9 @@ class TheMoviesFlix : MainAPI() {
     //  and extract the actual download links
     // ============================================================
     //
-    //  IMPORTANT: The site uses TWO redirect domains:
     //    - nexdrive.fit   → returns 200, works fine
     //    - mobilejsr.rest → returns 403 Cloudflare challenge, BLOCKED
     //  Both serve the SAME content for the same /genxfm.../ path.
-    //  Fix: rewrite mobilejsr.rest URLs to nexdrive.fit before fetching.
     //
     private suspend fun resolveRedirectPage(url: String): List<String> {
         return try {
@@ -607,7 +602,6 @@ class TheMoviesFlix : MainAPI() {
     //  The nexdrive page links to either:
     //    - fastdl.zip/embed.php?download=...  (works, returns reurl)
     //    - fastdl.zip/embed?download=...      (returns "File Deleted" error)
-    //  Fix: normalize /embed? → /embed.php? before fetching.
     //
     private suspend fun resolveFastDl(url: String): String? {
         return try {

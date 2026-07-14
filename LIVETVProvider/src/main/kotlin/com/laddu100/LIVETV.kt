@@ -66,7 +66,7 @@ class LIVETV(
         const val EXT_INF = "#EXTINF"
         const val EXT_VLC_OPT = "#EXTVLCOPT"
     }
-    
+
     override var lang = "ta"
     override var mainUrl = customMainUrl
     override var name = customName
@@ -88,11 +88,42 @@ class LIVETV(
     }
 
     private suspend fun getWithCustomHeaders(url: String): String {
+        val dynamicHeaders = headers.toMutableMap()
+        var hasCustomHeaders = false
+        val finalUrl: String
+
+        if (!url.contains("|")) {
+            finalUrl = url
+        } else {
+            val parts = url.split("|", limit = 2)
+            finalUrl = parts[0]
+            val headersPart = parts.getOrNull(1).orEmpty()
+            headersPart.split("&").forEach { pair ->
+                val kv = pair.split("=", limit = 2)
+                if (kv.size == 2) {
+                    val key = kv[0].trim()
+                    val value = kv[1].trim()
+                    val existingKey = dynamicHeaders.keys.firstOrNull { it.equals(key, ignoreCase = true) }
+                    if (existingKey != null) dynamicHeaders.remove(existingKey)
+                    dynamicHeaders[key] = value
+                    hasCustomHeaders = true
+                }
+            }
+        }
+
         val request = Request.Builder()
-            .url(url)
+            .url(finalUrl)
             .build()
 
-        return customHttpClient.newCall(request).execute().use { response ->
+        val client = if (hasCustomHeaders) {
+            OkHttpClient.Builder()
+                .addInterceptor(HeaderReplacementInterceptor(dynamicHeaders))
+                .build()
+        } else {
+            customHttpClient
+        }
+
+        return client.newCall(request).execute().use { response ->
             response.body.string()
         }
     }
@@ -141,7 +172,7 @@ private fun String.hexToBase64UrlOrNull(): String? {
             }
 
             val trimmedContent = content.trim()
-            
+
             // Try to decrypt encrypted content
             if (trimmedContent.length < 79) {
                 return trimmedContent // Too short to be encrypted, return as-is
@@ -227,7 +258,7 @@ private fun String.hexToBase64UrlOrNull(): String? {
     ): HomePageResponse {
         // Show star popup on first visit (shared across all CNCVerse plugins)
 
-        
+
         val rawContent = getWithCustomHeaders(mainUrl)
         val decryptedContent = decryptContent(rawContent)
         val data = IptvPlaylistParser().parseM3U(decryptedContent)
@@ -580,7 +611,7 @@ class IptvPlaylistParser {
 
     private fun parseLicenseKeysMap(licenseKey: String): Map<String, String> {
         val trimmedKey = licenseKey.trim()
-        if (!trimmedKey.startsWith("{")) return emptyMap()
+        if (!trimmedKey.startsWith("\u007B")) return emptyMap()
 
         return try {
             val json = JSONObject(trimmedKey)
@@ -607,7 +638,7 @@ class IptvPlaylistParser {
         val trimmedKey = licenseKey.trim()
         if (trimmedKey.isEmpty()) return null
 
-        if (trimmedKey.startsWith("{")) {
+        if (trimmedKey.startsWith("\u007B")) {
             return try {
                 val json = JSONObject(trimmedKey)
                 val keys = json.optJSONArray("keys") ?: return null
@@ -689,7 +720,7 @@ class IptvPlaylistParser {
                         // Extract DRM keys from attributes if present
                         val keyFromAttr = bufferedAttributes["key"] ?: bufferedAttributes["drm-key"]
                         val keyidFromAttr = bufferedAttributes["keyid"] ?: bufferedAttributes["drm-keyid"] ?: bufferedAttributes["kid"]
-                        
+
                         // Only use attribute keys if no buffered keys exist
                         if (bufferedKey == null) bufferedKey = keyFromAttr
                         if (bufferedKeyId == null) bufferedKeyId = keyidFromAttr
@@ -727,7 +758,7 @@ class IptvPlaylistParser {
                         if (licenseKey.startsWith("http://") || licenseKey.startsWith("https://")) {
                             bufferedLicenseUrl = licenseKey
                         } else {
-                            if (licenseKey.startsWith("{")) {
+                            if (licenseKey.startsWith("\u007B")) {
                                 // Updated JSON logic: preserve all KID->KEY pairs and use first as fallback.
                                 val parsedKeys = parseLicenseKeysMap(licenseKey)
                                 if (parsedKeys.isNotEmpty()) {

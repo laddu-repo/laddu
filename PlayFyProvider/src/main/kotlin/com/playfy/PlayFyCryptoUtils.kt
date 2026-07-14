@@ -1,4 +1,4 @@
-package com.laddu100.playfy
+package com.playfy
 
 import android.content.Context
 import android.util.Base64
@@ -87,7 +87,6 @@ object PlayFyCryptoUtils {
             val apkPath = appInfo.sourceDir
             val nativeDir = appInfo.nativeLibraryDir
 
-            Log.d(TAG, "PlayFy TV APK: $apkPath")
             Log.d(TAG, "Native lib dir: $nativeDir")
 
             // Also include split APKs if present

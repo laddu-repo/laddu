@@ -15,7 +15,6 @@ import com.lagradost.cloudstream3.utils.getQualityFromName
 import com.google.gson.JsonParser
 import com.lagradost.api.Log
 
-// ── BASE MEGAPLAY EXTRACTOR ──────────────────────────────────────────
 open class MegaPlayBaseExtractor(
     override val name: String,
     override val mainUrl: String
@@ -124,7 +123,6 @@ open class MegaPlayBaseExtractor(
 class NineAnimeMegaPlay : MegaPlayBaseExtractor("MegaPlay", "https://megaplay.buzz")
 class NineAnimeVidWish : MegaPlayBaseExtractor("VidWish", "https://vidwish.live")
 
-// ── CUSTOM VIDMOLY EXTRACTOR ─────────────────────────────────────────
 class NineAnimeVidmoly : ExtractorApi() {
     override val name = "Vidmoly"
     override val mainUrl = "https://vidmoly.biz"
@@ -172,7 +170,6 @@ class NineAnimeVidmoly : ExtractorApi() {
     }
 }
 
-// ── CUSTOM MOON EXTRACTOR ────────────────────────────────────────────
 class NineAnimeMoon : ExtractorApi() {
     override val name = "Moon"
     override val mainUrl = "https://bysesayeveum.com"
@@ -194,7 +191,7 @@ class NineAnimeMoon : ExtractorApi() {
             )
             val resolved = app.get(url, referer = referer ?: "https://9anime.org.lv/", interceptor = resolver).url
             val headers = mapOf("Referer" to url)
-            
+
             if (resolved.contains(".m3u8", ignoreCase = true)) {
                 M3u8Helper.generateM3u8(name, resolved, url, headers = headers).forEach(callback)
             } else if (resolved.contains(".mp4", ignoreCase = true)) {

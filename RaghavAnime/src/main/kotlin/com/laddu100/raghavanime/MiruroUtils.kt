@@ -28,8 +28,6 @@ import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
 import kotlin.coroutines.resume
 
-// ─── Pipe Encoding/Decoding ─────────────────────────────────────────────────
-
 fun encodePipeRequest(payload: Map<String, Any?>): String {
     val json = payload.toJson()
     return Base64.encodeToString(
@@ -74,7 +72,6 @@ private fun decompress(data: ByteArray): String {
 
 private fun gunzip(data: ByteArray): String = decompress(data)
 
-// ─── XOR obfuscation key (from VITE_PIPE_OBF_KEY in env2.js) ────────────────
 // JS: Ga = new Uint8Array("71951034f8fbcf53d89db52ceb3dc22c".match(/.{2}/g).map(e => parseInt(e, 16)))
 private val XOR_KEY = byteArrayOf(
     0x71, 0x95.toByte(), 0x10, 0x34, 0xF8.toByte(), 0xFB.toByte(), 0xCF.toByte(), 0x53,
@@ -155,8 +152,6 @@ fun translateEpisodeId(encodedId: String): String {
         encodedId
     }
 }
-
-// ─── Cloudflare Bypass + Domain Management ──────────────────────────────────
 
 val MIRURO_DOMAINS = listOf(
     "https://www.miruro.ru",
@@ -255,7 +250,6 @@ object MiruroCloudflare {
                     """.trimIndent()
 
                     view?.evaluateJavascript(js) {
-                        println("Miruro: fetch() injected, polling for result...")
                     }
 
                     // Poll for result every 500ms (up to 15s)
@@ -273,10 +267,8 @@ object MiruroCloudflare {
                                         .replace("\\\"", "\"")
                                         .replace("\\\\", "\\")
                                     if (text.startsWith("ERROR:")) {
-                                        println("Miruro: fetch() error: ${text.substring(6)}")
                                         finish(null)
                                     } else if (text.isNotEmpty() && text.length > 10) {
-                                        println("Miruro: fetch() got ${text.length} chars")
                                         finish(text)
                                     }
                                 }
@@ -290,7 +282,6 @@ object MiruroCloudflare {
                     view?.evaluateJavascript("document.title") { titleResult ->
                         if (done.get() || fetchInjected.get()) return@evaluateJavascript
                         val title = titleResult?.trim()?.removeSurrounding("\"") ?: ""
-                        println("Miruro: checkAndInject title='$title' loadCount=${loadCount[0]}")
 
                         val isChallenge = title.lowercase().contains("just a moment") ||
                                           title.lowercase().contains("attention required") ||
@@ -299,7 +290,6 @@ object MiruroCloudflare {
                                           title.isBlank()
 
                         if (!isChallenge) {
-                            println("Miruro: CF solved! Injecting fetch()...")
                             injectFetch(view)
                         }
                     }
@@ -318,7 +308,6 @@ object MiruroCloudflare {
                             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                                 super.onPageFinished(view, pageUrl)
                                 loadCount[0]++
-                                println("Miruro: onPageFinished #${loadCount[0]}: $pageUrl")
                                 Handler(Looper.getMainLooper()).postDelayed({
                                     checkAndInject(view)
                                 }, 500)
@@ -326,7 +315,6 @@ object MiruroCloudflare {
                         }
                     }
 
-                    println("Miruro: Loading homepage: $domain")
                     webView?.loadUrl(domain)
 
                     // Periodic challenge-solved check every 1s (CF can take 5-10s)
@@ -342,15 +330,12 @@ object MiruroCloudflare {
                         finish(null)
                     }, 30000)
                 } catch (e: Exception) {
-                    println("Miruro: WebView error: ${e.message}")
                     finish(null)
                 }
             }
         }
     }
 }
-
-// ─── Pipe Request ───────────────────────────────────────────────────────────
 
 suspend fun miruroPipeRequest(path: String, query: Map<String, Any>): String {
     val enrichedQuery = query.toMutableMap()
@@ -380,7 +365,6 @@ suspend fun miruroPipeRequest(path: String, query: Map<String, Any>): String {
             MiruroCloudflare.setWorkingDomain(domain)
             return result
         } catch (e: Exception) {
-            println("Miruro: pipe '$path' failed on $domain - ${e.message}")
             lastError = e
         }
     }
@@ -401,7 +385,6 @@ private suspend fun miruroPipeRequestForDomain(
     )
     MiruroCloudflare.getCookies(domain)?.let { headers["Cookie"] = it }
 
-    // ── Step 1: OkHttp direct (fast path with cached cookies) ──
     try {
         val response = app.get(pipeUrl, headers = headers, timeout = 30)
         if (response.code == 200) {
@@ -415,31 +398,22 @@ private suspend fun miruroPipeRequestForDomain(
                 }
             }
         }
-        println("Miruro: OkHttp direct failed (HTTP ${response.code}), falling back to WebView")
     } catch (e: Exception) {
-        println("Miruro: OkHttp direct exception: ${e.message}")
     }
 
-    // ── Step 2: WebView fetch() injection (reliable CF bypass) ──
     val webBody = MiruroCloudflare.fetchPipeViaWebView(
         Miruro.context, domain, pipeUrl
     )
     if (webBody != null && webBody.isNotEmpty()) {
-        println("Miruro: WebView returned ${webBody.length} chars, decoding...")
         try {
             return decodePipeResponseAuto(webBody)
         } catch (e: Exception) {
-            println("Miruro: Failed to decode WebView response - ${e.message}")
-            println("Miruro: First 100 chars: ${webBody.take(100)}")
         }
     } else {
-        println("Miruro: WebView returned null/empty")
     }
 
     throw Exception("Failed on $domain for /$path")
 }
-
-// ─── AniList GraphQL ────────────────────────────────────────────────────────
 
 const val ANILIST_URL = "https://graphql.anilist.co"
 
@@ -601,7 +575,6 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
                 return text
             }
             // AniList returned an error — log and retry once
-            com.lagradost.api.Log.d("RaghavAnime", "AniList error on attempt $attempt: ${text.take(200)}")
         } catch (e: Exception) {
             com.lagradost.api.Log.e("RaghavAnime", "AniList request failed on attempt $attempt: ${e.message}")
         }
@@ -611,8 +584,6 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
     }
     throw Exception("AniList query failed")
 }
-
-// ─── Data Classes ───────────────────────────────────────────────────────────
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AniListResponse(@JsonProperty("data") val data: AniListData? = null)

@@ -1,10 +1,16 @@
 // use an integer for version numbers
-version = 16
+version = 17
 
 android {
+    namespace = "com.laddu100"
     buildFeatures {
         buildConfig = true
         viewBinding = true
+    }
+    defaultConfig {
+        buildConfigField("String", "FB_API_KEY", "\"AIzaSyDKRqLlbaZBIpHzLBiQTUrJqr3gN-nDWWc\"")
+        buildConfigField("String", "FB_APP_ID", "\"1:516859456626:android:12a75869902c4f8a6826eb\"")
+        buildConfigField("String", "FB_PROJECT_NUMBER", "\"516859456626\"")
     }
 }
 dependencies {
@@ -30,5 +36,5 @@ cloudstream {
     )
     requiresResources = true
 
-    iconUrl = "https://www.google.com/s2/favicons?domain=livetv.top&sz=%size%"
+    iconUrl = "https://png.pngtree.com/png-vector/20191026/ourmid/pngtree-live-icon-design-template-vector-isolated-illustration-png-image_1874482.jpg"
 }

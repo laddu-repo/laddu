@@ -1,4 +1,4 @@
-package com.laddu100.playfy
+package com.playfy
 
 import android.content.Context
 import android.util.Base64
@@ -50,10 +50,6 @@ class PlayFyProvider : MainAPI() {
     override val hasChromecastSupport = true
     override val supportedTypes = setOf(TvType.Live)
 
-    // -------------------------------------------------------------------
-    // HTTP helper
-    // -------------------------------------------------------------------
-
     private val httpClient by lazy { OkHttpClient.Builder().build() }
 
     private fun fetchAndDecrypt(url: String, context: Context): String? {
@@ -90,10 +86,6 @@ class PlayFyProvider : MainAPI() {
         }
     }
 
-    // -------------------------------------------------------------------
-    // Models
-    // -------------------------------------------------------------------
-
     private data class PlayFyCat(
         val id: Int,
         val name: String,
@@ -107,10 +99,6 @@ class PlayFyProvider : MainAPI() {
         val api: String,     // "KID_hex:KEY_hex" for DRM, or ""
         val type: String     // "0" = plain, "1" = ClearKey DRM
     )
-
-    // -------------------------------------------------------------------
-    // Parsers
-    // -------------------------------------------------------------------
 
     private fun parseCategories(json: String): List<PlayFyCat> {
         val result = mutableListOf<PlayFyCat>()
@@ -179,10 +167,6 @@ class PlayFyProvider : MainAPI() {
         }
         return result
     }
-
-    // -------------------------------------------------------------------
-    // Stream helpers
-    // -------------------------------------------------------------------
 
     /**
      * Split "https://url.com/stream.mpd|User-Agent=Mozilla&Referer=https://example.com"
@@ -307,10 +291,6 @@ class PlayFyProvider : MainAPI() {
         }
     }
 
-    // -------------------------------------------------------------------
-    // CloudStream API
-    // -------------------------------------------------------------------
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val ctx = CloudStreamApp.context ?: run {
             Log.e(TAG, "No application context available")
@@ -343,7 +323,6 @@ class PlayFyProvider : MainAPI() {
 
         val categories = parseCategories(decrypted)
         if (categories.isEmpty()) {
-            Log.w(TAG, "No categories found in: ${decrypted.take(300)}")
         }
 
         val items = categories.map { cat ->
@@ -414,7 +393,6 @@ class PlayFyProvider : MainAPI() {
 
         val streams = parseStreams(decrypted)
         if (streams.isEmpty()) {
-            Log.w(TAG, "No streams in: ${decrypted.take(200)}")
             return false
         }
 

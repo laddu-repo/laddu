@@ -1,14 +1,12 @@
 // use an integer for version numbers
-version = 1
+version = 11
 
 android {
-    namespace = "com.laddu100.playfy"
     buildFeatures {
         buildConfig = true
         viewBinding = true
     }
 }
-
 dependencies {
     implementation("androidx.core:core:1.16.0")
     implementation("com.google.android.material:material:1.12.0")
@@ -16,7 +14,7 @@ dependencies {
 
 cloudstream {
     language = "en"
-    description = "Watch Live Sports & Events on PlayFy TV"
+    description = "Watch Live TV channels & sports via PlayFy TV"
     authors = listOf("raghav")
 
     /**
@@ -30,7 +28,7 @@ cloudstream {
     tvTypes = listOf(
         "Live",
     )
-    requiresResources = false
+    requiresResources = true
 
-    iconUrl = "https://www.google.com/s2/favicons?domain=globalmediapoint.online&sz=%size%"
+    iconUrl = "https://www.google.com/s2/favicons?domain=playfy.tv&sz=%size%"
 }

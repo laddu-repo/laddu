@@ -17,30 +17,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.URLEncoder
 
-// ════════════════════════════════════════════════════════════════════════════
-//  Senshi.live — CloudStream Provider
-//  ════════════════════════════════════════════════════════════════════════════
-//
-//  Site:        https://senshi.live
-//  Backend:     Express.js REST API at https://senshi.live/*
-//  CDN:         ninstream.com (Cloudflare-fronted nginx, signed-URL HLS)
-//  ID System:   anime.id == MyAnimeList ID (clean cross-reference)
-//
-//  API Map:
-//    POST /anime/filter                     {searchTerm, page, limit}  -> search/browse
-//    GET  /anime/random                                                 -> random anime
-//    GET  /anime/recently-added                                         -> recently added (array)
-//    GET  /anime/upcoming                                               -> upcoming (array)
-//    GET  /episode-embeds/latest-paginated?page=1&limit=24              -> latest episodes
-//    GET  /episodes/{mal_id}                                            -> episode list (titles+filler+skiptimes)
-//    GET  /episode-embeds/{mal_id}/{ep_num}                             -> stream URLs with status
-//
-//  Stream: direct m3u8 (H.264+AAC, 1080p/720p/360p). Needs Referer header.
-//  Sub/Dub: each embed has a `status` field ("Dub"/"HardSub"/"Sub") for clean separation.
-//
-//  Logging: all logs tagged "Senshi". Filter with: adb logcat -s Senshi:* Senshi_CFBypass:*
-// ════════════════════════════════════════════════════════════════════════════
-
 class Senshi : MainAPI() {
     override var mainUrl = "https://senshi.live"
     override var name = "Senshi"
@@ -73,9 +49,6 @@ class Senshi : MainAPI() {
         "Referer" to "$mainUrl/"
     )
 
-    // ─── Sub/Dub availability cache ──────────────────────────────────────
-    // Probes /episode-embeds/{malId}/1 once per anime, caches the result so
-    // posters show accurate SUB/DUB badges. Key = malId, Value = (hasSub, hasDub).
     private val subDubCache = mutableMapOf<Int, Pair<Boolean, Boolean>>()
     private val subDubCacheMutex = Mutex()
 
@@ -121,7 +94,6 @@ class Senshi : MainAPI() {
             }.awaitAll().toMap()
         }
 
-    // ─── Homepage sections ────────────────────────────────────────────────
     override val mainPage = mainPageOf(
         Pair("recently-added", "Recently Added"),
         Pair("latest", "Latest Episodes"),
@@ -130,26 +102,21 @@ class Senshi : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        Log.d(TAG, "getMainPage START: section='${request.name}' data='${request.data}' page=$page")
         return try {
             when (request.data) {
                 "recently-added" -> {
                     val res = cfGet("$mainUrl/anime/recently-added", headers = getHeaders)
-                    Log.d(TAG, "getMainPage recently-added: HTTP ${res.code}, len=${res.text.length}")
                     val items = parseJson<List<AnimeItem>>(res.text)
                     val subDubMap = probeSubDubBatch(items.mapNotNull { it.id })
                     val home = items.mapNotNull { it.toSearchResponse(subDubMap[it.id]) }
-                    Log.d(TAG, "getMainPage recently-added: ${home.size} items")
                     newHomePageResponse(request.name, home, hasNext = false)
                 }
 
                 "upcoming" -> {
                     val res = cfGet("$mainUrl/anime/upcoming", headers = getHeaders)
-                    Log.d(TAG, "getMainPage upcoming: HTTP ${res.code}, len=${res.text.length}")
                     val items = parseJson<List<AnimeItem>>(res.text)
                     val subDubMap = probeSubDubBatch(items.mapNotNull { it.id })
                     val home = items.mapNotNull { it.toSearchResponse(subDubMap[it.id]) }
-                    Log.d(TAG, "getMainPage upcoming: ${home.size} items")
                     newHomePageResponse(request.name, home, hasNext = false)
                 }
 
@@ -159,7 +126,6 @@ class Senshi : MainAPI() {
                         "$mainUrl/episode-embeds/latest-paginated?page=$page&limit=$limit",
                         headers = getHeaders
                     )
-                    Log.d(TAG, "getMainPage latest: HTTP ${res.code}, len=${res.text.length}")
                     val resp = parseJson<LatestEpisodesResponse>(res.text)
                     val subDubMap = probeSubDubBatch(resp.data.mapNotNull { it.anime?.id })
                     val home = resp.data.mapNotNull { it.toSearchResponse(subDubMap[it.anime?.id]) }
@@ -194,20 +160,15 @@ class Senshi : MainAPI() {
         }
     }
 
-    // ─── Search ───────────────────────────────────────────────────────────
     override suspend fun search(query: String): List<SearchResponse> {
-        Log.d(TAG, "search START: query='$query'")
         if (query.isBlank()) {
-            Log.d(TAG, "search: empty query, returning empty list")
             return emptyList()
         }
         return try {
             val encoded = query.replace("\"", "\\\"")
             val body = """{"searchTerm":"$encoded","page":1,"limit":30}"""
-            Log.d(TAG, "search POST body=$body")
             val res = cfPost("$mainUrl/anime/filter", body = body, headers = searchHeaders)
             Log.d(TAG, "search Response: HTTP ${res.code}, len=${res.text.length}")
-            Log.d(TAG, "search Body preview: ${res.text.take(300)}")
             if (res.code != 200 && res.code != 201) {
                 Log.e(TAG, "search non-2xx response, returning empty")
                 return emptyList()
@@ -223,9 +184,7 @@ class Senshi : MainAPI() {
         }
     }
 
-    // ─── Load (anime details + episode list) ───────────────────────────────
     override suspend fun load(url: String): LoadResponse? {
-        Log.d(TAG, "load START: url=$url")
         // URL format: https://senshi.live/anime/{mal_id}?t={urlencoded_title}
         // The title is encoded by toSearchResponse() so we can search for metadata
         // (senshi has no GET /anime/{id} endpoint — the filter POST is the only way).
@@ -238,18 +197,13 @@ class Senshi : MainAPI() {
         val encodedTitle = try {
             url.substringAfter("?t=", "").let { java.net.URLDecoder.decode(it, "UTF-8") }
         } catch (e: Exception) { "" }
-        Log.d(TAG, "load parsed malId=$malId, title='$encodedTitle'")
 
-        // Step 1: Probe the first episode's embeds to determine available stream types.
-        // This lets us show ONLY the Sub/Dub tabs that actually have content — no empty tabs.
         var hasSub = false
         var hasDub = false
         try {
             val probeRes = cfGet("$mainUrl/episode-embeds/$malId/1", headers = getHeaders)
-            Log.d(TAG, "load probe embeds: HTTP ${probeRes.code}, len=${probeRes.text.length}")
             if (probeRes.code == 200) {
                 val probeEmbeds = parseJson<List<StreamEmbed>>(probeRes.text)
-                Log.d(TAG, "load probe: ${probeEmbeds.size} embeds, statuses=${probeEmbeds.map { it.status }}")
                 probeEmbeds.forEach { emb ->
                     val st = emb.status?.lowercase() ?: ""
                     when {
@@ -261,21 +215,17 @@ class Senshi : MainAPI() {
         } catch (e: Exception) {
             Log.e(TAG, "load probe failed (will assume sub-only): ${e.message}")
         }
-        Log.d(TAG, "load probe result: hasSub=$hasSub, hasDub=$hasDub")
         // Fallback: if probe failed entirely, assume sub exists
         if (!hasSub && !hasDub) {
             hasSub = true
-            Log.d(TAG, "load: probe found nothing, defaulting to hasSub=true")
         }
         // Cache the probe result so search/homepage posters show accurate badges
         subDubCacheMutex.withLock {
             subDubCache[malId] = Pair(hasSub, hasDub)
         }
 
-        // Step 2: Get full episode list (with titles + filler markers)
         val episodesText = try {
             val r = cfGet("$mainUrl/episodes/$malId", headers = getHeaders)
-            Log.d(TAG, "load episodes: HTTP ${r.code}, len=${r.text.length}")
             r.text
         } catch (e: Exception) {
             Log.e(TAG, "load episodes fetch FAILED: ${e.message}")
@@ -289,15 +239,12 @@ class Senshi : MainAPI() {
             Log.e(TAG, "load episodes raw preview: ${episodesText.take(400)}")
             return null
         }
-        Log.d(TAG, "load got ${allEpisodes.size} episodes from API")
 
         if (allEpisodes.isEmpty()) {
             Log.e(TAG, "load: no episodes found for malId=$malId")
             return null
         }
 
-        // Step 3: Build sub and dub episode lists. The EpisodeData carries the
-        // streamType so loadLinks knows which embeds to return.
         val subEps = mutableListOf<Episode>()
         val dubEps = mutableListOf<Episode>()
         allEpisodes.sortedBy { it.ep_id }.forEach { ep ->
@@ -319,20 +266,13 @@ class Senshi : MainAPI() {
                 })
             }
         }
-        Log.d(TAG, "load built ${subEps.size} sub episodes and ${dubEps.size} dub episodes")
 
-        // Step 4: Fetch anime metadata via title search. Senshi has no GET /anime/{id}
-        // endpoint, so we POST /anime/filter with the title (encoded in the load URL by
-        // toSearchResponse()) and find the matching anime by mal_id. This gives us
-        // poster, plot, year, genres, score, and type — everything CS needs.
         var meta: AnimeItem? = null
         if (encodedTitle.isNotBlank()) {
             try {
                 val safeTitle = encodedTitle.replace("\"", "\\\"")
                 val body = """{"searchTerm":"$safeTitle","page":1,"limit":10}"""
-                Log.d(TAG, "load meta search POST body=$body")
                 val metaRes = cfPost("$mainUrl/anime/filter", body = body, headers = searchHeaders)
-                Log.d(TAG, "load meta search: HTTP ${metaRes.code}, len=${metaRes.text.length}")
                 if (metaRes.code == 200 || metaRes.code == 201) {
                     val resp = parseJson<FilterResponse>(metaRes.text)
                     // Find the exact anime by mal_id (title search may return multiple)
@@ -340,9 +280,7 @@ class Senshi : MainAPI() {
                     if (meta == null && resp.data.isNotEmpty()) {
                         // Fallback: use the first result if id match fails
                         meta = resp.data[0]
-                        Log.d(TAG, "load meta: id match not found, using first result (id=${meta?.id ?: "null"})")
                     }
-                    Log.d(TAG, "load meta found: title=${meta?.title}, type=${meta?.type}, year=${meta?.ani_year}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "load meta search failed: ${e.message}")
@@ -379,26 +317,22 @@ class Senshi : MainAPI() {
         }
     }
 
-    // ─── Load Links (streams) ─────────────────────────────────────────────
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d(TAG, "loadLinks START: data=$data")
         val epData = try {
             parseJson<SenshiEpData>(data)
         } catch (e: Exception) {
             Log.e(TAG, "loadLinks: failed to parse SenshiEpData: ${e.message}")
             return false
         }
-        Log.d(TAG, "loadLinks: malId=${epData.malId}, epNum=${epData.epNum}, streamType=${epData.streamType}")
 
         // Fetch fresh embeds (token is time-limited, so always get a fresh URL)
         val embedsText = try {
             val r = cfGet("$mainUrl/episode-embeds/${epData.malId}/${epData.epNum}", headers = getHeaders)
-            Log.d(TAG, "loadLinks embeds: HTTP ${r.code}, len=${r.text.length}")
             r.text
         } catch (e: Exception) {
             Log.e(TAG, "loadLinks embeds fetch FAILED: ${e.message}")
@@ -412,9 +346,7 @@ class Senshi : MainAPI() {
             Log.e(TAG, "loadLinks embeds raw preview: ${embedsText.take(400)}")
             return false
         }
-        Log.d(TAG, "loadLinks got ${embeds.size} embeds: ${embeds.map { it.status }}")
 
-        // Filter embeds by the requested stream type. This is the CLEAN sub/dub separation:
         // - streamType "sub" -> only embeds with status Sub/HardSub
         // - streamType "dub" -> only embeds with status Dub
         val targetStreamType = epData.streamType.lowercase()
@@ -426,7 +358,6 @@ class Senshi : MainAPI() {
                 else -> true
             }
         }
-        Log.d(TAG, "loadLinks: streamType='$targetStreamType' -> ${matching.size} matching embeds")
 
         if (matching.isEmpty()) {
             Log.e(TAG, "loadLinks: NO embeds match streamType='$targetStreamType'")
@@ -447,7 +378,6 @@ class Senshi : MainAPI() {
     private suspend fun addEmbedLink(embed: StreamEmbed, callback: (ExtractorLink) -> Unit) {
         val streamUrl = embed.url ?: return
         val status = embed.status ?: "Unknown"
-        Log.d(TAG, "addEmbedLink: status=$status, url=$streamUrl")
 
         // Play headers — the ninstream.com CDN REQUIRES Referer: https://senshi.live/
         val playHeaders = mapOf(
@@ -461,7 +391,6 @@ class Senshi : MainAPI() {
         if (streamUrl.contains(".m3u8", ignoreCase = true)) {
             try {
                 val label = "$name $status"
-                Log.d(TAG, "addEmbedLink: parsing m3u8 with M3u8Helper for '$label'")
                 val links = M3u8Helper.generateM3u8(label, streamUrl, "$mainUrl/", headers = playHeaders)
                 Log.d(TAG, "addEmbedLink: M3u8Helper produced ${links.size} quality links")
                 links.forEach(callback)
@@ -485,8 +414,6 @@ class Senshi : MainAPI() {
             )
         }
     }
-
-    // ─── Helpers ──────────────────────────────────────────────────────────
 
     private fun AnimeItem.toSearchResponse(subDub: Pair<Boolean, Boolean>? = null): SearchResponse? {
         val id = this.id ?: return null
@@ -525,8 +452,6 @@ class Senshi : MainAPI() {
             addDubStatus(dubExist = hasDub, subExist = hasSub)
         }
     }
-
-    // ─── Data classes (matching senshi's API responses) ───────────────────
 
     /** Per-episode payload stored in EpisodeData for loadLinks. */
     data class SenshiEpData(

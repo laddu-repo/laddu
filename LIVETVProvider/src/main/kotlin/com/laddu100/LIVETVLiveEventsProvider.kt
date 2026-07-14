@@ -35,14 +35,17 @@ import com.lagradost.cloudstream3.APIHolder.unixTime
  * IPTV provider). Event slugs resolve to stream lists via
  * `LIVETVProviderManager.fetchChannelStreams(slug)`.
  */
-class LIVETVLiveEventsProvider : MainAPI() {
+class LIVETVLiveEventsProvider(
+    private val customName: String = "\u26A1LIVE TV Live Events",
+    private val customCatLink: String? = null
+) : MainAPI() {
 
     companion object {
         var context: android.content.Context? = null
     }
 
     override var mainUrl = "https://adsflw.xyz"
-    override var name = "?LIVE TV Live Events"
+    override var name = customName
     override var lang = "hi"
     override val hasMainPage = true
     override val hasChromecastSupport = true
@@ -71,9 +74,9 @@ class LIVETVLiveEventsProvider : MainAPI() {
             val start = info.startTime?.let { fmt.parse(it)?.time }
             val end = info.endTime?.let { fmt.parse(it)?.time }
             when {
-                end != null && now >= end -> "?"
-                start != null && now >= start -> "??"
-                start != null && now < start -> "??"
+                end != null && now >= end -> "\u2705"
+                start != null && now >= start -> "\uD83D\uDD34"
+                start != null && now < start -> "\uD83D\uDD51"
                 else -> ""
             }
         } catch (_: Exception) { "" }
@@ -151,16 +154,24 @@ class LIVETVLiveEventsProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
 
-        val events = LIVETVProviderManager.fetchLiveEvents()
+        val events = if (customCatLink != null) {
+            LIVETVProviderManager.fetchCustomEvents(customCatLink)
+        } else {
+            LIVETVProviderManager.fetchLiveEvents()
+        }
         val grouped = events.groupBy { it.eventInfo?.eventCat ?: it.cat ?: "Other" }
 
         val pages = grouped
             .map { (category, catEvents) ->
                 val icon = when (category.lowercase()) {
-                    "cricket" -> "??"; "football" -> "?"; "basketball" -> "??"
-                    "ice hockey" -> "??"; "boxing" -> "??"
-                    "motorsport" -> "???"; "tennis" -> "??"
-                    else -> "??"
+                    "cricket" -> "\uD83C\uDFCF"
+                    "football" -> "\u26BD"
+                    "basketball" -> "\uD83C\uDFC0"
+                    "ice hockey" -> "\uD83C\uDFD2"
+                    "boxing" -> "\uD83E\uDD4A"
+                    "motorsport" -> "\uD83C\uDFCE"
+                    "tennis" -> "\uD83C\uDFBE"
+                    else -> "\uD83D\uDCFA"
                 }
                 val items = catEvents
                     .sortedByDescending { isEventLive(it) }
@@ -193,8 +204,13 @@ class LIVETVLiveEventsProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        
-        return LIVETVProviderManager.fetchLiveEvents()
+
+        val events = if (customCatLink != null) {
+            LIVETVProviderManager.fetchCustomEvents(customCatLink)
+        } else {
+            LIVETVProviderManager.fetchLiveEvents()
+        }
+        return events
             .filter { event ->
                 listOfNotNull(
                     event.title, event.eventInfo?.teamA, event.eventInfo?.teamB,
@@ -218,22 +234,22 @@ class LIVETVLiveEventsProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        
+
         val data = parseJson<LiveEventLoadData>(url)
         val info = data.eventInfo
         val plot = buildString {
             info?.let { i ->
-                i.eventType?.let { append("?? $it\n") }
-                i.eventName?.let { append("?? $it\n") }
+                i.eventType?.let { append("\uD83C\uDFC6 $it\n") }
+                i.eventName?.let { append("\uD83C\uDFAF $it\n") }
                 i.startTime?.let {
                     try {
                         val df = SimpleDateFormat("yyyy/MM/dd HH:mm:ss Z", Locale.US)
                         val disp = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.US)
-                        df.parse(it)?.let { d -> append("?? ${disp.format(d)}\n") }
-                    } catch (_: Exception) { append("?? $it\n") }
+                        df.parse(it)?.let { d -> append("\uD83D\uDD52 ${disp.format(d)}\n") }
+                    } catch (_: Exception) { append("\uD83D\uDD52 $it\n") }
                 }
             }
-            append("\n?? Available Servers: ${data.formats.size}")
+            append("\n\uD83D\uDCE1 Available Servers: ${data.formats.size}")
         }
         return newLiveStreamLoadResponse(data.title, url, url) {
             this.posterUrl = data.poster

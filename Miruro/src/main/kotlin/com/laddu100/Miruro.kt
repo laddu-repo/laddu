@@ -1,4 +1,5 @@
 package com.laddu100
+import android.util.Log
 
 import android.content.Context
 import com.lagradost.cloudstream3.DubStatus
@@ -157,7 +158,6 @@ class Miruro : MainAPI() {
             else -> null
         }
 
-        // ── Check episode cache first ──
         val cached = epsCache[anilistId]
         if (cached != null && System.currentTimeMillis() - cached.timestamp < EPS_CACHE_TTL) {
             return newAnimeLoadResponse(title, url, tvType) {
@@ -182,11 +182,6 @@ class Miruro : MainAPI() {
             val episodesData = parseJson<MiruroEpisodesResponse>(episodesJson)
             val providers = episodesData.providers ?: emptyMap()
 
-            // Log available providers for debugging
-            println("Miruro: Providers for $anilistId: ${providers.keys}")
-
-            // ── Sub episodes ──
-            // Find provider with most sub/ssub episodes for the episode list
             var bestSubProvider: String? = null
             var bestSubCount = 0
             for (provName in providerOrder) {
@@ -243,7 +238,6 @@ class Miruro : MainAPI() {
                 }
             }
 
-            // ── Dub episodes ──
             var bestDubProvider: String? = null
             var bestDubCount = 0
             for (provName in providerOrder) {
@@ -294,7 +288,6 @@ class Miruro : MainAPI() {
                 timestamp = System.currentTimeMillis()
             )
         } catch (e: Exception) {
-            println("Miruro: Failed to load episodes for $anilistId - ${e.message}")
         }
 
         return newAnimeLoadResponse(title, url, tvType) {
@@ -459,7 +452,7 @@ class Miruro : MainAPI() {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
             }
 
             // Subtitles
@@ -471,7 +464,6 @@ class Miruro : MainAPI() {
 
             return if (found) true else null
         } catch (e: Exception) {
-            println("Miruro: processProvider failed for $provider - ${e.message}")
             return null
         }
     }

@@ -1,4 +1,5 @@
 package com.laddu100.raghavanime
+import android.util.Log
 
 import android.util.Base64
 import com.google.gson.JsonParser
@@ -38,8 +39,6 @@ class RaghavAnikoto : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val doc = app.get("${request.data}?page=$page", headers = browserHeaders).document
-        // FIX: only select the outer .item card, NOT .inner (which is inside .item
-        // and causes every anime to appear twice in the homepage).
         val items = doc.select("div.ani.items > div.item").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, items)
     }
@@ -47,7 +46,6 @@ class RaghavAnikoto : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val doc = app.get("$mainUrl/filter?keyword=$encodedQuery", headers = browserHeaders).document
-        // FIX: same selector fix as getMainPage — only outer .item cards.
         return doc.select("div.ani.items > div.item").mapNotNull { it.toSearchResult() }
     }
 
@@ -55,14 +53,12 @@ class RaghavAnikoto : MainAPI() {
         val response = try {
             app.get(url, headers = browserHeaders)
         } catch (e: Exception) {
-            println("AniKoto: load() HTTP failed for $url - ${e.message}")
             return null
         }
         val doc = response.document
         val title = doc.selectFirst("#w-info h1.title, h1[itemprop=name], .title[itemprop=name]")?.text()?.trim()
             ?: doc.selectFirst("h1.title")?.text()?.trim()
             ?: run {
-                println("AniKoto: load() no title found — page may be a Cloudflare challenge. Body length=${doc.body()?.html()?.length ?: 0}")
                 return null
             }
         val poster = doc.selectFirst("#w-info .poster img, img[itemprop=image], .poster img")?.let {
@@ -77,7 +73,6 @@ class RaghavAnikoto : MainAPI() {
         val animeId = doc.selectFirst("#watch-main")?.attr("data-id")
             ?: doc.selectFirst("[data-id]")?.attr("data-id")
             ?: Regex("""data-id=["'](\d+)["']""").find(doc.html())?.groupValues?.get(1)
-        println("AniKoto: load url=$url title=$title animeId=$animeId")
 
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
@@ -88,10 +83,8 @@ class RaghavAnikoto : MainAPI() {
                     "$mainUrl/ajax/episode/list/$animeId",
                     referer = url, headers = ajaxHeaders(url)
                 ).text
-                println("AniKoto: ajax response len=${json.length} starts=${json.take(80)}")
                 val html = jsonResultString(json)
                 if (html.isBlank()) {
-                    println("AniKoto: Empty episode list for animeId=$animeId (json status != 200)")
                 }
                 Jsoup.parse(html).select("a[data-ids]").forEach { el ->
                     val serverIds = el.attr("data-ids")
@@ -116,24 +109,17 @@ class RaghavAnikoto : MainAPI() {
                         })
                     }
                 }
-                println("AniKoto: ${subEpisodes.size} sub eps, ${dubEpisodes.size} dub eps")
             } catch (e: Exception) {
-                println("AniKoto: Failed to load episodes for animeId=$animeId - ${e.message}")
             }
         }
 
-        // Fallback: if AJAX failed, store episode page URLs so loadLinks can retry.
-        // NOTE: previously this created /ep-N URLs that loadLinks couldn't resolve.
-        // Now loadLinks has a fallback that re-fetches the page and retries AJAX.
         if (subEpisodes.isEmpty() && dubEpisodes.isEmpty()) {
-            println("AniKoto: AJAX failed — using /ep- fallback (loadLinks will retry AJAX)")
             doc.select("a[href*='/ep-']").mapIndexed { i, el ->
                 subEpisodes.add(newEpisode(fixUrl(el.attr("href"))) {
                     this.episode = i + 1
                     this.name = el.text().ifBlank { "Episode ${i + 1}" }
                 })
             }
-            println("AniKoto: fallback created ${subEpisodes.size} episodes")
         }
 
         return newAnimeLoadResponse(title, url, if (isMovie) TvType.AnimeMovie else TvType.Anime) {
@@ -166,7 +152,6 @@ class RaghavAnikoto : MainAPI() {
             val serverIds = parts[2]
             val audioType = parts[3].ifBlank { "sub" }
             if (serverIds.isBlank()) return false
-            println("AniKoto: loadLinks type=$audioType ids=${serverIds.take(30)}...")
             return resolveServers(serverIds, referer, audioType, subtitleCallback, callback)
         }
 
@@ -180,10 +165,8 @@ class RaghavAnikoto : MainAPI() {
                 ?: doc.selectFirst("[data-id]")?.attr("data-id")
                 ?: Regex("""data-id=["'](\d+)["']""").find(doc.html())?.groupValues?.get(1)
             val epNum = Regex("""/ep-(\d+)""").find(cleanData)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-            println("AniKoto: Direct URL fallback — animeId=$animeId epNum=$epNum url=$cleanData")
 
             if (animeId.isNullOrBlank()) {
-                println("AniKoto: Direct URL fallback — no animeId found. Title=${doc.title()?.take(60)}")
                 return false
             }
 
@@ -194,7 +177,6 @@ class RaghavAnikoto : MainAPI() {
             ).text
             val html = jsonResultString(json)
             if (html.isBlank()) {
-                println("AniKoto: Direct URL fallback — empty episode list AJAX")
                 return false
             }
 
@@ -202,7 +184,6 @@ class RaghavAnikoto : MainAPI() {
             val epEl = Jsoup.parse(html).select("a[data-ids]").find {
                 it.attr("data-num").toIntOrNull() == epNum
             } ?: Jsoup.parse(html).selectFirst("a[data-ids]") ?: run {
-                println("AniKoto: Direct URL fallback — no matching episode found")
                 return false
             }
 
@@ -210,10 +191,8 @@ class RaghavAnikoto : MainAPI() {
             val audioType = if (epEl.attr("data-dub") == "1") "dub" else "sub"
             if (serverIds.isBlank()) return false
 
-            println("AniKoto: Direct URL fallback — resolved serverIds for ep=$epNum type=$audioType")
             resolveServers(serverIds, data, audioType, subtitleCallback, callback)
         } catch (e: Exception) {
-            println("AniKoto: Direct URL fallback failed - ${e.message}")
             false
         }
     }
@@ -238,13 +217,11 @@ class RaghavAnikoto : MainAPI() {
             app.get("$mainUrl/ajax/server/list?servers=$encodedIds",
                 referer = referer, headers = ajaxHeaders(referer)).text
         } catch (e: Exception) {
-            println("AniKoto: Failed to fetch server list - ${e.message}")
             return false
         }
 
         val serverListHtml = jsonResultString(serverListJson)
         if (serverListHtml.isBlank()) {
-            println("AniKoto: Empty server list HTML")
             return false
         }
 
@@ -259,13 +236,11 @@ class RaghavAnikoto : MainAPI() {
         val preferredServers = typeSelectors.flatMap { sel ->
             serverDoc.select("$sel li[data-link-id]")
         }.ifEmpty {
-            println("AniKoto: No servers for type=$audioType, trying all")
             serverDoc.select("li[data-link-id]")
         }
 
         val linkIds = preferredServers.map { it.attr("data-link-id") }
             .filter { it.isNotBlank() }.distinct()
-        println("AniKoto: ${linkIds.size} servers for type=$audioType")
         if (linkIds.isEmpty()) return false
 
         var found = false
@@ -277,29 +252,18 @@ class RaghavAnikoto : MainAPI() {
                 var embedUrl = jsonResultUrl(serverJson)
                 if (embedUrl.isNullOrBlank()) continue
 
-                // FIX: AniKoto often returns the SAME link-id for both sub and dub
-                // sections, so the embed URL always ends in /sub even when the user
-                // selected dub. The vidtube/megaplay player uses this path segment to
-                // decide which audio track to load. Rewrite it to match the requested
-                // audioType so dub actually plays dub.
                 if (audioType == "dub" && embedUrl.contains("/sub")) {
                     embedUrl = embedUrl.replace("/sub", "/dub")
-                    println("AniKoto: Rewrote embed URL to dub: ${embedUrl.take(60)}...")
                 } else if (audioType == "sub" && embedUrl.contains("/dub")) {
                     embedUrl = embedUrl.replace("/dub", "/sub")
-                    println("AniKoto: Rewrote embed URL to sub: ${embedUrl.take(60)}...")
                 }
-
-                println("AniKoto: Resolving ${embedUrl.take(60)}...")
 
                 if (resolveEmbedInline(embedUrl, referer, audioType, subtitleCallback, callback)) {
                     found = true
                 }
             } catch (e: Exception) {
-                println("AniKoto: Server failed - ${e.message}")
             }
         }
-        println("AniKoto: resolveServers result found=$found")
         return found
     }
 
@@ -342,7 +306,6 @@ class RaghavAnikoto : MainAPI() {
             try {
                 loadExtractor(normalizedUrl, referer, subtitleCallback, callback)
             } catch (e: Exception) {
-                println("AniKoto: loadExtractor failed for $domain - ${e.message}")
                 false
             }
         }
@@ -398,7 +361,6 @@ class RaghavAnikoto : MainAPI() {
                 ?: Regex("""/stream/s-\d+/(\d+)""").find(url)?.groupValues?.get(1)
                 ?: return false
             if (streamId.isBlank()) return false
-            println("AniKoto: $serverName streamId=$streamId type=$type")
 
             // 2. Fetch getSources
             val sourcesText = app.get("$host/stream/getSources?id=$streamId&type=$type",
@@ -416,10 +378,8 @@ class RaghavAnikoto : MainAPI() {
             } catch (_: Exception) { null }
 
             if (m3u8.isNullOrBlank()) {
-                println("AniKoto: No m3u8 in getSources response")
                 return false
             }
-            println("AniKoto: m3u8=${m3u8.take(60)}...")
 
             // 3. Generate m3u8 links
             val displayType = if (type == "dub") "DUB" else "SUB"
@@ -455,11 +415,10 @@ class RaghavAnikoto : MainAPI() {
                         subtitleCallback.invoke(newSubtitleFile(label, file))
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
 
             return true
         } catch (e: Exception) {
-            println("AniKoto: $serverName resolution failed - ${e.message}")
             return false
         }
     }

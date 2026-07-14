@@ -140,7 +140,7 @@ class Anizen : MainAPI() {
             "$mainUrl/ajax/servers/${episodeData.dataId}?ep=${episodeData.episode}",
             headers = headers
         ).parsedSafe<ServerResponse>() ?: return false
- 
+
         val requestedType = episodeData.type.lowercase()
         val filteredServers = response.servers.filter { server ->
             val serverType = server.type.lowercase()
@@ -151,13 +151,13 @@ class Anizen : MainAPI() {
                 else -> true
             }
         }
- 
+
         var loadedLinks = false
         val wrappedCallback: (ExtractorLink) -> Unit = { link ->
             loadedLinks = true
             callback(link)
         }
- 
+
         coroutineScope {
             filteredServers.sortedBy { it.priority() }.map { server ->
                 async {
@@ -348,4 +348,4 @@ class Anizen : MainAPI() {
     )
 
     class ErrorLoadingException(message: String) : RuntimeException(message)
-}      
+}

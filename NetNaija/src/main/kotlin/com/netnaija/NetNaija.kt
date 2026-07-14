@@ -93,7 +93,6 @@ class NetNaija : MainAPI() {
                 return token
             }
         } catch (e: Exception) {
-            println("NetNaija: token extraction failed - ${e.message}")
         }
         return null
     }
@@ -107,7 +106,6 @@ class NetNaija : MainAPI() {
             val response = app.get("$apiUrl/wefeed-h5api-bff/home", headers = headers)
             extractTokenFromResponse(response) ?: ""
         } catch (e: Exception) {
-            println("NetNaija: token fetch failed - ${e.message}")
             ""
         }
     }
@@ -128,7 +126,6 @@ class NetNaija : MainAPI() {
         return headers
     }
 
-    // ── Homepage ────────────────────────────────────────────────────────────
     override val mainPage = mainPageOf(
         Pair("trending", "Trending Now")
     )
@@ -145,12 +142,10 @@ class NetNaija : MainAPI() {
             val items = data.data?.subjectList?.mapNotNull { it.toSearchResponse() } ?: emptyList()
             newHomePageResponse(request.name, items, hasNext = data.data?.pager?.hasMore ?: false)
         } catch (e: Exception) {
-            println("NetNaija: getMainPage failed - ${e.message}")
             newHomePageResponse(request.name, emptyList(), hasNext = false)
         }
     }
 
-    // ── Search ──────────────────────────────────────────────────────────────
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
         return try {
@@ -166,12 +161,10 @@ class NetNaija : MainAPI() {
             val data = parseJson<NetNaijaSearchResponse>(response.text)
             data.data?.items?.mapNotNull { it.toSearchResponse() } ?: emptyList()
         } catch (e: Exception) {
-            println("NetNaija: search '$query' failed - ${e.message}")
             emptyList()
         }
     }
 
-    // ── Load ────────────────────────────────────────────────────────────────
     override suspend fun load(url: String): LoadResponse? {
         val detailPath = url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() }
             ?: return null
@@ -241,12 +234,10 @@ class NetNaija : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("NetNaija: load failed - ${e.message}")
             null
         }
     }
 
-    // ── Load Links ──────────────────────────────────────────────────────────
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -256,12 +247,10 @@ class NetNaija : MainAPI() {
         val epData = try {
             parseJson<NetNaijaEpisodeData>(data)
         } catch (e: Exception) {
-            println("NetNaija: loadLinks parse error - ${e.message}")
             return false
         }
 
         val dubs = epData.dubs
-        println("NetNaija: loadLinks — ${dubs.size} dubs, se=${epData.season} ep=${epData.episode}")
 
         var found = false
         var subtitlesLoaded = false
@@ -293,11 +282,8 @@ class NetNaija : MainAPI() {
                 extractTokenFromResponse(resp)
                 parseJson<NetNaijaPlayResponse>(resp.text).data
             } catch (e: Exception) {
-                println("NetNaija: play failed for $audioLabel - ${e.message}")
                 return@forEach
             } ?: return@forEach
-
-            println("NetNaija: $audioLabel — streams=${playData.streams?.size ?: 0} dash=${playData.dash?.size ?: 0}")
 
             // MP4 streams
             val mp4Streams = playData.streams ?: emptyList()
@@ -388,7 +374,6 @@ class NetNaija : MainAPI() {
             }
         }
 
-        println("NetNaija: loadLinks result found=$found")
         return found
     }
 
@@ -410,13 +395,10 @@ class NetNaija : MainAPI() {
                 val lang = caption.lanName ?: caption.lan ?: "Unknown"
                 subtitleCallback.invoke(newSubtitleFile(lang, url))
             }
-            println("NetNaija: loaded ${data?.captions?.size ?: 0} subtitles")
         } catch (e: Exception) {
-            println("NetNaija: subtitle fetch failed - ${e.message}")
         }
     }
 
-    // ── Search response helper ──────────────────────────────────────────────
     private fun NetNaijaSubject.toSearchResponse(): SearchResponse? {
         val title = this.title ?: return null
         val path = detailPath ?: return null
@@ -435,8 +417,6 @@ class NetNaija : MainAPI() {
         }
     }
 }
-
-// ── Data classes (top-level) ──────────────────────────────────────────────
 
 data class NetNaijaDub(
     @JsonProperty("subjectId") val subjectId: String? = null,

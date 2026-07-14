@@ -1,5 +1,7 @@
 package com.laddu100
 
+import com.lagradost.api.Log
+
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -10,21 +12,13 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/**
- * Firebase Remote Config fetcher for the LIVE TV app.
- *
- * Firebase credentials are taken from the LIVE TV plugin.js:
- *   packageName  : com.livetv.tv
- *   apiKey       : AIzaSyDKRqLlbaZBIpHzLBiQTUrJqr3gN-nDWWc
- *   appId        : 1:516859456626:android:12a75869902c4f8a6826eb
- *   projectNumber: 516859456626
- */
+
 object LIVETVFirebaseFetcher {
 
     private const val PACKAGE_NAME = "com.livetv.tv"
-    private const val API_KEY = "AIzaSyDKRqLlbaZBIpHzLBiQTUrJqr3gN-nDWWc"
-    private const val APP_ID = "1:516859456626:android:12a75869902c4f8a6826eb"
-    private const val PROJECT_NUMBER = "516859456626"
+    private val API_KEY get() = BuildConfig.FB_API_KEY
+    private val APP_ID get() = BuildConfig.FB_APP_ID
+    private val PROJECT_NUMBER get() = BuildConfig.FB_PROJECT_NUMBER
     private const val APP_VERSION = "2.1"
     private const val APP_BUILD = "4"
     private const val SDK_VERSION = "22.1.0"
@@ -85,7 +79,7 @@ object LIVETVFirebaseFetcher {
             }
             null
         } catch (e: Exception) {
-            println("LIVETV: Firebase fetch failed – ${e.message}")
+            Log.d("LIVETV", "LIVETV: Firebase fetch failed – ${e.message}")
             null
         }
     }

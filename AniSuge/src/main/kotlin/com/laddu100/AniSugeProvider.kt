@@ -13,7 +13,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 
-
 class AniSugeProvider : MainAPI() {
     override var mainUrl = "https://anisuge.tv"
     override var name = "AniSuge"
@@ -361,10 +360,10 @@ class AniSugeProvider : MainAPI() {
                     }
 
                     // Otherwise check if it is a Megaplay clone or custom embed
-                    val isMegaplayClone = playerUrl.contains("megaplay.buzz") || 
-                                          playerUrl.contains("vidwish.live") || 
+                    val isMegaplayClone = playerUrl.contains("megaplay.buzz") ||
+                                          playerUrl.contains("vidwish.live") ||
                                           playerUrl.contains("vidtube.site") ||
-                                          playerUrl.contains("vidstream") || 
+                                          playerUrl.contains("vidstream") ||
                                           playerUrl.contains("vidplay")
 
                     if (isMegaplayClone) {

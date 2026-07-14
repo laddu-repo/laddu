@@ -6,7 +6,6 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 @CloudstreamPlugin
 class AniSugePlugin : BasePlugin() {
     override fun load() {
-        DoHDnsResolver.inject()
         registerMainAPI(AniSugeProvider())
     }
 }

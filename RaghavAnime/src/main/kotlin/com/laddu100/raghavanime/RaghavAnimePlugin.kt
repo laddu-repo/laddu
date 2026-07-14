@@ -11,6 +11,10 @@ class RaghavAnimePlugin : Plugin() {
         Miruro.context = context
         // Initialize AniDB Cloudflare bypass (persistent cookie storage)
         initAniDbCFBypass(context)
+        // Initialize Anidap anti-bot bypass (_amx_id cookie for chad.anidap.se)
+        initAnidapCFBypass(context)
+        // Initialize Senshi Cloudflare bypass (senshi.live CF challenge)
+        initSenshiCFBypass(context)
         registerMainAPI(RaghavAnime())
 
         // Register Miruro's custom extractors

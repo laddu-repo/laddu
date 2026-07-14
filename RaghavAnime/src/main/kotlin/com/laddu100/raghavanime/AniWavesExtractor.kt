@@ -58,7 +58,6 @@ class AniWavesWebView(private val sourceName: String, private val baseUrl: Strin
     }
 }
 
-
 class AniWavesEchoVideo : ExtractorApi() {
     override val name = "EchoVideo"
     override val mainUrl = "https://play.echovideo.ru"

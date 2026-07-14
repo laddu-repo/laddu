@@ -36,7 +36,6 @@ class LIVETVSettings(
         .filter { sharedPref?.getBoolean(it, false) ?: false }
         .toMutableList()
 
-    // ── Resource helpers ──────────────────────────────────────────────────────
 
     @SuppressLint("DiscouragedApi")
     private fun getDrawable(name: String): Drawable? {
@@ -61,7 +60,6 @@ class LIVETVSettings(
         background = getDrawable("outline")
     }
 
-    // ── Fragment lifecycle ────────────────────────────────────────────────────
 
     @SuppressLint("DiscouragedApi")
     override fun onCreateView(
@@ -106,7 +104,6 @@ class LIVETVSettings(
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun restartApp() {
         val ctx = requireContext().applicationContext

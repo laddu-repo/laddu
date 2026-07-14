@@ -40,27 +40,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-// ════════════════════════════════════════════════════════════════════════════
-//  AniDB Cloudflare Bypass System
-//  ════════════════════════════════════════════════════════════════════════════
-//
-//  Architecture (improved from phisher98's implementation):
-//
-//  1. AniDbCFStore     — persistent cookie/UA storage with TTL (SharedPreferences)
-//  2. AniDbCFDialog    — BottomSheet WebView that solves the CF challenge
-//  3. cfAppGet()       — request wrapper: try → detect block → bypass → retry
-//  4. cfBypassMutex    — prevents multiple concurrent bypass dialogs
-//
-//  Improvements over phisher:
-//  - Cookie TTL tracking (auto-expire after 45 min, cf_clearance lasts ~1hr)
-//  - Proactive bypass (if no cookies stored, trigger before first request fails)
-//  - Better challenge detection (checks body content, not just status code)
-//  - Smart retry (up to 2 retries after bypass)
-//  - UA consistency (WebView UA used for ALL requests to the domain)
-//  - Cookie refresh (if cookies exist but request fails, force refresh)
-//  - Non-UI fallback (graceful failure when no activity available)
-// ════════════════════════════════════════════════════════════════════════════
-
 private const val TAG = "AniDB_CFBypass"
 
 // Phrases that indicate a Cloudflare challenge page
@@ -75,8 +54,6 @@ private val CF_CHALLENGE_TITLES = listOf(
     "just a moment", "just a moment...", "checking your browser",
     "attention required", "ddos-guard", "one more step"
 )
-
-// ─── Persistent Cookie/UA Storage with TTL ─────────────────────────────────
 
 private object AniDbCFStore {
     private const val PREFS_NAME = "AniDbCFBypass"
@@ -105,7 +82,6 @@ private object AniDbCFStore {
     fun getCookies(): String? {
         if (cachedCookies.isNullOrBlank()) return null
         if (System.currentTimeMillis() - cachedTimestamp > COOKIE_TTL_MS) {
-            Log.d(TAG, "Stored cookies expired (age=${(System.currentTimeMillis() - cachedTimestamp) / 1000}s)")
             clear()
             return null
         }
@@ -126,7 +102,6 @@ private object AniDbCFStore {
             putString(KEY_HOST, host)
             putLong(KEY_TIMESTAMP, cachedTimestamp)
         }?.apply()
-        Log.d(TAG, "Saved CF cookies for $host (UA=${userAgent.take(40)}...)")
     }
 
     fun clear() {
@@ -140,8 +115,6 @@ private object AniDbCFStore {
     fun hasValidCookies(): Boolean = getCookies() != null
 }
 
-// ─── Cloudflare Detection ──────────────────────────────────────────────────
-
 fun isCloudflareBlocked(response: NiceResponse): Boolean {
     if (response.code != 403 && response.code != 503) return false
     val body = response.text.lowercase()
@@ -153,11 +126,7 @@ private fun isChallengeTitle(title: String): Boolean {
     return CF_CHALLENGE_TITLES.any { lower.contains(it) }
 }
 
-// ─── Mutex (prevent multiple concurrent bypass dialogs) ────────────────────
-
 private val cfBypassMutex = Mutex()
-
-// ─── Cloudflare WebView Dialog ─────────────────────────────────────────────
 
 class AniDbCFDialog(
     private val targetUrl: String,
@@ -190,7 +159,6 @@ class AniDbCFDialog(
             if (cookiesSaved || !isAdded) return
             CookieManager.getInstance().flush()
             val cookieStr = CookieManager.getInstance().getCookie(targetHost) ?: ""
-            Log.d(TAG, "Poll [${pollElapsedMs}ms] cookies for $targetHost → ${cookieStr.take(80)}")
 
             when {
                 cookieStr.contains("cf_clearance") -> saveCookiesAndDismiss(cookieStr)
@@ -372,7 +340,6 @@ class AniDbCFDialog(
         val ua = webView?.settings?.userAgentString ?: ""
         AniDbCFStore.save(cookieStr, ua, targetHost)
 
-        Log.d(TAG, "✅ Saved cookies: ${cookieStr.take(80)}")
         updateStatus("✅ Done! Cookies saved.")
 
         webView?.postDelayed({
@@ -414,8 +381,6 @@ class AniDbCFDialog(
     }
 }
 
-// ─── Show CF Bypass Dialog (suspend) ───────────────────────────────────────
-
 private suspend fun showCFBypassDialogAndWait(url: String): Boolean = withContext(Dispatchers.Main) {
     val activity = CommonActivity.activity as? AppCompatActivity
     if (activity == null || activity.isFinishing || activity.isDestroyed) {
@@ -435,15 +400,6 @@ private suspend fun showCFBypassDialogAndWait(url: String): Boolean = withContex
         cont.invokeOnCancellation { dialog.dismissAllowingStateLoss() }
     }
 }
-
-// ─── Main Entry Point: cfAppGet() ──────────────────────────────────────────
-//
-//  This wraps app.get() with automatic Cloudflare bypass:
-//  1. If we have stored cookies → add them + use stored UA
-//  2. If response is CF-blocked → show bypass dialog → retry
-//  3. Mutex ensures only one dialog shows at a time
-//  4. Up to 2 retry attempts after bypass
-// ════════════════════════════════════════════════════════════════════════════
 
 suspend fun cfAppGet(
     url: String,
@@ -469,7 +425,6 @@ suspend fun cfAppGet(
         // Stored CF cookies + UA
         AniDbCFStore.getCookies()?.let { cookies ->
             h["Cookie"] = cookies
-            Log.d(TAG, "Using stored CF cookies for $targetHost")
         }
         AniDbCFStore.getUserAgent()?.let { ua ->
             h["User-Agent"] = ua
@@ -500,7 +455,6 @@ suspend fun cfAppGet(
         // Double-check: another coroutine may have already bypassed while we waited
         val cachedCookies = AniDbCFStore.getCookies()
         if (cachedCookies != null && AniDbCFStore.getHost() == targetHost) {
-            Log.d(TAG, "Cookies were refreshed by another coroutine — retrying")
             response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) return response
         }
@@ -516,10 +470,9 @@ suspend fun cfAppGet(
 
         // Retry with new cookies (up to 2 attempts)
         for (attempt in 1..2) {
-            Log.d(TAG, "Retrying request with new CF cookies (attempt $attempt)")
             response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) {
-                Log.d(TAG, "✅ Request succeeded after CF bypass (attempt $attempt)")
+                Log.d(TAG, " Request succeeded after CF bypass (attempt $attempt)")
                 return@withLock
             }
             Log.e(TAG, "Still CF-blocked after retry $attempt")
@@ -528,8 +481,6 @@ suspend fun cfAppGet(
 
     return response
 }
-
-// ─── Initialization ────────────────────────────────────────────────────────
 
 fun initAniDbCFBypass(context: Context) {
     AniDbCFStore.init(context)

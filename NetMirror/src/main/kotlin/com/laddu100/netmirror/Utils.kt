@@ -283,7 +283,7 @@ suspend fun loadNewTvLinks(
     } ?: return false
 
     val videoLink = resp.video_link
-    if (videoLink.isNullOrBlank() || resp.status != "ok") {
+    if (videoLink.isNullOrBlank()) {
         Log.e(TAG, "$providerName: no video_link status=${resp.status}")
         return false
     }
@@ -335,13 +335,20 @@ suspend fun getNewTvUserToken(apiBase: String, ott: String): String {
 
 @Volatile
 private var resolvedApiUrl: String = ""
+@Volatile
+private var resolvedApiUrlTime: Long = 0L
+private const val API_URL_TTL_MS = 10 * 60 * 1000L
 
 suspend fun resolveApiUrl(): String {
-    if (resolvedApiUrl.isNotBlank()) return resolvedApiUrl
+    val now = System.currentTimeMillis()
+    if (resolvedApiUrl.isNotBlank() && now - resolvedApiUrlTime < API_URL_TTL_MS) {
+        return resolvedApiUrl
+    }
 
     val (savedBase, savedTs) = NetflixMirrorStorage.getApiBase()
-    if (!savedBase.isNullOrEmpty() && System.currentTimeMillis() - savedTs < 86_400_000) {
+    if (!savedBase.isNullOrEmpty() && now - savedTs < 86_400_000) {
         resolvedApiUrl = savedBase
+        resolvedApiUrlTime = now
         Log.d(TAG, "resolveApiUrl: using cached=$savedBase")
         return resolvedApiUrl
     }
@@ -364,6 +371,7 @@ suspend fun resolveApiUrl(): String {
             }
             if (decoded.startsWith("http")) {
                 resolvedApiUrl = decoded
+                resolvedApiUrlTime = System.currentTimeMillis()
                 NetflixMirrorStorage.saveApiBase(decoded)
                 Log.d(TAG, "resolveApiUrl: resolved=$decoded")
                 return resolvedApiUrl

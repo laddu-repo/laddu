@@ -1,4 +1,4 @@
-version = 7
+version = 8
 
 cloudstream {
     description = "4K SPORTS - USE THIS IF YOUR DEVICE SUPPORTS 4K"

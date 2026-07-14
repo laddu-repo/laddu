@@ -188,7 +188,7 @@ object LIVETVCryptoUtils {
              * Already plain JSON/HTML
              */
             if (
-                raw.startsWith("{") ||
+                raw.startsWith("\u007B") ||
                 raw.startsWith("[") ||
                 raw.startsWith("<")
             ) {

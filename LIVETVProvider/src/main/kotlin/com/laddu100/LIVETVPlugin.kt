@@ -46,7 +46,12 @@ class LIVETVPlugin : Plugin() {
             .forEach { p ->
                 val title = p["title"] as String
                 val catLink = p["catLink"] as String
-                registerMainAPI(LIVETV(title, catLink))
+                val type = (p["type"] as? String) ?: "m3u"
+                if (type == "custom") {
+                    registerMainAPI(LIVETVLiveEventsProvider(title, catLink))
+                } else {
+                    registerMainAPI(LIVETV(title, catLink))
+                }
             }
 
         // Hook up the settings screen

@@ -77,27 +77,22 @@ class SettingsFragment(
             setPadding(0, 2.dp(), 0, 16.dp())
         })
 
-        // ── Clickable section: Catalogs ───────────────────────────────────
         root.addView(sectionButton(ctx, "CATALOGS", "AniList, TMDB, Cinemeta", dp) {
             showCatalogDialog(ctx, dp)
         })
 
-        // ── Clickable section: Torrent Sources ────────────────────────────
         root.addView(sectionButton(ctx, "TORRENT SOURCES", "Torrentio, TorrentsDB, Animetosho", dp) {
             showSourcesDialog(ctx, dp)
         })
 
-        // ── Clickable section: Debrid ─────────────────────────────────────
         root.addView(sectionButton(ctx, "DEBRID SERVICE", "Provider & API key", dp) {
             showDebridDialog(ctx, dp)
         })
 
-        // ── Clickable section: Stremio Addons ─────────────────────────────
         root.addView(sectionButton(ctx, "STREMIO ADDONS", "Custom addon URLs", dp) {
             showAddonsDialog(ctx, dp)
         })
 
-        // ── Close button ──────────────────────────────────────────────────
         root.addView(Button(ctx).apply {
             text = "CLOSE"
             setTextColor(cTextSub); textSize = 14f
@@ -108,8 +103,6 @@ class SettingsFragment(
 
         return scroll
     }
-
-    // ── Section button (clickable card) ──────────────────────────────────
 
     private fun sectionButton(
         ctx: Context, title: String, subtitle: String, dp: Float, onClick: () -> Unit
@@ -149,8 +142,6 @@ class SettingsFragment(
         }
     }
 
-    // ── Catalog Dialog ───────────────────────────────────────────────────
-
     @SuppressLint("UseSwitchCompatOrMaterialCode")
     private fun showCatalogDialog(ctx: Context, dp: Float) {
         val density = resources.displayMetrics.density
@@ -171,8 +162,6 @@ class SettingsFragment(
             .create().apply { show(); styleButtons() }
     }
 
-    // ── Sources Dialog ───────────────────────────────────────────────────
-
     @SuppressLint("UseSwitchCompatOrMaterialCode")
     private fun showSourcesDialog(ctx: Context, dp: Float) {
         val density = resources.displayMetrics.density
@@ -192,8 +181,6 @@ class SettingsFragment(
             .setNegativeButton("Cancel", null)
             .create().apply { show(); styleButtons() }
     }
-
-    // ── Debrid Dialog ────────────────────────────────────────────────────
 
     private fun showDebridDialog(ctx: Context, dp: Float) {
         val density = resources.displayMetrics.density
@@ -241,8 +228,6 @@ class SettingsFragment(
             .setNegativeButton("Cancel", null)
             .create().apply { show(); styleButtons() }
     }
-
-    // ── Addons Dialog ────────────────────────────────────────────────────
 
     private fun showAddonsDialog(ctx: Context, dp: Float) {
         val density = resources.displayMetrics.density
@@ -313,8 +298,6 @@ class SettingsFragment(
             .create().apply { show(); styleButtons() }
     }
 
-    // ── Reload ───────────────────────────────────────────────────────────
-
     private fun reloadPlugin() {
         try { MainActivity.reloadHomeEvent.invoke(true) } catch (_: Throwable) {}
     }
@@ -343,8 +326,6 @@ class SettingsFragment(
             reloadPlugin()
         }
     }
-
-    // ── UI helpers ───────────────────────────────────────────────────────
 
     private fun sectionLabel(ctx: Context, text: String, dp: Float): TextView {
         return TextView(ctx).apply {

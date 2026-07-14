@@ -95,7 +95,7 @@ class AniDb : MainAPI() {
         val year = doc.selectFirst("a[href*=&year=]")?.text()?.split(" ")?.lastOrNull()?.toIntOrNull()
         val ratingText = doc.select("span.badge-gray").firstOrNull { it.text().contains(Regex("[0-9]")) }?.ownText()?.trim()
         val rating = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
-        
+
         val episodesUrl = "$mainUrl/api/frontend/anime/$siteId/episodes"
         val epResponse = cfAppGet(episodesUrl, headers = mapOf("X-Requested-With" to "XMLHttpRequest", "Referer" to url, "Accept" to "application/json, text/plain, */*")).parsedSafe<EpisodesResponse>()
         val episodesList = epResponse?.episodes ?: emptyList()
@@ -127,11 +127,11 @@ class AniDb : MainAPI() {
         val animeMetaData = syncMetaData?.let { parseAnimeData(it) }
 
         val isMovie = doc.selectFirst("a[class*=badge-orange][href*=/browse?type=Movie]") != null
-        
+
         episodesList.forEachIndexed { index, ep ->
             val num = index + 1
             val metaEp = animeMetaData?.episodes?.get(num.toString())
-            
+
             val epName = metaEp?.title?.get("en") ?: metaEp?.title?.get("x-jat") ?: metaEp?.title?.get("ja") ?: "Episode $num"
             val epDesc = metaEp?.overview
             val epPoster = metaEp?.image
@@ -178,7 +178,7 @@ class AniDb : MainAPI() {
         val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
 
         val trailerUrl = doc.selectFirst("a[href*=youtube.com/watch]")?.attr("href")
-        
+
         val statusText = doc.selectFirst("a[class*=badge][href*=/browse?status=]")?.text()
         val showStatus = when (statusText) {
             "Finished Airing" -> ShowStatus.Completed
@@ -243,7 +243,7 @@ class AniDb : MainAPI() {
             val preferredCodes = if (audio == "sub") listOf("jpn", "ja", "japanese") else listOf("eng", "en", "english")
             listOfNotNull(langs.find { it.code?.lowercase() in preferredCodes } ?: langs.find { it.name?.lowercase() in preferredCodes })
         }
-        
+
         val hlsRegex = listOf(
             Regex("""file\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""", RegexOption.IGNORE_CASE),
             Regex("""sources\s*:\s*\[\s*\{[^}]*file\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""", RegexOption.IGNORE_CASE),
@@ -254,7 +254,7 @@ class AniDb : MainAPI() {
         langsToExtract.amap { language ->
             val embedUrl = language.embed_url ?: return@amap
             val embedDoc = cfAppGet(embedUrl, headers = mapOf("Referer" to "$mainUrl/")).text
-            
+
             var hlsUrl: String? = null
             for (regex in hlsRegex) {
                 val match = regex.find(embedDoc)
@@ -263,7 +263,7 @@ class AniDb : MainAPI() {
                     break
                 }
             }
-            
+
             if (hlsUrl != null) {
                 val sourceName = if (audio == "movie") "$name - ${language.name ?: "Unknown"}" else name
                 generateM3u8(
@@ -275,7 +275,7 @@ class AniDb : MainAPI() {
                 loadExtractor(embedUrl, "$mainUrl/", subtitleCallback, callback)
             }
         }
-        
+
         return true
     }
 

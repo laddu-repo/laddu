@@ -126,7 +126,7 @@ class StreamedPkProvider : MainAPI() {
                 Log.d("StreamedPk", "DNS bypass — $domain → $ip")
                 return rewritten
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
         return url
     }
 
@@ -149,22 +149,10 @@ class StreamedPkProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("StreamedPk: DoH resolution failed for $hostname - ${e.message}")
         }
         return emptyList()
     }
 
-    // ── DDoS-Guard cookie management ───────────────────────────────────────────
-    // streamed.pk is fronted by DDoS-Guard (server: ddos-guard) which intermittently
-    // issues challenge cookies (__ddg1_, __ddg8_, __ddg9_, __ddg10_ and, under
-    // stricter scrutiny, a JS-challenge cookie __ddg2_). OkHttp cannot execute
-    // the JS challenge, but DDoS-Guard lets a large share of requests through
-    // once the tracking cookies are present and echoed back. The previous code
-    // never persisted or re-sent these cookies, so every home-page load was a
-    // cold coin-flip against DDoS-Guard -> "no live matches" until the user
-    // reloaded enough times for one request to slip through and seed the
-    // (baseClient) cookie jar. We now manage cookies explicitly here so the
-    // success rate is high and predictable regardless of the base client config.
     private val cookieStore = ConcurrentHashMap<String, String>()
 
     private fun parseAndStoreCookies(headers: Headers) {
@@ -205,7 +193,6 @@ class StreamedPkProvider : MainAPI() {
                 parseAndStoreCookies(response.headers)
             }
         } catch (e: Exception) {
-            println("StreamedPk: warm-up error - ${e.message}")
         }
     }
 
@@ -267,19 +254,15 @@ class StreamedPkProvider : MainAPI() {
                 return customGetRaw(path, acceptHtml)
             } catch (e: Exception) {
                 lastError = e
-                println("StreamedPk: GET $path attempt $attempt/$maxAttempts failed - ${e.message}")
                 if (attempt < maxAttempts) {
                     val backoff = (attempt * 450L).coerceAtMost(2500L)
-                    try { delay(backoff) } catch (_: Exception) {}
+                    try { delay(backoff) } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
                 }
             }
         }
         throw lastError ?: Exception("GET $path failed after $maxAttempts attempts")
     }
 
-    // ── In-memory matches cache ────────────────────────────────────────────────
-    // Serves recent data on transient failures so the home page never shows
-    // "no matches" when matches actually exist.
     private data class CachedMatches(val matches: List<StreamedMatch>, val timestamp: Long)
     @Volatile private var matchesCache: CachedMatches? = null
     private val CACHE_TTL_MS = 60_000L          // considered fresh within 60s
@@ -296,14 +279,11 @@ class StreamedPkProvider : MainAPI() {
             // so the user never sees an empty home page due to a transient blip.
             val cached = matchesCache
             if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_STALE_LIMIT_MS) {
-                println("StreamedPk: API failed (${e.message}); serving cached matches (age=${(System.currentTimeMillis() - cached.timestamp) / 1000}s)")
                 return cached.matches
             }
             throw e
         }
     }
-
-    // ── Data classes for API structures ──────────────────────────────────────────
 
     data class StreamedMatch(
         @JsonProperty("id") val id: String,
@@ -349,8 +329,6 @@ class StreamedPkProvider : MainAPI() {
         val name: String,
         val url: String
     )
-
-    // ── Helpers ──────────────────────────────────────────────────────────────────
 
     private fun getCategoryTitle(cat: String?): String {
         val clean = cat?.lowercase() ?: ""
@@ -406,8 +384,6 @@ class StreamedPkProvider : MainAPI() {
         }
     }
 
-    // ── Main Page ─────────────────────────────────────────────────────────────
-
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
@@ -459,7 +435,6 @@ class StreamedPkProvider : MainAPI() {
                 lists.add(HomePageList("📅 Upcoming Matches", upcomingItems, isHorizontalImages = true))
             }
         } catch (e: Exception) {
-            println("StreamedPk: getMainPage failed after retries - ${e.message}")
             fetchFailed = true
         }
 
@@ -491,8 +466,6 @@ class StreamedPkProvider : MainAPI() {
         return newHomePageResponse(lists, hasNext = false)
     }
 
-    // ── Search ────────────────────────────────────────────────────────────────
-
     override suspend fun search(query: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
         try {
@@ -519,12 +492,9 @@ class StreamedPkProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            println("StreamedPk: Search failed - ${e.message}")
         }
         return results
     }
-
-    // ── Load ──────────────────────────────────────────────────────────────────
 
     override suspend fun load(url: String): LoadResponse {
         val eventData = parseJson<EventLoadData>(url)
@@ -553,7 +523,6 @@ class StreamedPkProvider : MainAPI() {
                 posterUrl = getPosterForMatch(freshMatch.category, freshMatch.poster)
             }
         } catch (e: Exception) {
-            println("StreamedPk: Failed to fetch fresh match details in load - ${e.message}")
         }
 
         val isUpcoming = sources.isNullOrEmpty()
@@ -580,7 +549,6 @@ class StreamedPkProvider : MainAPI() {
                         streamsList.add(StreamInfo(name = serverName, url = customUrl))
                     }
                 } catch (e: Exception) {
-                    println("StreamedPk: Failed to load stream details for ${src.source}:${src.id} - ${e.message}")
                 }
             }
         }
@@ -598,8 +566,6 @@ class StreamedPkProvider : MainAPI() {
             this.dataUrl = streamData.toJson()
         }
     }
-
-    // ── Load Links ────────────────────────────────────────────────────────────
 
     private val ua = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
@@ -645,7 +611,6 @@ class StreamedPkProvider : MainAPI() {
                         webChromeClient = object : WebChromeClient() {
                             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                                 val msg = consoleMessage?.message() ?: ""
-                                Log.d("StreamedPkJS", "[Console] $msg")
                                 return true
                             }
                         }
@@ -653,12 +618,10 @@ class StreamedPkProvider : MainAPI() {
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                                 super.onPageFinished(view, pageUrl)
-                                Log.d("StreamedPk", "Page finished loading: $pageUrl")
 
                                 Handler(Looper.getMainLooper()).postDelayed({
                                     if (captured.get()) return@postDelayed
                                     view?.evaluateJavascript(playScript) { result ->
-                                        Log.d("StreamedPkJS", "Hook injection result: $result")
                                     }
                                 }, 1500)
                             }
@@ -668,11 +631,9 @@ class StreamedPkProvider : MainAPI() {
                                 request: WebResourceRequest?
                             ): WebResourceResponse? {
                                 val reqUrl = request?.url?.toString() ?: return null
-                                Log.d("StreamedPkNet", "Request: $reqUrl")
 
                                 // Capture m3u8/master.txt stream URLs
                                 if ((reqUrl.contains(".m3u8", ignoreCase = true) || reqUrl.contains("master.txt", ignoreCase = true)) && !captured.get()) {
-                                    Log.d("StreamedPk", "Captured stream URL: $reqUrl")
                                     if (captured.compareAndSet(false, true)) {
                                         Handler(Looper.getMainLooper()).post {
                                             try {
@@ -717,7 +678,6 @@ class StreamedPkProvider : MainAPI() {
                                     response.headers.forEach { (k, v) -> respHeaders[k] = v }
                                     return WebResourceResponse(mimeType, encoding, statusCode, reason, respHeaders, stream)
                                 } catch (e: Exception) {
-                                    Log.d("StreamedPkNet", "DoH proxy failed for $reqUrl: ${e.message}")
                                     // Fall back to WebView's default handling
                                     return null
                                 }
@@ -835,7 +795,6 @@ class StreamedPkProvider : MainAPI() {
         val streamData = try {
             parseJson<StreamLoadData>(data)
         } catch (e: Exception) {
-            println("StreamedPk: loadLinks parse error - ${e.message}")
             return false
         }
 
@@ -904,7 +863,6 @@ class StreamedPkProvider : MainAPI() {
                     }
                 }
             } catch (e: Exception) {
-                println("StreamedPk: Failed to resolve links for ${stream.name} - ${e.message}")
             }
         }
 

@@ -44,7 +44,7 @@ import kotlin.coroutines.resume
 //  Anidap Anti-Bot Bypass System
 //  ════════════════════════════════════════════════════════════════════════════
 //
-//  anidap.se & chad.anidap.se use a CUSTOM anti-bot cookie called `_amx_id`
+//  anidap.lol & chad.anidap.lol use a CUSTOM anti-bot cookie called `_amx_id`
 //  (NOT Cloudflare's cf_clearance). The cookie is a JWT-like token that binds
 //  to the client's IP + User-Agent. When the anti-bot flags a request, it
 //  returns HTTP 403 with body: {"error":"bot_detected","status":403} (37 bytes).
@@ -57,7 +57,7 @@ import kotlin.coroutines.resume
 //
 //  Architecture (adapted from AniDbCloudflare.kt):
 //  1. AnidapCFStore     — persistent cookie/UA storage with TTL (SharedPreferences)
-//  2. AnidapCFDialog    — BottomSheet WebView that loads a chad.anidap.se API
+//  2. AnidapCFDialog    — BottomSheet WebView that loads a chad.anidap.lol API
 //                         URL with a REAL browser TLS fingerprint + UA, captures
 //                         the resulting `_amx_id` cookie + WebView UA
 //  3. cfAppGet()        — request wrapper: try → detect 403 → bypass → retry
@@ -65,9 +65,9 @@ import kotlin.coroutines.resume
 //
 //  Key differences from AniDbCloudflare:
 //  - Cookie name is `_amx_id` (not cf_clearance)
-//  - Target host is `chad.anidap.se` (the API subdomain that issues the cookie)
+//  - Target host is `chad.anidap.lol` (the API subdomain that issues the cookie)
 //  - The cookie is host-only (no Domain= attribute), so we MUST capture it
-//    from chad.anidap.se, not anidap.se
+//    from chad.anidap.lol, not anidap.lol
 //  - We MUST use the WebView's exact UA for all subsequent app.get() calls
 //    because the cookie validates against (IP, UA) pairs
 // ════════════════════════════════════════════════════════════════════════════
@@ -75,7 +75,7 @@ import kotlin.coroutines.resume
 private const val TAG = "Anidap_CFBypass"
 
 // The API subdomain that issues and validates the _amx_id cookie
-private const val CHAD_HOST = "https://chad.anidap.se"
+private const val CHAD_HOST = "https://chad.anidap.lol"
 
 // A lightweight API endpoint that the WebView can load to trigger cookie issuance.
 // We use the servers endpoint with a known slug — it returns small JSON and sets
@@ -219,7 +219,7 @@ class AnidapCFDialog(
                     else scheduleNextPoll()
                 }
                 pollElapsedMs >= POLL_TIMEOUT_MS -> {
-                    updateStatus("⏱️ Timed out. Try opening anidap.se in a browser, then tap Bypass again.")
+                    updateStatus("⏱️ Timed out. Try opening anidap.lol in a browser, then tap Bypass again.")
                 }
                 else -> scheduleNextPoll()
             }
@@ -228,7 +228,7 @@ class AnidapCFDialog(
 
     private fun scheduleNextPoll() {
         pollElapsedMs += POLL_INTERVAL_MS
-        updateStatus("⏳ Loading anidap.se in browser… (${pollElapsedMs / 1000}s)")
+        updateStatus("⏳ Loading anidap.lol in browser… (${pollElapsedMs / 1000}s)")
         handler.postDelayed(cookiePollRunnable, POLL_INTERVAL_MS)
     }
 
@@ -276,7 +276,7 @@ class AnidapCFDialog(
 
         // Status text
         TextView(requireContext()).apply {
-            text = "Loading anidap.se in browser…"
+            text = "Loading anidap.lol in browser…"
             textSize = 13f
             setTextColor(Color.parseColor("#A0A0B0"))
             setPadding(0, 0, 0, (4 * dp).toInt())
@@ -459,7 +459,7 @@ private suspend fun showCFBypassDialogAndWait(url: String = CF_TRIGGER_URL): Boo
 
 // ─── Main Entry Point: cfAppGet() ──────────────────────────────────────────
 //
-//  This wraps app.get() with automatic anti-bot bypass for chad.anidap.se:
+//  This wraps app.get() with automatic anti-bot bypass for chad.anidap.lol:
 //  1. If we have stored _amx_id cookies → add them + use stored WebView UA
 //  2. If response is blocked (403 bot_detected) → show bypass dialog → retry
 //  3. Mutex ensures only one dialog shows at a time
@@ -487,7 +487,7 @@ suspend fun cfAppGet(
             h["Accept-Language"] = "en-US,en;q=0.9"
         }
         if (!h.containsKey("Origin")) {
-            h["Origin"] = "https://anidap.se"
+            h["Origin"] = "https://anidap.lol"
         }
         if (!h.containsKey("Sec-Fetch-Dest")) {
             h["Sec-Fetch-Dest"] = "empty"

@@ -1,5 +1,7 @@
 package com.laddu100
 
+import com.lagradost.api.Log
+
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -13,16 +15,13 @@ import java.util.concurrent.ConcurrentHashMap
 
 class DamiTVProvider : MainAPI() {
 
-    override var mainUrl = "https://dami-tv.pro"
+    override var mainUrl = "https://damitv.st"
     override var name = "DamiTV"
     override var lang = "en"
     override val hasMainPage = true
     override val hasChromecastSupport = true
     override val supportedTypes = setOf(TvType.Live)
 
-    // ── DNS bypass for ISP-blocked domains ──────────────────────────────────
-    // Some ISPs block dami-tv.pro at the DNS level. We use Cloudflare DoH
-    // (1.1.1.1) to resolve the correct IP, bypassing ISP DNS hijacking.
     private val dnsCache = ConcurrentHashMap<String, List<InetAddress>>()
 
     private val customDns = object : Dns {
@@ -73,7 +72,7 @@ class DamiTVProvider : MainAPI() {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
         return emptyList()
     }
 
@@ -102,10 +101,10 @@ class DamiTVProvider : MainAPI() {
                 val ip = ips[0].hostAddress
                 // Rewrite URL: https://domain.com/path → https://IP/path
                 val rewritten = url.replace("//$domain", "//$ip")
-                println("DamiTV: DNS bypass — $domain → $ip")
+                Log.d("DamiTV", "DamiTV: DNS bypass — $domain → $ip")
                 return rewritten
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
         return url
     }
 
@@ -129,7 +128,7 @@ class DamiTVProvider : MainAPI() {
                 isUrlLoaded = true
             }
         } catch (e: Exception) {
-            println("DamiTV: Failed to load Firebase URL - ${e.message}")
+            Log.d("DamiTV", "DamiTV: Failed to load Firebase URL - ${e.message}")
         }
     }
 
@@ -150,8 +149,6 @@ class DamiTVProvider : MainAPI() {
             "Origin" to mainUrl,
             "Accept" to "*/*"
         )
-
-    // ── Data classes for API JSON structures ───────────────────────────────────
 
     data class DamiTvChannel(
         @JsonProperty("id") val id: String,
@@ -250,8 +247,6 @@ class DamiTVProvider : MainAPI() {
         @JsonProperty("error") val error: String?
     )
 
-    // ── Helpers ────────────────────────────────────────────────────────────
-
     private fun formatMatchDate(timestamp: Long?): String {
         if (timestamp == null) return "soon"
         return try {
@@ -266,7 +261,7 @@ class DamiTVProvider : MainAPI() {
 
     // Fetch a fresh signed HLS URL from /papi/extract-url right before playback.
     // Retries once to absorb transient Cloudflare/network hiccups, which are a
-    // common cause of intermittent playback failures on dami-tv.pro.
+    // common cause of intermittent playback failures on damitv.st.
     private suspend fun fetchExtractUrl(id: String): ExtractUrlResponse? {
         repeat(2) { attempt ->
             try {
@@ -274,7 +269,7 @@ class DamiTVProvider : MainAPI() {
                 val resp = parseJson<ExtractUrlResponse>(text)
                 if (resp.success) return resp
             } catch (e: Exception) {
-                println("DamiTV: extract-url attempt ${attempt + 1} failed for $id - ${e.message}")
+                Log.d("DamiTV", "DamiTV: extract-url attempt ${attempt + 1} failed for $id - ${e.message}")
             }
         }
         return null
@@ -327,8 +322,6 @@ class DamiTVProvider : MainAPI() {
         }
     }
 
-    // ── Main Page ─────────────────────────────────────────────────────────
-
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
@@ -379,13 +372,11 @@ class DamiTVProvider : MainAPI() {
                 lists.add(HomePageList("📡 24/7 Channels & Live TV", items, isHorizontalImages = true))
             }
         } catch (e: Exception) {
-            println("DamiTV: Failed to load matches - ${e.message}")
+            Log.d("DamiTV", "DamiTV: Failed to load matches - ${e.message}")
         }
 
         return newHomePageResponse(lists, hasNext = false)
     }
-
-    // ── Search ──────────────────────────────────────────────────────────
 
     override suspend fun search(query: String): List<SearchResponse> {
         loadFirebaseUrl()
@@ -406,12 +397,10 @@ class DamiTVProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("DamiTV: Search failed - ${e.message}")
+            Log.d("DamiTV", "DamiTV: Search failed - ${e.message}")
             emptyList()
         }
     }
-
-    // ── Load ──────────────────────────────────────────────────────────
 
     override suspend fun load(url: String): LoadResponse {
         loadFirebaseUrl()
@@ -453,13 +442,9 @@ class DamiTVProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            println("DamiTV: Load failed to query extract-url - ${e.message}")
+            Log.d("DamiTV", "DamiTV: Load failed to query extract-url - ${e.message}")
         }
 
-        // 3. Handle streamed.pk sources
-        // NOTE: dami-tv.pro renamed the `streamedSources` JSON field to `sources`.
-        // Prefer the new field and fall back to the legacy one so old cached
-        // detail-page payloads keep working.
         val streamedSourcesList = eventData.sources ?: eventData.streamedSources
         var addedStreamedSources = false
         if (!streamedSourcesList.isNullOrEmpty()) {
@@ -476,16 +461,16 @@ class DamiTVProvider : MainAPI() {
                         val quality = if (st.hd == true) "HD" else "SD"
                         val lang = st.language?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""
                         val stName = "$namePrefix$sn ($quality$lang)"
-                        
+
                         val encodedId = java.net.URLEncoder.encode(src.id, "UTF-8").replace("+", "%20")
                         val encodedFallback = st.embedUrl?.let { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") } ?: ""
                         val customUrl = "streamed://${src.source}?id=$encodedId&num=$sn&fallback=$encodedFallback"
-                        
+
                         streamsList.add(StreamInfo(name = stName, url = customUrl))
                         addedStreamedSources = true
                     }
                 } catch (e: Exception) {
-                    println("DamiTV: Failed to load streamed source - ${e.message}")
+                    Log.d("DamiTV", "DamiTV: Failed to load streamed source - ${e.message}")
                 }
             }
         }
@@ -517,8 +502,6 @@ class DamiTVProvider : MainAPI() {
         }
     }
 
-    // ── Load Links ────────────────────────────────────────────────────────
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -529,7 +512,6 @@ class DamiTVProvider : MainAPI() {
         val streamData = try {
             parseJson<StreamLoadData>(data)
         } catch (e: Exception) {
-            println("DamiTV: loadLinks parse error — ${e.message}")
             return false
         }
 
@@ -570,11 +552,11 @@ class DamiTVProvider : MainAPI() {
                         val queryIndex = stripped.indexOf('?')
                         val source = if (queryIndex != -1) stripped.substring(0, queryIndex) else stripped
                         val queryString = if (queryIndex != -1) stripped.substring(queryIndex + 1) else ""
-                        
+
                         var streamId = ""
                         var streamNo = ""
                         var fallbackUrl = ""
-                        
+
                         if (queryString.isNotEmpty()) {
                             val params = queryString.split('&')
                             for (param in params) {
@@ -627,7 +609,6 @@ class DamiTVProvider : MainAPI() {
                                     foundAny = true
                                 }
                             } catch (e: Exception) {
-                                println("DamiTV: sd-token direct HLS unavailable for ${stream.name} - ${e.message}")
                             }
 
                             // Fallback: hand the variant's embedUrl to CloudStream's extractor
@@ -639,14 +620,12 @@ class DamiTVProvider : MainAPI() {
                                 try {
                                     loadExtractor(fallbackUrl, "$mainUrl/", subtitleCallback, callback)
                                 } catch (e: Exception) {
-                                    println("DamiTV: loadExtractor failed for ${stream.name} - ${e.message}")
                                 }
                             }
                         }
                     } catch (e: Exception) {
-                        println("DamiTV: Failed to load streamed link for ${stream.name} - ${e.message}")
                     }
-                } 
+                }
                 // 3. Standard PPV extraction
                 else {
                     // Fetch a fresh signed HLS URL right before playing (with retry).
@@ -654,7 +633,6 @@ class DamiTVProvider : MainAPI() {
                     if (response != null) {
                         val playHeaders = hlsPlayHeaders
 
-                        // === PRIMARY: Direct HLS from BunnyCDN ===
                         if (!response.hlsUrl.isNullOrBlank()) {
                             callback.invoke(
                                 newExtractorLink(
@@ -669,23 +647,17 @@ class DamiTVProvider : MainAPI() {
                             foundAny = true
                         }
 
-                        // === FALLBACK: hand embedUrl to CloudStream's extractor registry ===
-                        // embedindia.st is a JS-rendered player: the real m3u8 is resolved at
-                        // runtime (WASM -> vishnu.indianservers.st) and is NOT present in the
-                        // HTML, so HTTP regex scraping cannot recover it. We only try the
-                        // built-in extractor registry in case a future extractor supports it;
-                        // any failure is non-fatal (the direct hlsUrl above is the real source).
                         if (!response.embedUrl.isNullOrBlank()) {
                             try {
                                 loadExtractor(response.embedUrl, "$mainUrl/", subtitleCallback, callback)
                             } catch (extractError: Exception) {
-                                println("DamiTV: loadExtractor failed for ${stream.name} - ${extractError.message}")
+                                Log.d("DamiTV", "DamiTV: loadExtractor failed for ${stream.name} - ${extractError.message}")
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
-                println("DamiTV: Failed to load stream link for ${stream.name} - ${e.message}")
+                Log.d("DamiTV", "DamiTV: Failed to load stream link for ${stream.name} - ${e.message}")
             }
         }
 

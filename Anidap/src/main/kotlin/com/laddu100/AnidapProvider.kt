@@ -14,14 +14,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
 class AnidapProvider : MainAPI() {
-    override var mainUrl = "https://anidap.se"
+    override var mainUrl = "https://anidap.lol"
     override var name = "Anidap"
     override var lang = "en"
     override val hasMainPage = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    private val chadUrl = "https://chad.anidap.se/rest/api"
+    private val chadUrl = "https://chad.anidap.lol/rest/api"
     private val TAG = "Anidap"
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
 
@@ -526,7 +526,7 @@ class AnidapProvider : MainAPI() {
     //   - uwu/kiwi            → Origin: https://animex.one
     //   - sora                → Referer: https://kaa.lt/ + Android User-Agent
     //
-    // The old code extracted only Referer and fell back to anidap.se/ — that's
+    // The old code extracted only Referer and fell back to anidap.lol/ — that's
     // why uwu/kiwi/sora always failed (403). Now we pass the FULL headers map.
 
     override suspend fun loadLinks(

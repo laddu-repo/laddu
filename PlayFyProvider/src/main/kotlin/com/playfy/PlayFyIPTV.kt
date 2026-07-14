@@ -1,4 +1,4 @@
-package com.laddu100
+﻿package com.playfy
 
 import android.util.Base64
 import com.lagradost.cloudstream3.*
@@ -56,7 +56,7 @@ class LoggingInterceptor : Interceptor {
   }
 }
 
-class LIVETV(
+class PlayFyIPTV(
     private val customName: String = "IPTV Player",
     private val customMainUrl: String = "https://fifabd.site/OPLLX7/LIVE2.m3u"
 ) : MainAPI() {
@@ -66,7 +66,7 @@ class LIVETV(
         const val EXT_INF = "#EXTINF"
         const val EXT_VLC_OPT = "#EXTVLCOPT"
     }
-    
+
     override var lang = "ta"
     override var mainUrl = customMainUrl
     override var name = customName
@@ -141,7 +141,7 @@ private fun String.hexToBase64UrlOrNull(): String? {
             }
 
             val trimmedContent = content.trim()
-            
+
             // Try to decrypt encrypted content
             if (trimmedContent.length < 79) {
                 return trimmedContent // Too short to be encrypted, return as-is
@@ -227,7 +227,6 @@ private fun String.hexToBase64UrlOrNull(): String? {
     ): HomePageResponse {
         // Show star popup on first visit (shared across all CNCVerse plugins)
 
-        
         val rawContent = getWithCustomHeaders(mainUrl)
         val decryptedContent = decryptContent(rawContent)
         val data = IptvPlaylistParser().parseM3U(decryptedContent)
@@ -260,6 +259,7 @@ private fun String.hexToBase64UrlOrNull(): String? {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+
         val rawContent = getWithCustomHeaders(mainUrl)
         val decryptedContent = decryptContent(rawContent)
         val data = IptvPlaylistParser().parseM3U(decryptedContent)
@@ -283,6 +283,7 @@ private fun String.hexToBase64UrlOrNull(): String? {
     }
 
     override suspend fun load(url: String): LoadResponse {
+
         val data = parseJson<LoadData>(url)
         return newLiveStreamLoadResponse(data.title,url,url)
         {
@@ -524,7 +525,6 @@ private fun String.hexToBase64UrlOrNull(): String? {
     }
 }
 
-
 data class Playlist(
     val items: List<PlaylistItem> = emptyList(),
 )
@@ -541,7 +541,6 @@ data class PlaylistItem(
     val licenseUrl: String? = null,
     val drmKeys: Map<String, String> = emptyMap(),
 )
-
 
 class IptvPlaylistParser {
 
@@ -642,7 +641,6 @@ class IptvPlaylistParser {
         return key to keyId
     }
 
-
     /**
      * Parse M3U8 string into [Playlist]
      *
@@ -676,20 +674,19 @@ class IptvPlaylistParser {
         var bufferedTitle: String? = null
         var bufferedAttributes: Map<String, String> = emptyMap()
 
-
         while (i < allLines.size) {
             val line = allLines[i].trim()
 
             if (line.isNotEmpty()) {
                 when {
-                    line.startsWith(LIVETV.EXT_INF) -> {
+                    line.startsWith(PlayFyIPTV.EXT_INF) -> {
                         bufferedTitle = line.getTitle()
                         bufferedAttributes = line.getAttributes()
 
                         // Extract DRM keys from attributes if present
                         val keyFromAttr = bufferedAttributes["key"] ?: bufferedAttributes["drm-key"]
                         val keyidFromAttr = bufferedAttributes["keyid"] ?: bufferedAttributes["drm-keyid"] ?: bufferedAttributes["kid"]
-                        
+
                         // Only use attribute keys if no buffered keys exist
                         if (bufferedKey == null) bufferedKey = keyFromAttr
                         if (bufferedKeyId == null) bufferedKeyId = keyidFromAttr
@@ -709,7 +706,7 @@ class IptvPlaylistParser {
                             // Ignore parsing errors
                         }
                     }
-                    line.startsWith(LIVETV.EXT_VLC_OPT) -> {
+                    line.startsWith(PlayFyIPTV.EXT_VLC_OPT) -> {
                         // Buffer user agent and referrer
                         val userAgent = line.getTagValue("http-user-agent")
                         val referrer = line.getTagValue("http-referrer") ?: line.getTagValue("http-referer")
@@ -806,7 +803,6 @@ class IptvPlaylistParser {
                             j++
                         }
 
-
                         // Update index to skip the lines we've already processed
                         i = j - 1
 
@@ -876,7 +872,7 @@ class IptvPlaylistParser {
      * Check if given content is valid M3U8 playlist.
      */
     private fun String.isExtendedM3u(): Boolean =
-        startsWith(LIVETV.EXT_M3U) || startsWith(LIVETV.EXT_INF) || startsWith("#KODIPROP")
+        startsWith(PlayFyIPTV.EXT_M3U) || startsWith(PlayFyIPTV.EXT_INF) || startsWith("#KODIPROP")
 
     /**
      * Get title of media.
@@ -1014,7 +1010,6 @@ class IptvPlaylistParser {
         } else {
             afterExtInf.trim()
         }
-
 
         val attributes = mutableMapOf<String, String>()
 

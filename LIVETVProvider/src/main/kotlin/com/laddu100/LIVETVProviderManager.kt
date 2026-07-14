@@ -1,5 +1,7 @@
 package com.laddu100
 
+import com.lagradost.api.Log
+
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -7,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
-// ── Data classes shared by provider/live-event layers ────────────────────────
 
 data class LIVETVProviderEntry(
     val id: Int,
@@ -50,7 +51,6 @@ data class LIVETVEventData(
     val priority: Int?
 )
 
-// ── Live event domain model (mirrored from SKTech) ────────────────────────────
 
 data class LIVELiveEventData(
     val id: Int,
@@ -82,14 +82,13 @@ data class LIVELiveEventFormat(
     val webLink: String?
 )
 
-// ── Manager singleton ─────────────────────────────────────────────────────────
 
 object LIVETVProviderManager {
 
     /** Hardcoded fallback base URLs from the LIVE TV plugin.js */
     private val DEFAULT_BASE_URLS = listOf(
         "https://adsflw.xyz",
-        "https://livetv2828.store"
+        "https://playztv2828.store"
     )
 
     private var cachedBaseUrl: String? = null
@@ -99,7 +98,6 @@ object LIVETVProviderManager {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // ── Internal helpers ──────────────────────────────────────────────────────
 
     private fun parseDateTime(date: String?, time: String?): String? {
         if (date == null || time == null) return null
@@ -155,16 +153,15 @@ object LIVETVProviderManager {
                 val body = response.body.string()
                 if (body.isNotBlank()) LIVETVCryptoUtils.decryptLIVETV(body.trim()) else null
             } else {
-                println("LIVETV: HTTP ${response.code} fetching $url")
+                Log.d("LIVETV", "LIVETV: HTTP ${response.code} fetching $url")
                 null
             }
         } catch (e: Exception) {
-            println("LIVETV: Exception fetching $url – ${e.message}")
+            Log.d("LIVETV", "LIVETV: Exception fetching $url – ${e.message}")
             null
         }
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
 
     /**
      * Fetches the provider/category list from `{baseUrl}/categories.txt`.
@@ -183,17 +180,18 @@ object LIVETVProviderManager {
                                 "id" to (index + 1),
                                 "title" to cat.name,
                                 "image" to (cat.logo ?: ""),
-                                "catLink" to cat.api
+                                "catLink" to cat.api,
+                                "type" to (cat.type ?: "m3u")
                             )
                         } else null
                     } catch (e: Exception) {
-                        println("LIVETV: Failed to parse category at $index – ${e.message}")
+                        Log.d("LIVETV", "LIVETV: Failed to parse category at $index – ${e.message}")
                         null
                     }
                 }
             }
         } catch (e: Exception) {
-            println("LIVETV: fetchProviders exception – ${e.message}")
+            Log.d("LIVETV", "LIVETV: fetchProviders exception – ${e.message}")
         }
         emptyList()
     }
@@ -234,14 +232,63 @@ object LIVETVProviderManager {
                             } ?: emptyList()
                         )
                     } catch (e: Exception) {
-                        println("LIVETV: Failed to parse event at $index – ${e.message}")
+                        Log.d("LIVETV", "LIVETV: Failed to parse event at $index – ${e.message}")
                         null
                     }
                 }
                 return@withContext events.filter { it.publish == 1 }
             }
         } catch (e: Exception) {
-            println("LIVETV: fetchLiveEvents exception – ${e.message}")
+            Log.d("LIVETV", "LIVETV: fetchLiveEvents exception – ${e.message}")
+        }
+        emptyList()
+    }
+
+    /**
+     * Fetches custom live events from `{baseUrl}/{catLink}` (used for
+     * category entries whose `type` is "custom").
+     */
+    suspend fun fetchCustomEvents(catLink: String): List<LIVELiveEventData> = withContext(Dispatchers.IO) {
+        try {
+            val decrypted = fetchDecrypted(catLink)
+            if (!decrypted.isNullOrBlank()) {
+                val wrappers = parseJson<List<LIVETVEventWrapper>>(decrypted)
+                val events = wrappers.mapIndexedNotNull { index, wrapper ->
+                    try {
+                        val ev = parseJson<LIVETVEventData>(wrapper.event)
+                        LIVELiveEventData(
+                            id = index + 1,
+                            title = ev.eventName ?: "Unknown Event",
+                            image = ev.eventLogo,
+                            slug = ev.links?.substringBeforeLast(".") ?: "",
+                            cat = ev.category,
+                            eventInfo = LIVELiveEventInfo(
+                                teamA = ev.teamAName,
+                                teamB = ev.teamBName,
+                                teamAFlag = ev.teamAFlag,
+                                teamBFlag = ev.teamBFlag,
+                                eventCat = ev.category,
+                                eventName = ev.eventName,
+                                eventLogo = ev.eventLogo,
+                                isHot = null,
+                                eventType = ev.category,
+                                startTime = parseDateTime(ev.date, ev.time),
+                                endTime = parseDateTime(ev.end_date, ev.end_time)
+                            ),
+                            publish = if (ev.visible == true) 1 else 0,
+                            formats = ev.link_names?.map { name ->
+                                LIVELiveEventFormat(title = name, webLink = ev.links)
+                            } ?: emptyList()
+                        )
+                    } catch (e: Exception) {
+                        Log.d("LIVETV", "LIVETV: Failed to parse custom event at $index – ${e.message}")
+                        null
+                    }
+                }
+                return@withContext events.filter { it.publish == 1 }
+            }
+        } catch (e: Exception) {
+            Log.d("LIVETV", "LIVETV: fetchCustomEvents exception – ${e.message}")
         }
         emptyList()
     }
@@ -257,13 +304,12 @@ object LIVETVProviderManager {
                 return@withContext parseJson<List<LIVEStreamUrl>>(decrypted)
             }
         } catch (e: Exception) {
-            println("LIVETV: fetchChannelStreams exception for $slug – ${e.message}")
+            Log.d("LIVETV", "LIVETV: fetchChannelStreams exception for $slug – ${e.message}")
         }
         null
     }
 }
 
-// ── Stream URL model returned by /channels/{slug}.txt ────────────────────────
 
 data class LIVEStreamUrl(
     val name: String?,

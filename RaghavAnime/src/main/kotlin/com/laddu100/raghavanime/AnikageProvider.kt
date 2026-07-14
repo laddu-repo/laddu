@@ -1,6 +1,5 @@
 package com.laddu100.raghavanime
 
-
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
@@ -68,7 +67,7 @@ class AnikageProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val slug = url.substringAfterLast("/")
-        
+
         val episodesUrl = "$mainUrl/api/media/anime/$slug/episodes"
         val episodesText = app.get(episodesUrl).text
         val episodesList = try {
@@ -82,14 +81,14 @@ class AnikageProvider : MainAPI() {
         val animeInfo = infoParsed.anime
 
         val titleName = animeInfo.title.english ?: animeInfo.title.romaji
-        
+
         val tvType = if (animeInfo.type.contains("movie", true)) TvType.AnimeMovie else TvType.Anime
 
         return newAnimeLoadResponse(titleName, url, tvType) {
             this.posterUrl = animeInfo.coverImage.extraLarge ?: animeInfo.coverImage.large
             this.backgroundPosterUrl = animeInfo.bannerImage
             this.year = animeInfo.year
-            
+
             animeInfo.anilistId?.let { addAniListId(it) }
             animeInfo.idMal?.let { addMalId(it) }
 
@@ -134,10 +133,10 @@ class AnikageProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean = coroutineScope {
         val epData = parseJson<EpisodeData>(data)
-        
+
         val langs = if (epData.isDub) listOf("dub") else listOf("sub")
         val lang = langs.first()
-        
+
         val serversUrl = "$mainUrl/api/media/anime/${epData.slug}/episodes/${epData.number}/servers?lang=$lang"
         val serversData = try {
             parseJson<List<ServerData>>(app.get(serversUrl).text)
@@ -152,7 +151,7 @@ class AnikageProvider : MainAPI() {
                     try {
                         val res = app.get(sourceUrl).text
                         val sourceData = parseJson<EpisodeSource>(res)
-                        
+
                         sourceData.subtitles?.amap { sub ->
                             subtitleCallback(newSubtitleFile(sub.label ?: lang, "https://prox.anikage.cc/vtt/${sub.file}"))
                         }
@@ -165,7 +164,7 @@ class AnikageProvider : MainAPI() {
                         sourceData.sources?.amap { src ->
                             val isM3u8 = src.isM3U8 == true
                             val videoUrl = "https://prox.anikage.cc/${if(isM3u8) "m3u8" else "stream"}/${src.url}"
-                            
+
                             val nameStr = "$baseNameStr ${src.quality?.replaceFirstChar { it.uppercase() } ?: ""}".trim()
 
                             callback(
@@ -180,7 +179,7 @@ class AnikageProvider : MainAPI() {
                                 }
                             )
                         }
-                        
+
                         sourceData.embeds?.amap { embed ->
                             loadExtractor(embed.url, "$mainUrl/", subtitleCallback, callback)
                         }
@@ -189,7 +188,7 @@ class AnikageProvider : MainAPI() {
                     }
                 }
         }.awaitAll()
-        
+
         true
     }
 

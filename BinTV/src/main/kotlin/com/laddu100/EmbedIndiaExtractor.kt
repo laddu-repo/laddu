@@ -113,7 +113,6 @@ class EmbedIndiaExtractor(private val context: Context) : ExtractorApi() {
                         webChromeClient = object : WebChromeClient() {
                             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                                 val msg = consoleMessage?.message() ?: ""
-                                Log.d("EmbedIndiaJS", "[Console] $msg")
                                 return true
                             }
                         }
@@ -121,13 +120,11 @@ class EmbedIndiaExtractor(private val context: Context) : ExtractorApi() {
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, pageUrl: String?) {
                                 super.onPageFinished(view, pageUrl)
-                                Log.d("EmbedIndia", "Page finished loading: $pageUrl")
 
                                 // Inject our robust hook script
                                 Handler(Looper.getMainLooper()).postDelayed({
                                     if (captured.get()) return@postDelayed
                                     view?.evaluateJavascript(playScript) { result ->
-                                        Log.d("EmbedIndiaJS", "Hook injection result: $result")
                                     }
                                 }, 1500)
                             }
@@ -137,10 +134,8 @@ class EmbedIndiaExtractor(private val context: Context) : ExtractorApi() {
                                 request: WebResourceRequest?
                             ): WebResourceResponse? {
                                 val reqUrl = request?.url?.toString() ?: return null
-                                Log.d("EmbedIndiaNet", "Request: $reqUrl")
-                                
+
                                 if ((reqUrl.contains("m3u8", ignoreCase = true) || reqUrl.contains("master.txt", ignoreCase = true)) && !captured.get()) {
-                                    Log.d("EmbedIndia", "Captured stream URL: $reqUrl")
                                     if (captured.compareAndSet(false, true)) {
                                         Handler(Looper.getMainLooper()).post {
                                             try {
@@ -324,7 +319,7 @@ class EmbedIndiaExtractor(private val context: Context) : ExtractorApi() {
             try {
                 var originalOpen = XMLHttpRequest.prototype.open;
                 var originalSend = XMLHttpRequest.prototype.send;
-                
+
                 XMLHttpRequest.prototype.open = function(method, url) {
                     var urlStr = (url && typeof url.toString === 'function') ? url.toString() : url;
                     this._url = urlStr;
@@ -502,24 +497,24 @@ class EmbedIndiaExtractor(private val context: Context) : ExtractorApi() {
             }, 500);
 
             var playInterval = setInterval(function() {
-                var jwButton = document.querySelector('.jw-icon-display') || 
+                var jwButton = document.querySelector('.jw-icon-display') ||
                                document.querySelector('.jw-display-icon-container') ||
                                document.querySelector('.jw-icon-play');
                 if (jwButton) {
                     log("Clicking play button");
                     jwButton.click();
                 }
-                
+
                 var videos = document.querySelectorAll('video');
                 if (videos) {
                     for (var i = 0; i < videos.length; i++) {
-                        try { 
-                            videos[i].play(); 
+                        try {
+                            videos[i].play();
                         } catch(e) {}
                     }
                 }
-                
-                var playOverlay = document.querySelector('[class*="play"]') || 
+
+                var playOverlay = document.querySelector('[class*="play"]') ||
                                   document.querySelector('[id*="play"]');
                 if (playOverlay && playOverlay !== document.body && !playOverlay.classList.contains('jw-icon-play')) {
                     try { playOverlay.click(); } catch(e) {}
