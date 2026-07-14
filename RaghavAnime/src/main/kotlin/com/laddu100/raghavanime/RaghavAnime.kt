@@ -340,14 +340,14 @@ class RaghavAnime : MainAPI() {
             },
             {
                 try {
-                    val anikage = AnikageProvider()
+                    val anikage = RaghavAniKage()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
                     val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
                         doSearch = { anikage.search(it) },
                         doLoad = { anikage.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse }
                     )
                     if (epData != null) anikage.loadLinks(epData, false, subtitleCallback, callback)
-                } catch (e: Throwable) { Log.d("RaghavAnime", "Anikage: ${e.message}") }
+                } catch (e: Throwable) { Log.d("RaghavAnime", "AniKage: ${e.message}") }
             },
             {
                 try {
@@ -449,7 +449,7 @@ class RaghavAnime : MainAPI() {
                         aniNami.loadLinks(matchedEp.data, false, subtitleCallback, callback)
                     }
                 } catch (e: Throwable) { Log.d("RaghavAnime", "AniNami: ${e.message}") }
-            }
+            },
         )
 
         return true
