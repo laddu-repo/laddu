@@ -140,7 +140,7 @@ class RaghavAniNami : MainAPI() {
             Log.d("RaghavAnime", "AniNami: no pipe in data")
             return false
         }
-        val requestedAudio = data.substring(0, pipeIdx)
+        val requestedAudio = data.substring(0, pipeIdx).substringAfterLast("/")
         val epIds = data.substring(pipeIdx + 1).split(";;").filter { it.isNotEmpty() }
         if (epIds.isEmpty()) {
             Log.d("RaghavAnime", "AniNami: no epIds in data")

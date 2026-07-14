@@ -320,8 +320,10 @@ class RaghavAnime : MainAPI() {
                         }
                         if (matchedData != null) break
                     }
-                    if (matchedData != null) aniWaves.loadLinks(matchedData, false, subtitleCallback, callback)
-                    else Log.d("RaghavAnime", "AniWaves: no match for '$title'")
+                    if (matchedData != null) {
+                        Log.d("RaghavAnime", "AniWaves: matched '$title' ep $episode")
+                        aniWaves.loadLinks(matchedData, false, subtitleCallback, callback)
+                    } else Log.d("RaghavAnime", "AniWaves: no match for '$title'")
                 } catch (e: Throwable) { Log.d("RaghavAnime", "AniWaves: ${e.message}") }
             },
             {

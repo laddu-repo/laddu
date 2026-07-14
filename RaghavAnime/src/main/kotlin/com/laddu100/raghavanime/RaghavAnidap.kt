@@ -146,27 +146,41 @@ class RaghavAnidap : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.length < 2) return emptyList()
-        return try {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "$mainUrl/api/anime/search?q=$encoded"
-            Log.d(TAG, "search: $url")
-            val res = app.get(url, headers = baseHeaders, timeout = 30_000L)
-            val parsed = parseJson<SearchResponseData>(res.text)
-            val results = parsed.results ?: emptyList()
-            results.mapNotNull { item ->
-                val title = item.title?.userPreferred ?: item.title?.english ?: item.title?.romaji
-                    ?: return@mapNotNull null
-                if (title == "Unknown") return@mapNotNull null
-                val data = "$mainUrl|${item.id}"
-                newAnimeSearchResponse(title, data, TvType.Anime) {
-                    this.posterUrl = item.image
-                    addDubStatus(dubExist = true, subExist = true)
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "$mainUrl/api/anime/search?q=$encoded"
+        Log.d(TAG, "search: $url")
+
+        var lastError: String? = null
+        for (attempt in 1..3) {
+            try {
+                val res = app.get(url, headers = baseHeaders, timeout = 15_000L)
+                val body = res.text
+                if (body.contains("error code", ignoreCase = true)) {
+                    Log.d(TAG, "search attempt $attempt: server error response, retrying...")
+                    lastError = "server error: ${body.take(50)}"
+                    kotlinx.coroutines.delay(2000L * attempt)
+                    continue
                 }
+                val parsed = parseJson<SearchResponseData>(body)
+                val results = parsed.results ?: emptyList()
+                return results.mapNotNull { item ->
+                    val title = item.title?.userPreferred ?: item.title?.english ?: item.title?.romaji
+                        ?: return@mapNotNull null
+                    if (title == "Unknown") return@mapNotNull null
+                    val data = "$mainUrl|${item.id}"
+                    newAnimeSearchResponse(title, data, TvType.Anime) {
+                        this.posterUrl = item.image
+                        addDubStatus(dubExist = true, subExist = true)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "search attempt $attempt failed: ${e.message}")
+                lastError = e.message
+                kotlinx.coroutines.delay(2000L * attempt)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "search failed: ${e.message}")
-            emptyList()
         }
+        Log.e(TAG, "search failed after 3 attempts: $lastError")
+        return emptyList()
     }
 
     override suspend fun load(url: String): LoadResponse? {
