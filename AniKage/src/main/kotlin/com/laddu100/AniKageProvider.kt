@@ -1,6 +1,5 @@
 package com.laddu100
 
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
@@ -21,13 +20,9 @@ import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.nicehttp.RequestBodyTypes
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.toRequestBody
 
 class AniKageProvider : MainAPI() {
     override var mainUrl = "https://anikage.cc"
@@ -39,40 +34,43 @@ class AniKageProvider : MainAPI() {
 
     private val apiUrl = "https://anikage.cc/api/media/anime"
     private val proxyUrl = "https://prox.anicore.tv"
-    private val anilistGraphql = "https://graphql.anilist.co"
-    private val apiHeaders = mapOf("Accept" to "application/json", "Referer" to "$mainUrl/")
+    private val apiHeaders = mapOf("Accept" to "application/json")
     private val proxyHeaders = mapOf("Origin" to mainUrl, "Referer" to "$mainUrl/")
 
     private val subProviders = listOf("koto", "neko", "miko", "megg", "dib", "wave")
     private val dubProvider = "koto"
 
     override val mainPage = mainPageOf(
-        "trending" to "Trending",
-        "popular" to "Popular",
-        "seasonal" to "This Season",
-        "topRated" to "Top Rated",
-        "updated" to "Latest Updates"
+        "$apiUrl/browse?sort=trending&limit=25&adult=true&page=" to "Trending",
+        "$apiUrl/browse?sort=updated&limit=25&adult=true&status=RELEASING&page=" to "Latest Updates",
+        "$apiUrl/browse?sort=popularity&limit=25&adult=true&page=" to "Popular",
+        "$apiUrl/browse?sort=popularity&limit=25&adult=true&format=MOVIE&page=" to "Popular Movies",
+        "$apiUrl/browse?sort=popularity&limit=25&adult=true&format=OVA&page=" to "Popular OVAs"
     )
 
-    private data class AniListMedia(
-        val id: Int? = null,
-        val idMal: Int? = null,
-        val title: Title? = null,
-        val coverImage: Cover? = null,
+    private data class BrowseResponse(val count: Long = 0, val data: List<AnimeResult> = emptyList())
+    private data class AnimeResult(
+        val slug: String = "",
+        val anilistId: Int? = null,
+        val title: AnimeTitle? = null,
+        val coverImage: CoverImage? = null,
+        val bannerImage: String? = null,
         val format: String? = null,
-        val episodes: Int? = null,
-        val seasonYear: Int? = null,
-        val status: String? = null
+        val status: String? = null,
+        val year: Int? = null,
+        val totalEpisodes: Int? = null,
+        val genres: List<String>? = null
     )
-    private data class Title(val romaji: String? = null, val english: String? = null)
-    private data class Cover(val extraLarge: String? = null, val large: String? = null)
+    private data class AnimeTitle(val romaji: String? = null, val english: String? = null, val native: String? = null)
+    private data class CoverImage(val large: String? = null, val extraLarge: String? = null)
 
+    private data class AnimeDetailResponse(val anime: AnimeDetail? = null)
     private data class AnimeDetail(
         val slug: String = "",
         val anilistId: Int? = null,
         val malId: Int? = null,
         val title: AnimeTitle? = null,
-        val coverImage: AnimeCover? = null,
+        val coverImage: CoverImage? = null,
         val bannerImage: String? = null,
         val description: String? = null,
         val genres: List<String>? = null,
@@ -80,9 +78,8 @@ class AniKageProvider : MainAPI() {
         val format: String? = null,
         val seasonYear: Int? = null
     )
-    private data class AnimeTitle(val romaji: String? = null, val english: String? = null, val native: String? = null)
-    private data class AnimeCover(val large: String? = null, val extraLarge: String? = null)
 
+    private data class EpisodesResponse(val total: Int = 0, val episodes: List<EpisodeInfo> = emptyList())
     private data class EpisodeInfo(
         val number: Int,
         val title: String? = null,
@@ -91,11 +88,13 @@ class AniKageProvider : MainAPI() {
         val isFiller: Boolean = false
     )
 
-    private data class ServerInfo(
-        val id: String = "",
-        val subTypes: List<String> = emptyList()
-    )
+    private data class ServersResponse(val servers: List<ServerInfo> = emptyList())
+    private data class ServerInfo(val id: String = "", val subTypes: List<String> = emptyList())
 
+    private data class SourcesResponse(
+        val sources: List<SourceInfo> = emptyList(),
+        val subtitles: List<SubtitleInfo>? = null
+    )
     private data class SourceInfo(
         val url: String = "",
         val quality: String? = null,
@@ -109,114 +108,57 @@ class AniKageProvider : MainAPI() {
         val embedUrl: String? = null
     )
 
-    private data class MegaPlayTrack(
-        val file: String? = null,
-        val label: String? = null,
-        val kind: String? = null
-    )
-
-    private suspend fun anilistRequest(query: String, variables: Map<String, Any?>): List<AniListMedia> {
-        val body = mapOf(
-            "query" to query,
-            "variables" to variables
-        ).toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
-
-        val responseText = app.post(
-            anilistGraphql,
-            headers = mapOf("Content-Type" to "application/json", "Accept" to "application/json"),
-            requestBody = body
-        ).text
-
-        val response = parseJson<AniListGraphqlResponse>(responseText)
-        return response.data?.Page?.media ?: emptyList()
-    }
-
-    private data class AniListGraphqlResponse(val data: GraphqlData? = null)
-    private data class GraphqlData(val Page: GraphqlPage? = null)
-    private data class GraphqlPage(val media: List<AniListMedia> = emptyList(), val pageInfo: PageInfo? = null)
-    private data class PageInfo(val hasNextPage: Boolean = false)
+    private data class MegaPlayResponse(val tracks: List<MegaPlayTrack>? = null)
+    private data class MegaPlayTrack(val file: String? = null, val label: String? = null, val kind: String? = null)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val sort = when (request.data) {
-            "trending" -> "TRENDING_DESC"
-            "popular" -> "POPULARITY_DESC"
-            "topRated" -> "SCORE_DESC"
-            "updated" -> "UPDATED"
-            "seasonal" -> "TRENDING_DESC"
-            else -> "TRENDING_DESC"
-        }
-
-        val query = if (request.data == "seasonal") {
-            """query(${'$'}page: Int, ${'$'}sort: [MediaSort], ${'$'}season: MediaSeason, ${'$'}seasonYear: Int) {
-                Page(page: ${'$'}page, perPage: 20) {
-                    pageInfo { hasNextPage }
-                    media(sort: ${'$'}sort, type: ANIME, season: ${'$'}season, seasonYear: ${'$'}seasonYear) {
-                        id idMal title { english romaji } coverImage { extraLarge large } format episodes seasonYear status
-                    }
-                }
-            }""".trimIndent()
-        } else {
-            """query(${'$'}page: Int, ${'$'}sort: [MediaSort]) {
-                Page(page: ${'$'}page, perPage: 20) {
-                    pageInfo { hasNextPage }
-                    media(sort: ${'$'}sort, type: ANIME) {
-                        id idMal title { english romaji } coverImage { extraLarge large } format episodes seasonYear status
-                    }
-                }
-            }""".trimIndent()
-        }
-
-        val variables = mutableMapOf<String, Any?>("page" to page, "sort" to listOf(sort, "POPULARITY_DESC"))
-        if (request.data == "seasonal") {
-            val cal = java.util.Calendar.getInstance()
-            variables["season"] = when (cal.get(java.util.Calendar.MONTH)) {
-                in 0..2 -> "WINTER"
-                in 3..5 -> "SPRING"
-                in 6..8 -> "SUMMER"
-                else -> "FALL"
-            }
-            variables["seasonYear"] = cal.get(java.util.Calendar.YEAR)
-        }
-
-        val mediaList = try {
-            anilistRequest(query, variables)
+        val url = request.data + page
+        val response = try {
+            app.get(url, headers = apiHeaders).text
         } catch (e: Exception) {
             Log.d("AniKage", "getMainPage error: ${e.message}")
             return newHomePageResponse(request.name, emptyList())
         }
 
-        val home = mediaList.mapNotNull { item ->
+        val parsed = try {
+            parseJson<BrowseResponse>(response)
+        } catch (e: Exception) {
+            Log.d("AniKage", "getMainPage parse error: ${e.message}")
+            return newHomePageResponse(request.name, emptyList())
+        }
+
+        val home = parsed.data.mapNotNull { item ->
             val title = item.title?.english ?: item.title?.romaji ?: return@mapNotNull null
             val poster = item.coverImage?.extraLarge ?: item.coverImage?.large
-            newAnimeSearchResponse(title, "$mainUrl/anime/${item.id}", TvType.Anime) {
+            newAnimeSearchResponse(title, item.slug, TvType.Anime) {
                 this.posterUrl = poster
-                this.year = item.seasonYear
+                this.year = item.year
                 addDubStatus(dubExist = true, subExist = true)
             }
         }
 
-        return newHomePageResponse(request.name, home, hasNext = mediaList.size >= 20)
+        return newHomePageResponse(request.name, home, hasNext = home.size >= 25)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
 
-        val graphqlQuery = """query(${'$'}search: String) {
-            Page(page: 1, perPage: 25) {
-                media(search: ${'$'}search, type: ANIME, sort: POPULARITY_DESC) {
-                    id idMal title { english romaji } coverImage { extraLarge large } format episodes seasonYear status
-                }
-            }
-        }""".trimIndent()
-
-        val mediaList = try {
-            anilistRequest(graphqlQuery, mapOf("search" to query))
+        val url = "$apiUrl/browse?search=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=25&adult=true&page=1"
+        val response = try {
+            app.get(url, headers = apiHeaders).text
         } catch (e: Exception) {
             Log.d("AniKage", "search error: ${e.message}")
             return emptyList()
         }
 
-        return mediaList.mapNotNull { item ->
+        val parsed = try {
+            parseJson<BrowseResponse>(response)
+        } catch (e: Exception) {
+            Log.d("AniKage", "search parse error: ${e.message}")
+            return emptyList()
+        }
+
+        return parsed.data.mapNotNull { item ->
             val title = item.title?.english ?: item.title?.romaji ?: return@mapNotNull null
             val poster = item.coverImage?.extraLarge ?: item.coverImage?.large
             val tvType = when (item.format) {
@@ -224,28 +166,34 @@ class AniKageProvider : MainAPI() {
                 "OVA", "ONA", "SPECIAL" -> TvType.OVA
                 else -> TvType.Anime
             }
-            newAnimeSearchResponse(title, "$mainUrl/anime/${item.id}", tvType) {
+            newAnimeSearchResponse(title, item.slug, tvType) {
                 this.posterUrl = poster
-                this.year = item.seasonYear
+                this.year = item.year
                 addDubStatus(dubExist = true, subExist = true)
             }
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val anilistId = url.substringAfterLast("/").toIntOrNull() ?: return null
+        val slug = url.substringAfterLast("/")
 
         val detailResponse = try {
-            app.get("$apiUrl/$anilistId", headers = apiHeaders).text
+            app.get("$apiUrl/$slug", headers = apiHeaders).text
         } catch (e: Exception) {
             Log.d("AniKage", "load detail error: ${e.message}")
             return null
         }
 
-        val detail = parseJson<AnimeDetailResponse>(detailResponse).anime ?: return null
-        val slug = detail.slug
+        val detail = try {
+            parseJson<AnimeDetailResponse>(detailResponse).anime
+        } catch (e: Exception) {
+            Log.d("AniKage", "load detail parse error: ${e.message}")
+            return null
+        } ?: return null
+
         val title = detail.title?.english ?: detail.title?.romaji ?: return null
         val poster = detail.coverImage?.extraLarge ?: detail.coverImage?.large
+        val banner = detail.bannerImage
         val plot = detail.description?.replace(Regex("<[^>]+>"), "")
         val year = detail.seasonYear
         val tags = detail.genres?.filter { it.isNotBlank() } ?: emptyList()
@@ -270,7 +218,13 @@ class AniKageProvider : MainAPI() {
             return null
         }
 
-        val episodes = parseJson<EpisodesResponse>(episodesResponse).episodes
+        val episodes = try {
+            parseJson<EpisodesResponse>(episodesResponse).episodes
+        } catch (e: Exception) {
+            Log.d("AniKage", "load episodes parse error: ${e.message}")
+            return null
+        }
+
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
 
@@ -296,6 +250,7 @@ class AniKageProvider : MainAPI() {
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
+            this.backgroundPosterUrl = banner
             this.year = year
             this.plot = plot
             this.tags = tags
@@ -305,9 +260,6 @@ class AniKageProvider : MainAPI() {
             if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
         }
     }
-
-    private data class AnimeDetailResponse(val anime: AnimeDetail? = null)
-    private data class EpisodesResponse(val episodes: List<EpisodeInfo> = emptyList(), val total: Int = 0)
 
     override suspend fun loadLinks(
         data: String,
@@ -335,7 +287,12 @@ class AniKageProvider : MainAPI() {
                     headers = apiHeaders
                 ).text
 
-                val sourcesResponse = parseJson<SourcesResponse>(responseText)
+                val sourcesResponse = try {
+                    parseJson<SourcesResponse>(responseText)
+                } catch (e: Exception) {
+                    continue
+                }
+
                 if (sourcesResponse.sources.isEmpty()) continue
 
                 for (source in sourcesResponse.sources) {
@@ -391,11 +348,6 @@ class AniKageProvider : MainAPI() {
         return found
     }
 
-    private data class SourcesResponse(
-        val sources: List<SourceInfo> = emptyList(),
-        val subtitles: List<SubtitleInfo>? = null
-    )
-
     private suspend fun fetchMegaPlaySubtitles(
         embedUrl: String,
         subtitleCallback: (SubtitleFile) -> Unit
@@ -426,6 +378,4 @@ class AniKageProvider : MainAPI() {
             Log.d("AniKage", "megaplay subtitles error: ${e.message}")
         }
     }
-
-    private data class MegaPlayResponse(val tracks: List<MegaPlayTrack>? = null)
 }
