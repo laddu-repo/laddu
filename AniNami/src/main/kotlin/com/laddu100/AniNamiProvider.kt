@@ -43,7 +43,6 @@ class AniNamiProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    private val TAG = "AniNami"
     private val anilistUrl = "https://graphql.anilist.co"
     private val apiHeaders = mapOf(
         "Accept" to "application/json",
@@ -311,8 +310,8 @@ class AniNamiProvider : MainAPI() {
 
     private fun parseQuality(q: String?): Int {
         if (q.isNullOrBlank() || q == "auto" || q == "Hls") return Qualities.Unknown.value
-        val match = Regex("(\\d{3,4})").find(q)
-        val h = match?.groupValues?.get(1)?.toIntOrNull() ?: return Qualities.Unknown.value
+        val h = Regex("(\\d{3,4})").find(q)?.groupValues?.get(1)?.toIntOrNull()
+            ?: return Qualities.Unknown.value
         return when {
             h >= 1080 -> Qualities.P1080.value
             h >= 720 -> Qualities.P720.value
@@ -329,15 +328,13 @@ class AniNamiProvider : MainAPI() {
             "TOP_RATED" -> TOP_RATED_QUERY
             else -> TRENDING_QUERY
         }
-        val variables = mapOf("page" to page, "perPage" to 20)
         val responseText = try {
-            anilistQuery(query, variables)
+            anilistQuery(query, mapOf("page" to page, "perPage" to 20))
         } catch (e: Exception) {
-            Log.d(TAG, "getMainPage failed: ${e.message}")
+            Log.d("AniNami", "getMainPage: ${e.message}")
             return newHomePageResponse(request.name, emptyList())
         }
-        val response = parseJson<AniListResponse>(responseText)
-        val mediaList = response.data?.Page?.media ?: emptyList()
+        val mediaList = parseJson<AniListResponse>(responseText).data?.Page?.media ?: emptyList()
 
         val home = mediaList.mapNotNull { media ->
             val id = media.id ?: return@mapNotNull null
@@ -345,9 +342,8 @@ class AniNamiProvider : MainAPI() {
                 ?: media.title?.english
                 ?: media.title?.romaji
                 ?: return@mapNotNull null
-            val posterUrl = media.coverImage?.extraLarge ?: media.coverImage?.large
             newAnimeSearchResponse(title, "$mainUrl/anime/$id", TvType.Anime) {
-                this.posterUrl = posterUrl
+                this.posterUrl = media.coverImage?.extraLarge ?: media.coverImage?.large
                 this.year = media.seasonYear
                 addDubStatus(dubExist = true, subExist = true)
             }
@@ -357,15 +353,13 @@ class AniNamiProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "$mainUrl/api/search?query=$encoded"
         val responseText = try {
-            app.get(url, headers = apiHeaders).text
+            app.get("$mainUrl/api/search?query=$encoded", headers = apiHeaders).text
         } catch (e: Exception) {
-            Log.d(TAG, "search failed: ${e.message}")
+            Log.d("AniNami", "search: ${e.message}")
             return emptyList()
         }
-        val response = parseJson<SearchResponseData>(responseText)
-        val results = response.results?.results ?: emptyList()
+        val results = parseJson<SearchResponseData>(responseText).results?.results ?: emptyList()
 
         return results.mapNotNull { item ->
             val id = item.id ?: return@mapNotNull null
@@ -373,11 +367,10 @@ class AniNamiProvider : MainAPI() {
                 ?: item.title?.romaji
                 ?: item.title?.native
                 ?: return@mapNotNull null
-            val posterUrl = item.coverImage?.extraLarge
-                ?: item.coverImage?.large
-                ?: item.coverImage?.medium
             newAnimeSearchResponse(title, "$mainUrl/anime/$id", TvType.Anime) {
-                this.posterUrl = posterUrl
+                this.posterUrl = item.coverImage?.extraLarge
+                    ?: item.coverImage?.large
+                    ?: item.coverImage?.medium
                 this.year = item.seasonYear
                 addDubStatus(dubExist = true, subExist = true)
             }
@@ -391,24 +384,16 @@ class AniNamiProvider : MainAPI() {
         val infoText = try {
             anilistQuery(INFO_QUERY, mapOf("id" to anilistId))
         } catch (e: Exception) {
-            Log.d(TAG, "load info failed: ${e.message}")
+            Log.d("AniNami", "load: ${e.message}")
             return null
         }
-        val infoResponse = parseJson<AniListResponse>(infoText)
-        val media = infoResponse.data?.Media ?: return null
+        val media = parseJson<AniListResponse>(infoText).data?.Media ?: return null
 
         val title = media.title?.userPreferred
             ?: media.title?.english
             ?: media.title?.romaji
             ?: "Unknown"
-        val posterUrl = media.coverImage?.extraLarge ?: media.coverImage?.large
-        val bannerUrl = media.bannerImage
         val plot = media.description?.replace(Regex("<[^>]*>"), "")
-        val year = media.seasonYear
-        val tags = media.genres ?: emptyList()
-        val animeScore = media.averageScore
-
-        val tvType = TvType.Anime
         val showStatus = when (media.status) {
             "RELEASING" -> ShowStatus.Ongoing
             "FINISHED" -> ShowStatus.Completed
@@ -419,10 +404,8 @@ class AniNamiProvider : MainAPI() {
         val dubEpisodes = mutableListOf<Episode>()
 
         try {
-            val epsUrl = "$mainUrl/api/episodes/$anilistId"
-            val epsText = app.get(epsUrl, headers = apiHeaders).textLarge
-            val epsData = parseJson<EpisodesResponse>(epsText)
-            val providers = epsData.results?.providers ?: emptyMap()
+            val epsText = app.get("$mainUrl/api/episodes/$anilistId", headers = apiHeaders).textLarge
+            val providers = parseJson<EpisodesResponse>(epsText).results?.providers ?: emptyMap()
 
             val subByNumber = sortedMapOf<Int, EpisodeItem>()
             val subIdsByNumber = sortedMapOf<Int, MutableList<String>>()
@@ -445,48 +428,41 @@ class AniNamiProvider : MainAPI() {
                 }
             }
 
-            for ((num, ids) in subIdsByNumber) {
-                val dataStr = "sub|${ids.joinToString(";;")}"
+            subIdsByNumber.forEach { (num, ids) ->
                 val rep = subByNumber[num]
-                val epName = rep?.title?.takeIf { it.isNotBlank() } ?: "Episode $num"
-                val desc = buildString {
-                    if (rep?.filler == true) append("[Filler] ")
-                    rep?.description?.let { append(it) }
-                }.ifEmpty { null }
-                subEpisodes.add(newEpisode(dataStr) {
-                    this.name = epName
+                subEpisodes.add(newEpisode("sub|${ids.joinToString(";;")}") {
+                    this.name = rep?.title?.takeIf { it.isNotBlank() } ?: "Episode $num"
                     this.episode = num
                     this.posterUrl = rep?.image
-                    this.description = desc
+                    this.description = buildString {
+                        if (rep?.filler == true) append("[Filler] ")
+                        rep?.description?.let { append(it) }
+                    }.ifEmpty { null }
                 })
             }
-
-            for ((num, ids) in dubIdsByNumber) {
-                val dataStr = "dub|${ids.joinToString(";;")}"
+            dubIdsByNumber.forEach { (num, ids) ->
                 val rep = dubByNumber[num]
-                val epName = rep?.title?.takeIf { it.isNotBlank() } ?: "Episode $num"
-                val desc = buildString {
-                    if (rep?.filler == true) append("[Filler] ")
-                    rep?.description?.let { append(it) }
-                }.ifEmpty { null }
-                dubEpisodes.add(newEpisode(dataStr) {
-                    this.name = epName
+                dubEpisodes.add(newEpisode("dub|${ids.joinToString(";;")}") {
+                    this.name = rep?.title?.takeIf { it.isNotBlank() } ?: "Episode $num"
                     this.episode = num
                     this.posterUrl = rep?.image
-                    this.description = desc
+                    this.description = buildString {
+                        if (rep?.filler == true) append("[Filler] ")
+                        rep?.description?.let { append(it) }
+                    }.ifEmpty { null }
                 })
             }
         } catch (e: Exception) {
-            Log.d(TAG, "load episodes failed: ${e.message}")
+            Log.d("AniNami", "load episodes: ${e.message}")
         }
 
-        return newAnimeLoadResponse(title, url, tvType) {
-            this.posterUrl = posterUrl
-            this.backgroundPosterUrl = bannerUrl
-            this.year = year
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = media.coverImage?.extraLarge ?: media.coverImage?.large
+            this.backgroundPosterUrl = media.bannerImage
+            this.year = media.seasonYear
             this.plot = plot
-            this.tags = tags
-            if (animeScore != null) this.score = Score.from10((animeScore / 10).toString())
+            this.tags = media.genres ?: emptyList()
+            media.averageScore?.let { this.score = Score.from10((it / 10).toString()) }
             this.showStatus = showStatus
             addAniListId(anilistId)
             if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
@@ -502,8 +478,7 @@ class AniNamiProvider : MainAPI() {
     ): Boolean {
         val pipeIdx = data.indexOf("|")
         if (pipeIdx < 0) return false
-        val idsStr = data.substring(pipeIdx + 1)
-        val epIds = idsStr.split(";;").filter { it.isNotEmpty() }
+        val epIds = data.substring(pipeIdx + 1).split(";;").filter { it.isNotEmpty() }
         if (epIds.isEmpty()) return false
 
         var found = false
@@ -516,42 +491,35 @@ class AniNamiProvider : MainAPI() {
             val anilistId = parts[2]
             val audioType = parts[3]
             val slug = parts.drop(4).joinToString("/")
-            if (provider.isEmpty() || anilistId.isEmpty() || audioType.isEmpty() || slug.isEmpty()) continue
+            if (provider.isEmpty() || slug.isEmpty()) continue
 
             val displayName = providerNames[provider] ?: provider
             val watchUrl = "$mainUrl/api/watch/$provider/$anilistId/$audioType/$slug"
             val streamsText = try {
                 app.get(watchUrl, headers = apiHeaders).text
             } catch (e: Exception) {
-                Log.d(TAG, "watch failed for $provider: ${e.message}")
+                Log.d("AniNami", "watch $provider: ${e.message}")
                 continue
             }
-            val streamData = try {
-                parseJson<StreamResponse>(streamsText)
+            val streams = try {
+                parseJson<StreamResponse>(streamsText).results?.streams
             } catch (e: Exception) {
+                Log.d("AniNami", "parse streams $provider: ${e.message}")
                 continue
-            }
-            val streams = streamData.results?.streams ?: continue
+            } ?: continue
 
             for (stream in streams) {
                 val streamUrl = stream.url ?: continue
-                if (streamUrl.isBlank()) continue
-                if (!seenUrls.add(streamUrl)) continue
+                if (streamUrl.isBlank() || !seenUrls.add(streamUrl)) continue
                 val referer = stream.referer?.takeIf { it.isNotBlank() } ?: "$mainUrl/"
-                val quality = parseQuality(stream.quality)
                 val qualityLabel = stream.quality?.takeIf { it.isNotBlank() } ?: "Auto"
                 val label = "$displayName $qualityLabel"
 
                 when (stream.type?.lowercase()) {
                     "hls" -> {
                         callback.invoke(
-                            newExtractorLink(
-                                source = name,
-                                name = label,
-                                url = streamUrl,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.quality = quality
+                            newExtractorLink(label, label, streamUrl, ExtractorLinkType.M3U8) {
+                                this.quality = parseQuality(stream.quality)
                                 this.headers = mapOf("Referer" to referer)
                             }
                         )
@@ -566,7 +534,8 @@ class AniNamiProvider : MainAPI() {
                         try {
                             loadExtractor(streamUrl, referer, subtitleCallback, callback)
                             found = true
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            Log.d("AniNami", "loadExtractor: ${e.message}")
                         }
                     }
                 }
@@ -585,16 +554,14 @@ class AniNamiProvider : MainAPI() {
     ): Boolean {
         val host = try {
             java.net.URL(embedUrl).host
-        } catch (_: Exception) {
-            ""
+        } catch (e: Exception) {
+            return false
         }
 
-        val needsScrape = host.isNotEmpty() && (
-            host.contains("vivibebe.site") ||
+        val needsScrape = host.contains("vivibebe.site") ||
             host.contains("bibiemb.xyz") ||
             host.contains("otakuhg.site") ||
             host.contains("otakuvid.online")
-        )
 
         if (needsScrape) {
             return try {
@@ -608,12 +575,7 @@ class AniNamiProvider : MainAPI() {
                 }
                 if (m3u8 != null) {
                     callback.invoke(
-                        newExtractorLink(
-                            source = name,
-                            name = label,
-                            url = m3u8,
-                            type = ExtractorLinkType.M3U8
-                        ) {
+                        newExtractorLink(label, label, m3u8, ExtractorLinkType.M3U8) {
                             this.headers = mapOf("Referer" to embedUrl)
                         }
                     )
@@ -621,26 +583,21 @@ class AniNamiProvider : MainAPI() {
                 } else {
                     false
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.d("AniNami", "handleEmbed scrape: ${e.message}")
                 false
             }
         }
 
         return try {
-            val loaded = loadExtractor(embedUrl, referer, subtitleCallback, callback)
-            if (loaded) {
+            if (loadExtractor(embedUrl, referer, subtitleCallback, callback)) {
                 true
             } else {
                 val html = app.get(embedUrl, headers = mapOf("Referer" to referer)).text
                 val m3u8 = Regex("""(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)""").find(html)?.groupValues?.get(1)
                 if (m3u8 != null) {
                     callback.invoke(
-                        newExtractorLink(
-                            source = name,
-                            name = label,
-                            url = m3u8,
-                            type = ExtractorLinkType.M3U8
-                        ) {
+                        newExtractorLink(label, label, m3u8, ExtractorLinkType.M3U8) {
                             this.headers = mapOf("Referer" to embedUrl)
                         }
                     )
@@ -649,7 +606,8 @@ class AniNamiProvider : MainAPI() {
                     false
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d("AniNami", "handleEmbed fallback: ${e.message}")
             false
         }
     }
@@ -673,10 +631,7 @@ object JsPacker {
         var payload = p
         for (i in c - 1 downTo 0) {
             if (i < k.size && k[i].isNotEmpty()) {
-                val key = k[i]
-                val baseStr = baseN(i, a)
-                val regex = Regex("\\b$baseStr\\b")
-                payload = payload.replace(regex, key)
+                payload = payload.replace(Regex("\\b${baseN(i, a)}\\b"), k[i])
             }
         }
         return payload
@@ -684,10 +639,10 @@ object JsPacker {
 
     fun parseAndUnpack(html: String): String? {
         val startIdx = html.indexOf("eval(function(p,a,c,k,e,d)")
-        val actualStart = if (startIdx != -1) startIdx else html.indexOf("function(p,a,c,k,e,d)")
-        if (actualStart == -1) return null
+            .let { if (it != -1) it else html.indexOf("function(p,a,c,k,e,d)") }
+        if (startIdx == -1) return null
 
-        val openBraceIdx = html.indexOf("{", actualStart)
+        val openBraceIdx = html.indexOf("{", startIdx)
         if (openBraceIdx == -1) return null
 
         var braceCount = 1
@@ -701,11 +656,11 @@ object JsPacker {
         val argsStartIdx = html.indexOf("(", j - 1)
         if (argsStartIdx == -1) return null
 
-        var argsParenCount = 1
+        var parenCount = 1
         var kIdx = argsStartIdx + 1
-        while (kIdx < html.length && argsParenCount > 0) {
-            if (html[kIdx] == '(') argsParenCount++
-            else if (html[kIdx] == ')') argsParenCount--
+        while (kIdx < html.length && parenCount > 0) {
+            if (html[kIdx] == '(') parenCount++
+            else if (html[kIdx] == ')') parenCount--
             kIdx++
         }
 
@@ -742,7 +697,7 @@ object JsPacker {
         val c = ints[1]
 
         var keysStr = ""
-        var jj = quotePos + 1
+        var jj = restQuoteMatch.range.first + 1
         while (jj < rest.length) {
             if (rest[jj].toString() == restQuoteChar) {
                 var backslashCount = 0
@@ -758,8 +713,6 @@ object JsPacker {
         }
 
         keysStr = keysStr.replace("\\$restQuoteChar", restQuoteChar).replace("\\\\", "\\")
-        val keys = keysStr.split("|")
-
-        return unpack(payload, a, c, keys)
+        return unpack(payload, a, c, keysStr.split("|"))
     }
 }
