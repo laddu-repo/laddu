@@ -116,12 +116,15 @@ class AniKageProvider : MainAPI() {
     )
 
     private suspend fun anilistRequest(query: String, variables: Map<String, Any?>): List<AniListMedia> {
-        val body = parseJson<Map<String, Any>>(mapOf("query" to query, "variables" to variables).toJson())
-        val requestBody = body.toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
+        val body = mapOf(
+            "query" to query,
+            "variables" to variables
+        ).toJson().toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
+
         val responseText = app.post(
             anilistGraphql,
             headers = mapOf("Content-Type" to "application/json", "Accept" to "application/json"),
-            requestBody = requestBody
+            requestBody = body
         ).text
 
         val response = parseJson<AniListGraphqlResponse>(responseText)
