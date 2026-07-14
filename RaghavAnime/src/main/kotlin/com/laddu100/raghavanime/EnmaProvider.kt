@@ -188,6 +188,57 @@ class RaghavEnma : MainAPI() {
         return parsed.results?.data?.mapNotNull { it.toSearchResult() } ?: emptyList()
     }
 
+    suspend fun loadLinksByAnilistId(
+        anilistId: Int,
+        title: String,
+        jpTitle: String?,
+        episode: Int,
+        isDub: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val searchQueries = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
+        if (searchQueries.isEmpty()) {
+            Log.d("RaghavAnime", "Enma: no search titles for anilistId=$anilistId")
+            return false
+        }
+
+        var matchedId: String? = null
+        for (query in searchQueries) {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val response = try {
+                app.get("$apiUrl/search?keyword=$encoded&page=1", headers = headers).text
+            } catch (e: Exception) {
+                Log.d("RaghavAnime", "Enma search: ${e.message}")
+                continue
+            }
+            val parsed = try { parseJson<EnmaSearchResponse>(response) } catch (e: Exception) {
+                continue
+            }
+            val items = parsed.results?.data ?: emptyList()
+            val match = items.firstOrNull { it.anilistId == anilistId }
+            if (match != null && match.id != null) {
+                matchedId = match.id
+                Log.d("RaghavAnime", "Enma: matched anilistId=$anilistId id=${match.id} title=${match.title}")
+                break
+            }
+        }
+
+        if (matchedId == null) {
+            Log.d("RaghavAnime", "Enma: no anilistId match for $anilistId (searched ${searchQueries.size} titles)")
+            return false
+        }
+
+        val loadResult = load("$mainUrl/$matchedId") as? AnimeLoadResponse ?: return false
+        val epKey = if (isDub) DubStatus.Dubbed else DubStatus.Subbed
+        val matchedEp = loadResult.episodes?.get(epKey)?.find { it.episode == episode }
+        if (matchedEp == null) {
+            Log.d("RaghavAnime", "Enma: ep $episode not found (dub=$isDub)")
+            return false
+        }
+        return loadLinks(matchedEp.data, false, subtitleCallback, callback)
+    }
+
     private fun EnmaAnimeItem.toSearchResult(): AnimeSearchResponse? {
         val id = id ?: return null
         val title = title ?: return null
