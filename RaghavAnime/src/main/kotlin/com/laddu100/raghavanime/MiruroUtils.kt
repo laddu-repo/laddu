@@ -520,7 +520,7 @@ val INFO_QUERY = """
 
 private val anilistCache = mutableMapOf<String, Pair<String, Long>>()
 private const val ANILIST_CACHE_TTL = 10 * 60 * 1000L
-private val anilistMutex = kotlinx.coroutines.sync.Mutex()
+private val anilistLocks = mutableMapOf<String, kotlinx.coroutines.sync.Mutex>()
 
 suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
     val cacheKey = "$query|${variables.toJson()}"
@@ -529,10 +529,21 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
         if (now - time < ANILIST_CACHE_TTL) return cached
     }
 
-    anilistMutex.withLock {
-        anilistCache[cacheKey]?.let { (cached, time) ->
-            if (now - time < ANILIST_CACHE_TTL) return cached
+    val lock = synchronized(anilistLocks) {
+        anilistLocks.getOrPut(cacheKey) { kotlinx.coroutines.sync.Mutex() }
+    }
+
+    if (lock.isLocked) {
+        repeat(50) {
+            kotlinx.coroutines.delay(100)
+            anilistCache[cacheKey]?.let { (cached, time) ->
+                if (now - time < ANILIST_CACHE_TTL) return cached
+            }
         }
+    }
+
+    anilistCache[cacheKey]?.let { (cached, time) ->
+        if (now - time < ANILIST_CACHE_TTL) return cached
     }
 
     val requestData = mapOf(
@@ -550,7 +561,7 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
             ANILIST_URL,
             headers = headers,
             requestBody = requestData,
-            timeout = 30_000L
+            timeout = 15_000L
         )
         val text = response.text
         if (text.isNotBlank() && !text.contains("\"errors\"")) {
