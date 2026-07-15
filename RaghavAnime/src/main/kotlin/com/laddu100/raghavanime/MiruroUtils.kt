@@ -18,6 +18,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -519,12 +520,19 @@ val INFO_QUERY = """
 
 private val anilistCache = mutableMapOf<String, Pair<String, Long>>()
 private const val ANILIST_CACHE_TTL = 10 * 60 * 1000L
+private val anilistMutex = kotlinx.coroutines.sync.Mutex()
 
 suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
     val cacheKey = "$query|${variables.toJson()}"
     val now = System.currentTimeMillis()
     anilistCache[cacheKey]?.let { (cached, time) ->
         if (now - time < ANILIST_CACHE_TTL) return cached
+    }
+
+    anilistMutex.withLock {
+        anilistCache[cacheKey]?.let { (cached, time) ->
+            if (now - time < ANILIST_CACHE_TTL) return cached
+        }
     }
 
     val requestData = mapOf(
@@ -537,30 +545,24 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
         "Content-Type" to "application/json"
     )
 
-    var lastError: Exception? = null
-    for (attempt in 1..3) {
-        try {
-            val response = app.post(
-                ANILIST_URL,
-                headers = headers,
-                requestBody = requestData
-            )
-            val text = response.text
-            if (text.isNotBlank() && !text.contains("\"errors\"")) {
-                anilistCache[cacheKey] = text to now
-                return text
-            }
-        } catch (e: Exception) {
-            lastError = e
-            com.lagradost.api.Log.d("RaghavAnime", "AniList attempt $attempt failed: ${e.message}")
+    try {
+        val response = app.post(
+            ANILIST_URL,
+            headers = headers,
+            requestBody = requestData,
+            timeout = 30_000L
+        )
+        val text = response.text
+        if (text.isNotBlank() && !text.contains("\"errors\"")) {
+            anilistCache[cacheKey] = text to now
+            return text
         }
-        if (attempt < 3) {
-            try { kotlinx.coroutines.delay(1000L * attempt) } catch (_: Exception) {}
-        }
+    } catch (e: Exception) {
+        com.lagradost.api.Log.d("RaghavAnime", "AniList failed: ${e.message}")
     }
 
     anilistCache[cacheKey]?.let { (cached, _) -> return cached }
-    throw lastError ?: Exception("AniList query failed")
+    throw Exception("AniList query failed")
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
