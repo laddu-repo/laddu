@@ -303,7 +303,6 @@ class RaghavAnime : MainAPI() {
                             val c = cleanTitle(r.name)
                             val score = when {
                                 aniWavesTargets.contains(c) -> 2
-                                aniWavesTargets.any { tgt -> tgt.contains(c) || c.contains(tgt) } -> 1
                                 else -> 0
                             }
                             if (score > 0) Pair(score, r) else null
@@ -571,9 +570,13 @@ class RaghavAnime : MainAPI() {
         }
 
         allCandidates.sortByDescending { it.combinedScore }
-        Log.d("RaghavAnime", "$sourceTag: ${allCandidates.size} candidates (best score=${allCandidates.first().combinedScore})")
+        Log.d("RaghavAnime", "$sourceTag: ${allCandidates.size} candidates (best score=${allCandidates.firstOrNull()?.combinedScore ?: 0})")
 
         for (cand in allCandidates) {
+            if (cand.titleScore < 2) {
+                Log.d("RaghavAnime", "$sourceTag: skipping partial matches (best exact=${allCandidates.filter { it.titleScore >= 2 }.size})")
+                break
+            }
             try {
                 val loadResult = doLoad(cand.result.url) ?: continue
                 val ep = loadResult.episodes?.get(epKey)?.find { it.episode == episode }
