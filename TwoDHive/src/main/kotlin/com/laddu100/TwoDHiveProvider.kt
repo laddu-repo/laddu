@@ -149,11 +149,15 @@ class TwoDHiveProvider : MainAPI() {
             val href = a.attr("href")
             val epNumMatch = Regex("""ep_num=(\d+)""").find(href)
             val epNum = epNumMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
-            val epTitle = "Episode $epNum"
+            val epTitle = a.selectFirst("p.font-semibold")?.text()?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Episode $epNum"
+            val epPoster = a.selectFirst("img")?.attr("src")?.takeIf { it.isNotBlank() }
 
             episodes.add(newEpisode("$mainUrl$href") {
                 this.episode = epNum
                 this.name = epTitle
+                this.posterUrl = epPoster
             })
         }
 
@@ -161,12 +165,14 @@ class TwoDHiveProvider : MainAPI() {
             newEpisode("${ep.data}|sub") {
                 this.episode = ep.episode
                 this.name = ep.name
+                this.posterUrl = ep.posterUrl
             }
         }
         val dubEpisodes = episodes.map { ep ->
             newEpisode("${ep.data}|dub") {
                 this.episode = ep.episode
                 this.name = ep.name
+                this.posterUrl = ep.posterUrl
             }
         }
 

@@ -283,7 +283,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val aniSuge = AniSugeProvider()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { aniSuge.search(it) },
                         doLoad = { aniSuge.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "AniSuge"
@@ -330,7 +330,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val anikai = Anikai()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { anikai.search(it) },
                         doLoad = { anikai.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Anikai"
@@ -342,7 +342,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val aniDb = AniDb()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { q -> aniDb.search(q, 1).items },
                         doLoad = { aniDb.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "AniDb"
@@ -360,7 +360,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val anineko = Anineko()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { anineko.search(it) },
                         doLoad = { anineko.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Anineko"
@@ -372,7 +372,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val animetsu = AnimetsuProvider()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { animetsu.search(it) },
                         doLoad = { animetsu.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Animetsu"
@@ -384,7 +384,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val twoDHive = RaghavTwoDHive()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { twoDHive.search(it) },
                         doLoad = { twoDHive.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "2DHive"
@@ -396,7 +396,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val anikoto = RaghavAnikoto()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { anikoto.search(it) },
                         doLoad = { anikoto.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "AniKoto"
@@ -414,7 +414,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val animo = RaghavAnimo()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { animo.search(it) },
                         doLoad = { animo.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Animo"
@@ -428,7 +428,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val anidap = RaghavAnidap()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { anidap.search(it) },
                         doLoad = { anidap.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Anidap"
@@ -440,7 +440,7 @@ class RaghavAnime : MainAPI() {
                 try {
                     val senshi = RaghavSenshi()
                     val searchTitles = listOfNotNull(title, jpTitle).filter { it.isNotBlank() }
-                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub,
+                    val epData = findEpisodeData(searchTitles, listOfNotNull(title, jpTitle), episode, isDub, year = linkData.year,
                         doSearch = { senshi.search(it) },
                         doLoad = { senshi.load(it) as? com.lagradost.cloudstream3.AnimeLoadResponse },
                         sourceTag = "Senshi"
@@ -478,11 +478,53 @@ class RaghavAnime : MainAPI() {
             .trim()
     }
 
+    private fun romanToInt(s: String): Int? {
+        val upper = s.uppercase()
+        val map = mapOf('I' to 1, 'V' to 5, 'X' to 10)
+        if (upper.any { it !in map }) return null
+        var result = 0
+        var prev = 0
+        for (c in upper.reversed()) {
+            val curr = map[c] ?: return null
+            if (curr < prev) result -= curr else result += curr
+            prev = curr
+        }
+        return if (result in 1..20) result else null
+    }
+
+    private fun extractSeasonNumber(title: String): Int? {
+        val lower = title.lowercase()
+        Regex("""(\d+)(?:st|nd|rd|th)\s*season""").find(lower)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        Regex("""season\s*(\d+)""").find(lower)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        Regex("""\bs(\d+)\b""").find(lower)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        Regex("""part\s*(\d+)""").find(lower)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        Regex("""cour\s*(\d+)""").find(lower)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        Regex("""\s+([ivx]+)\s*$""").find(lower)?.let {
+            return romanToInt(it.groupValues[1])
+        }
+        return null
+    }
+
+    private fun extractYear(title: String): Int? {
+        return Regex("""\b(19\d{2}|20\d{2})\b""").find(title)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
     private suspend fun findEpisodeData(
         searchTitles: List<String>,
         targetTitles: List<String>,
         episode: Int,
         isDub: Boolean,
+        year: Int?,
         doSearch: suspend (String) -> List<SearchResponse>,
         doLoad: suspend (String) -> com.lagradost.cloudstream3.AnimeLoadResponse?,
         dubKey: com.lagradost.cloudstream3.DubStatus = com.lagradost.cloudstream3.DubStatus.Dubbed,
@@ -492,7 +534,11 @@ class RaghavAnime : MainAPI() {
         val cleanedTargets = targetTitles.map { cleanTitle(it) }
         val epKey = if (isDub) dubKey else subKey
 
-        val allCandidates = mutableListOf<Pair<Int, SearchResponse>>()
+        val targetSeasonNum = targetTitles.firstNotNullOfOrNull { extractSeasonNumber(it) }
+
+        data class Candidate(val combinedScore: Int, val titleScore: Int, val result: SearchResponse)
+
+        val allCandidates = mutableListOf<Candidate>()
         var totalSearchResults = 0
         for (t in searchTitles) {
             val searchResults = try { doSearch(t) } catch (e: Throwable) {
@@ -502,12 +548,20 @@ class RaghavAnime : MainAPI() {
             totalSearchResults += searchResults.size
             for (r in searchResults) {
                 val c = cleanTitle(r.name)
-                val score = when {
+                val titleScore = when {
                     cleanedTargets.contains(c) -> 2
                     cleanedTargets.any { tgt -> tgt.contains(c) || c.contains(tgt) } -> 1
                     else -> 0
                 }
-                if (score > 0) allCandidates.add(Pair(score, r))
+                if (titleScore == 0) continue
+
+                val candSeasonNum = extractSeasonNumber(r.name)
+                val candYear = extractYear(r.name)
+                val yearScore = if (year != null && (candYear == year || r.name.contains(year.toString()))) 1 else 0
+                val seasonScore = if (targetSeasonNum != null && candSeasonNum == targetSeasonNum) 1 else 0
+
+                val combinedScore = titleScore * 10 + yearScore * 5 + seasonScore * 3
+                allCandidates.add(Candidate(combinedScore, titleScore, r))
             }
         }
 
@@ -516,34 +570,19 @@ class RaghavAnime : MainAPI() {
             return null
         }
 
-        allCandidates.sortByDescending { it.first }
-        Log.d("RaghavAnime", "$sourceTag: ${allCandidates.size} candidates (best score=${allCandidates.first().first})")
+        allCandidates.sortByDescending { it.combinedScore }
+        Log.d("RaghavAnime", "$sourceTag: ${allCandidates.size} candidates (best score=${allCandidates.first().combinedScore})")
 
-        for ((score, result) in allCandidates) {
-            if (score < 2) continue
+        for (cand in allCandidates) {
             try {
-                val loadResult = doLoad(result.url) ?: continue
+                val loadResult = doLoad(cand.result.url) ?: continue
                 val ep = loadResult.episodes?.get(epKey)?.find { it.episode == episode }
                 if (ep != null) {
-                    Log.d("RaghavAnime", "$sourceTag: matched (score=$score) '${result.name}' ep $episode found")
+                    Log.d("RaghavAnime", "$sourceTag: matched (score=${cand.combinedScore} title=${cand.titleScore}) '${cand.result.name}' ep $episode found")
                     return ep.data
                 }
             } catch (e: Throwable) {
-                Log.d("RaghavAnime", "$sourceTag: load failed for '${result.name}': ${e.message}")
-            }
-        }
-
-        for ((score, result) in allCandidates) {
-            if (score < 1) continue
-            try {
-                val loadResult = doLoad(result.url) ?: continue
-                val ep = loadResult.episodes?.get(epKey)?.find { it.episode == episode }
-                if (ep != null) {
-                    Log.d("RaghavAnime", "$sourceTag: matched (score=$score partial) '${result.name}' ep $episode found")
-                    return ep.data
-                }
-            } catch (e: Throwable) {
-                Log.d("RaghavAnime", "$sourceTag: load failed for '${result.name}': ${e.message}")
+                Log.d("RaghavAnime", "$sourceTag: load failed for '${cand.result.name}': ${e.message}")
             }
         }
 

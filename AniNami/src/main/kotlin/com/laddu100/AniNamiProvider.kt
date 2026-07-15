@@ -23,6 +23,7 @@ import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -162,7 +163,18 @@ class AniNamiProvider : MainAPI() {
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class StreamResultData(
         @JsonProperty("streams") val streams: List<Stream>? = null,
-        @JsonProperty("download") val download: String? = null
+        @JsonProperty("download") val download: String? = null,
+        @JsonProperty("subtitles") val subtitles: List<SubtitleTrack>? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class SubtitleTrack(
+        @JsonProperty("file") val file: String? = null,
+        @JsonProperty("label") val label: String? = null,
+        @JsonProperty("kind") val kind: String? = null,
+        @JsonProperty("language") val language: String? = null,
+        @JsonProperty("format") val format: String? = null,
+        @JsonProperty("default") val default: Boolean? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -414,7 +426,12 @@ class AniNamiProvider : MainAPI() {
                     val num = ep.number ?: return@forEach
                     val id = ep.id ?: return@forEach
                     subIdsByNumber.getOrPut(num) { mutableListOf() }.add(id)
-                    if (!subByNumber.containsKey(num)) subByNumber[num] = ep
+                    val current = subByNumber[num]
+                    if (current == null ||
+                        (current.title.isNullOrBlank() && !ep.title.isNullOrBlank())
+                    ) {
+                        subByNumber[num] = ep
+                    }
                 }
             }
             val dubByNumber = sortedMapOf<Int, EpisodeItem>()
@@ -424,7 +441,12 @@ class AniNamiProvider : MainAPI() {
                     val num = ep.number ?: return@forEach
                     val id = ep.id ?: return@forEach
                     dubIdsByNumber.getOrPut(num) { mutableListOf() }.add(id)
-                    if (!dubByNumber.containsKey(num)) dubByNumber[num] = ep
+                    val current = dubByNumber[num]
+                    if (current == null ||
+                        (current.title.isNullOrBlank() && !ep.title.isNullOrBlank())
+                    ) {
+                        dubByNumber[num] = ep
+                    }
                 }
             }
 
@@ -483,6 +505,7 @@ class AniNamiProvider : MainAPI() {
 
         var found = false
         val seenUrls = mutableSetOf<String>()
+        val seenSubs = mutableSetOf<String>()
 
         for (epId in epIds) {
             val parts = epId.split("/")
@@ -501,12 +524,31 @@ class AniNamiProvider : MainAPI() {
                 Log.d("AniNami", "watch $provider: ${e.message}")
                 continue
             }
-            val streams = try {
-                parseJson<StreamResponse>(streamsText).results?.streams
+            val streamResult = try {
+                parseJson<StreamResponse>(streamsText).results
             } catch (e: Exception) {
                 Log.d("AniNami", "parse streams $provider: ${e.message}")
                 continue
             } ?: continue
+
+            val streams = streamResult.streams ?: emptyList()
+            val subtitles = streamResult.subtitles ?: emptyList()
+
+            val subReferer = streams.firstOrNull()?.referer
+                ?.takeIf { it.isNotBlank() } ?: "$mainUrl/"
+            for (sub in subtitles) {
+                val rawFile = sub.file ?: continue
+                if (rawFile.isBlank()) continue
+                val subUrl = if (rawFile.startsWith("http")) rawFile
+                    else "$mainUrl/${rawFile.removePrefix("/")}"
+                if (!seenSubs.add(subUrl)) continue
+                val label = sub.label?.takeIf { it.isNotBlank() }
+                    ?: sub.language?.takeIf { it.isNotBlank() }
+                    ?: "Subtitle"
+                subtitleCallback.invoke(newSubtitleFile(label, subUrl) {
+                    this.headers = mapOf("Referer" to subReferer)
+                })
+            }
 
             for (stream in streams) {
                 val streamUrl = stream.url ?: continue

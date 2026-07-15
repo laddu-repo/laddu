@@ -136,8 +136,10 @@ class RaghavAnimo : MainAPI() {
                 if (hd == 1) {
                     sources.tracks?.forEach { t ->
                         val file = t.file ?: return@forEach
-                        val subUrl = if (file.startsWith("http")) file else "$cdnUrl$file"
-                        subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl))
+                        val subUrl = if (file.startsWith("http")) file else "$cdnUrl/${file.removePrefix("/")}"
+                        subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl) {
+                            this.headers = playHeaders
+                        })
                     }
                 }
             } catch (e: Exception) { Log.d("RaghavAnime", "Animo: ${e.message}") }

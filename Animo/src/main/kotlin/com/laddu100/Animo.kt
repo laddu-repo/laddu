@@ -252,6 +252,10 @@ class Animo : MainAPI() {
         var found = false
         val typesToTry = if (epData.streamType == "dub") listOf("dub", "sub") else listOf("sub", "dub")
         for (type in typesToTry) {
+            // Subtitles are forwarded once per type on the first hd variant that
+            // actually returns tracks, so a failing hd=1 does not block subs for
+            // the whole type (the previous `hd == 1` gate did exactly that).
+            var subsPassedForType = false
             for (hd in 1..4) {
                 val sourcesUrl = "$cdnUrl/stream/getSources?hd=$hd&id=${epData.animeId}&episode=${epData.episodeNum}&type=$type"
                 Log.d(TAG, "loadLinks Fetching getSources (type=$type, hd=$hd): $sourcesUrl")
@@ -281,7 +285,7 @@ class Animo : MainAPI() {
 
                     sources.sources?.forEach { s ->
                         val file = s.file ?: return@forEach
-                        val streamUrl = if (file.startsWith("http")) file else "$cdnUrl$file"
+                        val streamUrl = if (file.startsWith("http")) file else "$cdnUrl/${file.removePrefix("/")}"
                         val label = "$name HD$hd ($type)"
                         Log.d(TAG, "loadLinks found source: label=$label, type=${s.type}, url=$streamUrl")
                         if (s.type == "hls" || streamUrl.contains(".m3u8")) {
@@ -308,14 +312,18 @@ class Animo : MainAPI() {
                         }
                     }
 
-                    // Forward subtitles (only once per type)
-                    if (hd == 1) {
-                        sources.tracks?.forEach { t ->
+                    if (!subsPassedForType && !sources.tracks.isNullOrEmpty()) {
+                        sources.tracks.forEach { t ->
                             val file = t.file ?: return@forEach
-                            val subUrl = if (file.startsWith("http")) file else "$cdnUrl$file"
+                            val subUrl = if (file.startsWith("http")) file else "$cdnUrl/${file.removePrefix("/")}"
                             Log.d(TAG, "loadLinks found subtitle: label=${t.label}, url=$subUrl")
-                            subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl))
+                            // CDN subtitle files need Referer/Origin like the video does,
+                            // otherwise the player shows the track name but serves no text.
+                            subtitleCallback.invoke(newSubtitleFile(t.label ?: "English", subUrl) {
+                                this.headers = playHeaders
+                            })
                         }
+                        subsPassedForType = true
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "loadLinks getSources (type=$type, hd=$hd) FAILED: ${e.message}")

@@ -116,9 +116,11 @@ open class MegaPlay : ExtractorApi() {
                         val kind = track.get("kind")?.asString ?: continue
                         if (kind != "captions" && kind != "subtitles") continue
                         val file = track.get("file")?.asString ?: continue
+                        // Track files may be root-relative; resolve against the megaplay host.
+                        val trackUrl = if (file.startsWith("http")) file else "$host/${file.removePrefix("/")}"
                         val label = track.get("label")?.asString ?: "Unknown"
                         subtitleCallback(
-                            newSubtitleFile(label, file) {
+                            newSubtitleFile(label, trackUrl) {
                                 this.headers = playbackHeaders
                             }
                         )

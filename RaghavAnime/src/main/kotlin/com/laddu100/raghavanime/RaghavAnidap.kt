@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -20,7 +21,8 @@ class RaghavAnidap : MainAPI() {
     override var lang = "en"
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    private val chadUrl = "https://chad.anidap.se/rest/api"
+    private val chadHost = "https://chad.anidap.se"
+    private val chadUrl = "$chadHost/rest/api"
     private val TAG = "RaghavAnidap"
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
 
@@ -290,9 +292,14 @@ class RaghavAnidap : MainAPI() {
                     var trackUrl = track.url ?: continue
                     if (trackUrl.isBlank()) continue
                     trackUrl = trackUrl.replace("https:///", "https://").replace("http:///", "http://")
+                    if (!trackUrl.startsWith("http")) {
+                        trackUrl = "$chadHost/${trackUrl.removePrefix("/")}"
+                    }
                     val label = track.label ?: track.lang ?: "Subtitle"
                     if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
-                        subtitleCallback.invoke(SubtitleFile(label, trackUrl))
+                        subtitleCallback.invoke(newSubtitleFile(label, trackUrl) {
+                            this.headers = apiHeaders
+                        })
                     }
                 }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -21,7 +22,8 @@ class AnidapProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
-    private val chadUrl = "https://chad.anidap.lol/rest/api"
+    private val chadHost = "https://chad.anidap.lol"
+    private val chadUrl = "$chadHost/rest/api"
     private val TAG = "Anidap"
     private val baseHeaders = mapOf("Referer" to "$mainUrl/home")
 
@@ -472,7 +474,7 @@ class AnidapProvider : MainAPI() {
                     this.name = if (epTitle.isNullOrBlank()) {
                         "Episode $epNum$fillerSuffix"
                     } else {
-                        "Ep $epNum: $epTitle$fillerSuffix"
+                        "$epTitle$fillerSuffix"
                     }
                     this.episode = epNum
                     this.posterUrl = epInfo?.img?.takeIf { it.isNotBlank() }
@@ -493,7 +495,7 @@ class AnidapProvider : MainAPI() {
                     this.name = if (epTitle.isNullOrBlank()) {
                         "Episode $epNum$fillerSuffix"
                     } else {
-                        "Ep $epNum: $epTitle$fillerSuffix"
+                        "$epTitle$fillerSuffix"
                     }
                     this.episode = epNum
                     this.posterUrl = epInfo?.img?.takeIf { it.isNotBlank() }
@@ -604,17 +606,23 @@ class AnidapProvider : MainAPI() {
                     continue
                 }
 
-                // 2. Pass subtitles to subtitleCallback
+                // Subtitle files share the video CDN, so they need the same
+                // Referer/Origin headers to avoid empty/403 responses.
                 for (track in tracks) {
                     var trackUrl = track.url ?: continue
                     if (trackUrl.isBlank()) continue
-                    // Fix malformed URLs from the API (e.g. "https:///subbl.krussdomi.com/..."
-                    // has an empty host — replace triple slash with double slash)
+                    // API sometimes returns URLs with an empty host like
+                    // "https:///subbl.krussdomi.com/..." — normalize the scheme.
                     trackUrl = trackUrl.replace("https:///", "https://").replace("http:///", "http://")
+                    // Resolve root-relative track paths against the API host.
+                    if (!trackUrl.startsWith("http")) {
+                        trackUrl = "$chadHost/${trackUrl.removePrefix("/")}"
+                    }
                     val label = track.label ?: track.lang ?: "Subtitle"
-                    // Accept captions, subtitles, and metadata tracks
                     if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
-                        subtitleCallback.invoke(SubtitleFile(label, trackUrl))
+                        subtitleCallback.invoke(newSubtitleFile(label, trackUrl) {
+                            this.headers = apiHeaders
+                        })
                         Log.d(TAG, "loadLinks: $providerId subtitle '$label' added")
                     }
                 }
