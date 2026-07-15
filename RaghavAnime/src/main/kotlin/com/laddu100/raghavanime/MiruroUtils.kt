@@ -333,7 +333,6 @@ suspend fun miruroPipeRequest(path: String, query: Map<String, Any>): String {
             return result
         } catch (e: Exception) {
             lastError = e
-            com.lagradost.api.Log.d("RaghavAnime", "AniList attempt $attempt failed: ${e.message}")
         }
     }
     throw lastError ?: Exception("All Miruro domains failed for /$path")
