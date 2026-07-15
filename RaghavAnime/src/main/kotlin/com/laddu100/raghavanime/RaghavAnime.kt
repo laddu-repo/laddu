@@ -34,12 +34,6 @@ class RaghavAnime : MainAPI() {
         "TRENDING" to "Trending Now",
         "POPULAR" to "Popular This Season",
         "RECENT" to "Recently Updated",
-        "ACTION" to "Action & Adventure",
-        "FANTASY" to "Fantasy & Magic",
-        "SCIFI" to "Sci-Fi & Mecha",
-        "ROMANCE" to "Romance & Drama",
-        "COMEDY" to "Comedy & Slice of Life",
-        "MOVIES" to "Top Rated Movies",
         "TOP_RATED" to "Top Rated Series"
     )
 
@@ -57,30 +51,6 @@ class RaghavAnime : MainAPI() {
             "RECENT" -> {
                 variables["sort"] = listOf("START_DATE_DESC")
                 variables["status"] = "RELEASING"
-            }
-            "ACTION" -> {
-                variables["sort"] = listOf("TRENDING_DESC", "POPULARITY_DESC")
-                variables["genreIn"] = listOf("Action", "Adventure")
-            }
-            "FANTASY" -> {
-                variables["sort"] = listOf("TRENDING_DESC", "POPULARITY_DESC")
-                variables["genreIn"] = listOf("Fantasy")
-            }
-            "SCIFI" -> {
-                variables["sort"] = listOf("TRENDING_DESC", "POPULARITY_DESC")
-                variables["genreIn"] = listOf("Sci-Fi")
-            }
-            "ROMANCE" -> {
-                variables["sort"] = listOf("TRENDING_DESC", "POPULARITY_DESC")
-                variables["genreIn"] = listOf("Romance", "Drama")
-            }
-            "COMEDY" -> {
-                variables["sort"] = listOf("TRENDING_DESC", "POPULARITY_DESC")
-                variables["genreIn"] = listOf("Comedy")
-            }
-            "MOVIES" -> {
-                variables["sort"] = listOf("SCORE_DESC")
-                variables["format"] = "MOVIE"
             }
             "TOP_RATED" -> {
                 variables["sort"] = listOf("SCORE_DESC")
