@@ -297,8 +297,13 @@ class RaghavAnidap : MainAPI() {
                     }
                     val label = track.label ?: track.lang ?: "Subtitle"
                     if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
+                        val subHeaders = when {
+                            trackUrl.contains("lostproject.club") -> mapOf("Referer" to "https://megaplay.buzz/")
+                            trackUrl.contains("megaplay.buzz") -> mapOf("Referer" to "https://megaplay.buzz/")
+                            else -> apiHeaders
+                        }
                         subtitleCallback.invoke(newSubtitleFile(label, trackUrl) {
-                            this.headers = apiHeaders
+                            this.headers = subHeaders
                         })
                     }
                 }

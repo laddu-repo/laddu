@@ -420,8 +420,16 @@ class AnikotoProvider : MainAPI() {
                         val kind = track.get("kind")?.asString ?: continue
                         if (kind != "captions" && kind != "subtitles") continue
                         val file = track.get("file")?.asString ?: continue
+                        val trackUrl = if (file.startsWith("http")) file else "$host/${file.removePrefix("/")}"
                         val label = track.get("label")?.asString ?: "English"
-                        subtitleCallback.invoke(newSubtitleFile(label, file))
+                        val subHeaders = when {
+                            trackUrl.contains("lostproject.club") -> mapOf("Referer" to "https://megaplay.buzz/")
+                            trackUrl.contains("nekostream.site") -> mapOf("Referer" to "$host/")
+                            else -> playbackHeaders
+                        }
+                        subtitleCallback.invoke(newSubtitleFile(label, trackUrl) {
+                            this.headers = subHeaders
+                        })
                     }
                 }
             } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }

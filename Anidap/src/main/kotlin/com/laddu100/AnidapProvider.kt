@@ -611,17 +611,19 @@ class AnidapProvider : MainAPI() {
                 for (track in tracks) {
                     var trackUrl = track.url ?: continue
                     if (trackUrl.isBlank()) continue
-                    // API sometimes returns URLs with an empty host like
-                    // "https:///subbl.krussdomi.com/..." — normalize the scheme.
                     trackUrl = trackUrl.replace("https:///", "https://").replace("http:///", "http://")
-                    // Resolve root-relative track paths against the API host.
                     if (!trackUrl.startsWith("http")) {
                         trackUrl = "$chadHost/${trackUrl.removePrefix("/")}"
                     }
                     val label = track.label ?: track.lang ?: "Subtitle"
                     if (track.kind == "captions" || track.kind == "subtitles" || track.kind == "metadata") {
+                        val subHeaders = when {
+                            trackUrl.contains("lostproject.club") -> mapOf("Referer" to "https://megaplay.buzz/")
+                            trackUrl.contains("megaplay.buzz") -> mapOf("Referer" to "https://megaplay.buzz/")
+                            else -> apiHeaders
+                        }
                         subtitleCallback.invoke(newSubtitleFile(label, trackUrl) {
-                            this.headers = apiHeaders
+                            this.headers = subHeaders
                         })
                         Log.d(TAG, "loadLinks: $providerId subtitle '$label' added")
                     }

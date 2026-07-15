@@ -1,4 +1,4 @@
-version = 10
+version = 11
 
 cloudstream {
     description = "AniKoto Anime - Watch Anime Sub & Dub in HD"
