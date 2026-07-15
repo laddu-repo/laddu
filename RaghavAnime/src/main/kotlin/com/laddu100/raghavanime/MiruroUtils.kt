@@ -517,7 +517,16 @@ val INFO_QUERY = """
     }
 """.trimIndent()
 
+private val anilistCache = mutableMapOf<String, Pair<String, Long>>()
+private const val ANILIST_CACHE_TTL = 10 * 60 * 1000L
+
 suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
+    val cacheKey = "$query|${variables.toJson()}"
+    val now = System.currentTimeMillis()
+    anilistCache[cacheKey]?.let { (cached, time) ->
+        if (now - time < ANILIST_CACHE_TTL) return cached
+    }
+
     val requestData = mapOf(
         "query" to query,
         "variables" to variables
@@ -528,7 +537,8 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
         "Content-Type" to "application/json"
     )
 
-    for (attempt in 1..2) {
+    var lastError: Exception? = null
+    for (attempt in 1..3) {
         try {
             val response = app.post(
                 ANILIST_URL,
@@ -537,17 +547,19 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
             )
             val text = response.text
             if (text.isNotBlank() && !text.contains("\"errors\"")) {
+                anilistCache[cacheKey] = text to now
                 return text
             }
-
         } catch (e: Exception) {
-            com.lagradost.api.Log.e("RaghavAnime", "AniList request failed on attempt $attempt: ${e.message}")
+            lastError = e
         }
-        if (attempt < 2) {
-            try { kotlinx.coroutines.delay(500L) } catch (_: Exception) {}
+        if (attempt < 3) {
+            try { kotlinx.coroutines.delay(1000L * attempt) } catch (_: Exception) {}
         }
     }
-    throw Exception("AniList query failed")
+
+    anilistCache[cacheKey]?.let { (cached, _) -> return cached }
+    throw lastError ?: Exception("AniList query failed")
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
