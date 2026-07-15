@@ -42,14 +42,12 @@ import kotlin.coroutines.resume
 
 private const val CF_TAG = "Senshi_CFBypass"
 
-// Phrases that indicate a Cloudflare challenge page
 private val CF_BLOCKER_PHRASES = listOf(
     "just a moment", "checking your browser", "ddos-guard",
     "attention required", "verify you are human", "cloudflare",
     "challenge-platform", "cf-ray", "enable javascript", "turnstile"
 )
 
-// Page titles that indicate an active challenge
 private val CF_CHALLENGE_TITLES = listOf(
     "just a moment", "just a moment...", "checking your browser",
     "attention required", "ddos-guard", "one more step", "senshi.live"
@@ -61,7 +59,7 @@ private object SenshiCFStore {
     private const val KEY_UA = "cf_user_agent"
     private const val KEY_HOST = "cf_cookie_host"
     private const val KEY_TIMESTAMP = "cf_timestamp"
-    private const val COOKIE_TTL_MS = 45 * 60 * 1000L // 45 minutes (cf_clearance ~1hr)
+    private const val COOKIE_TTL_MS = 45 * 60 * 1000L
 
     private var prefs: android.content.SharedPreferences? = null
     private var cachedCookies: String? = null
@@ -211,7 +209,6 @@ class SenshiCFDialog(
             layoutParams = ViewGroup.LayoutParams(-1, -2)
         }
 
-        // Title
         root.addView(TextView(requireContext()).apply {
             text = "Senshi - Cloudflare Bypass"
             textSize = 18f
@@ -220,7 +217,6 @@ class SenshiCFDialog(
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
 
-        // Status text
         TextView(requireContext()).apply {
             text = "Loading challenge page..."
             textSize = 13f
@@ -228,7 +224,6 @@ class SenshiCFDialog(
             setPadding(0, 0, 0, (4 * dp).toInt())
         }.also { statusText = it; root.addView(it) }
 
-        // Hint
         root.addView(TextView(requireContext()).apply {
             text = "Solve any CAPTCHA shown below. The dialog will close automatically once done."
             textSize = 11f
@@ -236,13 +231,11 @@ class SenshiCFDialog(
             setPadding(0, 0, 0, (12 * dp).toInt())
         })
 
-        // Progress bar
         ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = (12 * dp).toInt() }
         }.also { progressBar = it; root.addView(it) }
 
-        // WebView container
         FrameLayout(requireContext()).apply {
             layoutParams = LinearLayout.LayoutParams(-1, webViewHeight)
             webView = buildWebView()
@@ -255,7 +248,7 @@ class SenshiCFDialog(
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        // Clear stale CF cookies before loading (CinemaCity approach)
+
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
@@ -442,14 +435,13 @@ internal suspend fun cfGet(
     Log.d(CF_TAG, "Cloudflare blocked (HTTP ${response.code}) for $url -> triggering bypass")
 
     senshiCfBypassMutex.withLock {
-        // Double-check: another coroutine may have bypassed while we waited
+
         val cachedCookies = SenshiCFStore.getCookies()
         if (cachedCookies != null && SenshiCFStore.getHost() == targetHost) {
             response = try { app.get(url, headers = buildSenshiHeaders(headers), timeout = timeout) } catch (e: Exception) { throw e }
             if (!isSenshiCloudflareBlocked(response)) return response
         }
 
-        // Clear stale cookies and show bypass dialog
         SenshiCFStore.clear()
         val bypassSuccess = showSenshiCFBypassDialogAndWait(url)
 
@@ -458,7 +450,6 @@ internal suspend fun cfGet(
             return@withLock
         }
 
-        // Retry with new cookies (up to 2 attempts)
         for (attempt in 1..2) {
             response = try { app.get(url, headers = buildSenshiHeaders(headers), timeout = timeout) } catch (e: Exception) { throw e }
             if (!isSenshiCloudflareBlocked(response)) {
@@ -520,7 +511,7 @@ internal suspend fun cfPost(
         }
 
         for (attempt in 1..2) {
-            // Rebuild headers to pick up new cookies
+
             val retryHeaders = buildSenshiHeaders(headers).toMutableMap().apply {
                 if (!containsKey("Content-Type")) {
                     this["Content-Type"] = "application/json"

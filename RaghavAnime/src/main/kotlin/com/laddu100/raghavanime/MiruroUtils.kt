@@ -44,20 +44,19 @@ fun decodePipeResponse(responseBody: String): String {
 }
 
 private fun decompress(data: ByteArray): String {
-    // gzip: magic bytes 1f 8b 08
+
     if (data.size > 2 && data[0] == 0x1f.toByte() && data[1] == 0x8b.toByte()) {
         val bais = ByteArrayInputStream(data)
         val gzis = GZIPInputStream(bais)
         return gzis.use { it.readBytes().toString(Charsets.UTF_8) }
     }
-    // zlib or raw deflate: use Inflater with nowrap
-    // zlib header: first byte & 0x0f == 0x08, first byte >> 4 <= 7, (byte0<<8|byte1) % 31 == 0
+
     val isZlib = data.size > 1 &&
         (data[0].toInt() and 0x0f) == 0x08 &&
         (data[0].toInt() shr 4) <= 7 &&
         (((data[0].toInt() and 0xff) shl 8) or (data[1].toInt() and 0xff)) % 31 == 0
 
-    val inflater = if (isZlib) Inflater() else Inflater(true) // true = raw deflate (no zlib header)
+    val inflater = if (isZlib) Inflater() else Inflater(true)
     val bais = ByteArrayInputStream(data)
     val iis = InflaterInputStream(bais, inflater)
     return iis.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -65,7 +64,6 @@ private fun decompress(data: ByteArray): String {
 
 private fun gunzip(data: ByteArray): String = decompress(data)
 
-// JS: Ga = new Uint8Array("71951034f8fbcf53d89db52ceb3dc22c".match(/.{2}/g).map(e => parseInt(e, 16)))
 private val XOR_KEY = byteArrayOf(
     0x71, 0x95.toByte(), 0x10, 0x34, 0xF8.toByte(), 0xFB.toByte(), 0xCF.toByte(), 0x53,
     0xD8.toByte(), 0x9D.toByte(), 0xB5.toByte(), 0x2C, 0xEB.toByte(), 0x3D, 0xC2.toByte(), 0x2C
@@ -81,7 +79,7 @@ private fun xorDecrypt(data: ByteArray): ByteArray {
 
 fun decodePipeResponseWithHeader(responseBody: String, obfuscatedHeader: String?): String {
     if (obfuscatedHeader == null) {
-        // Plain JSON response
+
         return responseBody.trim()
     }
 
@@ -99,7 +97,6 @@ fun decodePipeResponseWithHeader(responseBody: String, obfuscatedHeader: String?
 fun decodePipeResponseAuto(responseBody: String): String {
     val trimmed = responseBody.trim()
 
-    // Plain JSON?
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
         return trimmed
     }
@@ -111,12 +108,10 @@ fun decodePipeResponseAuto(responseBody: String): String {
         throw Exception("Cannot base64-decode pipe response")
     }
 
-    // base64url + decompress?
     try {
         return decompress(decoded)
     } catch (_: Exception) {}
 
-    // base64url + XOR + decompress
     try {
         val xored = xorDecrypt(decoded)
         return decompress(xored)
@@ -227,7 +222,6 @@ object MiruroCloudflare {
                     view?.evaluateJavascript(js) {
                     }
 
-                    // Poll for result every 500ms (up to 15s)
                     for (i in 1..30) {
                         val delay = (i * 500).toLong()
                         Handler(Looper.getMainLooper()).postDelayed({
@@ -292,7 +286,6 @@ object MiruroCloudflare {
 
                     webView?.loadUrl(domain)
 
-                    // Periodic challenge-solved check every 1s (CF can take 5-10s)
                     for (i in 1..12) {
                         val delay = (i * 1000).toLong()
                         Handler(Looper.getMainLooper()).postDelayed({
@@ -300,7 +293,6 @@ object MiruroCloudflare {
                         }, delay)
                     }
 
-                    // Overall timeout: 30s
                     Handler(Looper.getMainLooper()).postDelayed({
                         finish(null)
                     }, 30000)
@@ -536,8 +528,6 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
         "Content-Type" to "application/json"
     )
 
-    // Single attempt with minimal retry — AniList either works or it doesn't.
-    // Retrying 4x with 500ms backoff wastes 3+ seconds when AniList is down.
     for (attempt in 1..2) {
         try {
             val response = app.post(
@@ -549,7 +539,7 @@ suspend fun anilistQuery(query: String, variables: Map<String, Any?>): String {
             if (text.isNotBlank() && !text.contains("\"errors\"")) {
                 return text
             }
-            // AniList returned an error — log and retry once
+
         } catch (e: Exception) {
             com.lagradost.api.Log.e("RaghavAnime", "AniList request failed on attempt $attempt: ${e.message}")
         }

@@ -14,33 +14,6 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.newSubtitleFile
 import java.net.URLEncoder
 
-/**
- * Animetsu provider — complete rewrite.
- *
- * Site: https://animetsu.live
- * API base: https://animetsu.live/v2/api/anime/
- * Stream proxy: https://swiftstream.top/proxy (when need_proxy=true)
- *
- * All endpoints verified working with real HTTP requests. The site is behind
- * Cloudflare but does NOT issue a JS challenge to requests that send proper
- * Origin + Referer headers. The old plugin used CloudflareKiller which caused
- * "Bad Request" errors — this rewrite uses plain app.get with browser headers.
- *
- * Flow:
- *   Homepage → /v2/api/anime/home (seasonal, trending, popular, top, upcoming)
- *           → /v2/api/anime/recent?page=N&per_page=20 (recent, paginated)
- *   Search  → /v2/api/anime/search/?query={query}
- *   Load    → /v2/api/anime/info/{id}     (details)
- *           → /v2/api/anime/eps/{id}      (episode list)
- *           → /v2/api/anime/servers/{id}/{ep}  (4 servers: kite, dio, sage, meg)
- *   Links   → /v2/api/anime/oppai/{id}/{ep}?server={server}&source_type=sub|dub
- *           → returns sources[] with relative URLs
- *           → if need_proxy=true, prepend https://swiftstream.top/proxy
- *           → the proxy URL returns a valid m3u8 playlist (360p/720p/1080p)
- *
- * Sub/Dub: the source_type query param (sub or dub) controls the audio track.
- *   Not all servers have dub — we test each server and skip empty ones.
- */
 class AnimetsuProvider : MainAPI() {
     override var mainUrl = "https://animetsu.live"
     override var name = "Animetsu"
@@ -79,7 +52,7 @@ class AnimetsuProvider : MainAPI() {
                 val resp = parseJson<PaginatedResponse>(apiGet("$apiBase/recent?page=$page&per_page=20"))
                 resp.results?.mapNotNull { it.toSearchResponse() } ?: emptyList()
             } else {
-                // Home categories (seasonal, trending, etc.) only have 1 page
+
                 if (page > 1) return newHomePageResponse(request.name, emptyList(), hasNext = false)
                 val resp = parseJson<HomeResponse>(apiGet("$apiBase/home"))
                 val list = when (request.data) {
@@ -95,7 +68,7 @@ class AnimetsuProvider : MainAPI() {
         } catch (e: Exception) {
             emptyList()
         }
-        val hasNext = request.data == "recent" // only recent is paginated
+        val hasNext = request.data == "recent"
         return newHomePageResponse(request.name, items, hasNext = hasNext)
     }
 
@@ -111,10 +84,9 @@ class AnimetsuProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        // Extract anime ID from URL. CloudStream may pass the full URL or just the ID.
+
         val animeId = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: return null
 
-        // Fetch anime info
         val info = try {
             parseJson<AnimeInfo>(apiGet("$apiBase/info/$animeId"))
         } catch (e: Exception) {
@@ -129,20 +101,18 @@ class AnimetsuProvider : MainAPI() {
         val genres = info.genres ?: emptyList()
         val tvType = if (info.status?.contains("MOVIE", ignoreCase = true) == true) TvType.AnimeMovie else TvType.Anime
 
-        // Fetch episodes
         val eps = try {
             parseJson<List<EpisodeItem>>(apiGet("$apiBase/eps/$animeId"))
         } catch (e: Exception) {
             emptyList()
         }
 
-        // Check if dub is available by testing servers on episode 1
         var hasDub = false
         if (eps.isNotEmpty()) {
             val firstEp = eps[0].epNum
             try {
                 val servers = parseJson<List<ServerItem>>(apiGet("$apiBase/servers/$animeId/$firstEp"))
-                // Test each server for dub
+
                 for (server in servers) {
                     try {
                         val oppaiText = apiGet("$apiBase/oppai/$animeId/$firstEp?server=${server.id}&source_type=dub")
@@ -194,7 +164,7 @@ class AnimetsuProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // CloudStream may prepend mainUrl — strip it
+
         val cleanData = when {
             data.startsWith("$mainUrl/animetsu|") -> data.removePrefix("$mainUrl/")
             data.startsWith("/animetsu|") -> data.removePrefix("/")
@@ -206,9 +176,8 @@ class AnimetsuProvider : MainAPI() {
         if (parts.size < 4) return false
         val animeId = parts[1]
         val epNum = parts[2]
-        val sourceType = parts[3] // "sub" or "dub"
+        val sourceType = parts[3]
 
-        // Fetch available servers (kite, dio, sage, meg)
         val servers = try {
             parseJson<List<ServerItem>>(apiGet("$apiBase/servers/$animeId/$epNum"))
         } catch (e: Exception) {
@@ -229,10 +198,6 @@ class AnimetsuProvider : MainAPI() {
                     val rawUrl = source.url ?: continue
                     if (rawUrl.isBlank()) continue
 
-                    // Build the final URL:
-                    // - If it's already a full URL, use it as-is
-                    // - If need_proxy=true, prepend the swiftstream proxy
-                    // - Otherwise, prepend the site URL
                     val finalUrl = when {
                         rawUrl.startsWith("http") -> rawUrl
                         source.needProxy == true -> "$proxyBase${if (rawUrl.startsWith("/")) "" else "/"}$rawUrl"
@@ -255,7 +220,7 @@ class AnimetsuProvider : MainAPI() {
                     val serverDisplayName = "Animetsu ${server.id} $displayType"
 
                     if (isM3u8) {
-                        // Use M3u8Helper to parse the playlist and generate quality-specific links
+
                         val generated = M3u8Helper.generateM3u8(
                             serverDisplayName, finalUrl, "$mainUrl/",
                             headers = mapOf(
@@ -303,7 +268,6 @@ class AnimetsuProvider : MainAPI() {
                     found = true
                 }
 
-                // Subtitles
                 oppai.subs?.forEach { sub ->
                     val subUrl = sub.url ?: return@forEach
                     val fullSubUrl = if (subUrl.startsWith("http")) subUrl

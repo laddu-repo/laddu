@@ -69,7 +69,6 @@ class RaghavAnikoto : MainAPI() {
         val isMovie = doc.selectFirst("#w-info a[href*='/type/movie']") != null ||
             doc.selectFirst(".bmeta")?.text()?.contains("Movie", ignoreCase = true) == true
 
-        // Try multiple selectors for the anime ID — the page may render differently.
         val animeId = doc.selectFirst("#watch-main")?.attr("data-id")
             ?: doc.selectFirst("[data-id]")?.attr("data-id")
             ?: Regex("""data-id=["'](\d+)["']""").find(doc.html())?.groupValues?.get(1)
@@ -137,8 +136,7 @@ class RaghavAnikoto : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // CloudStream may prepend mainUrl to the data string if it doesn't start
-        // with http. Strip it so the anikoto| prefix is detected correctly.
+
         val cleanData = when {
             data.startsWith("$mainUrl/anikoto|") -> data.removePrefix("$mainUrl/")
             data.startsWith("/anikoto|") -> data.removePrefix("/")
@@ -155,12 +153,9 @@ class RaghavAnikoto : MainAPI() {
             return resolveServers(serverIds, referer, audioType, subtitleCallback, callback)
         }
 
-        // Direct URL fallback — episode page was stored directly (AJAX failed during load).
-        // The episode page has the same #watch-main data-id as the anime page, so we can
-        // retry the AJAX here, find the matching episode by number, and resolve servers.
         return try {
             val doc = app.get(cleanData, headers = browserHeaders).document
-            // Try multiple selectors — same as load()
+
             val animeId = doc.selectFirst("#watch-main")?.attr("data-id")
                 ?: doc.selectFirst("[data-id]")?.attr("data-id")
                 ?: Regex("""data-id=["'](\d+)["']""").find(doc.html())?.groupValues?.get(1)
@@ -170,7 +165,6 @@ class RaghavAnikoto : MainAPI() {
                 return false
             }
 
-            // Retry the AJAX episode list
             val json = app.get(
                 "$mainUrl/ajax/episode/list/$animeId",
                 referer = data, headers = ajaxHeaders(data)
@@ -180,7 +174,6 @@ class RaghavAnikoto : MainAPI() {
                 return false
             }
 
-            // Find the matching episode by data-num
             val epEl = Jsoup.parse(html).select("a[data-ids]").find {
                 it.attr("data-num").toIntOrNull() == epNum
             } ?: Jsoup.parse(html).selectFirst("a[data-ids]") ?: run {
@@ -197,11 +190,6 @@ class RaghavAnikoto : MainAPI() {
         }
     }
 
-    /**
-     * Shared server resolution — used by both the anikoto| data branch and the
-     * direct URL fallback. Fetches the server list, picks servers by audio type,
-     * and resolves each embed URL.
-     */
     private suspend fun resolveServers(
         serverIds: String,
         referer: String,
@@ -209,9 +197,7 @@ class RaghavAnikoto : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // serverIds is a base64 blob containing '+', '=', '/' which MUST be
-        // URL-encoded. Without encoding, '+' becomes a space server-side and the
-        // API returns 500 "Bad request" → empty server list → "no link found".
+
         val encodedIds = URLEncoder.encode(serverIds, "UTF-8")
         val serverListJson = try {
             app.get("$mainUrl/ajax/server/list?servers=$encodedIds",
@@ -267,10 +253,6 @@ class RaghavAnikoto : MainAPI() {
         return found
     }
 
-    /**
-     * Inline embed resolution — no dependency on companion object.
-     * Handles megaplay.buzz, vidtube.site, vidwish.live.
-     */
     private suspend fun resolveEmbedInline(
         url: String,
         referer: String,
@@ -284,7 +266,6 @@ class RaghavAnikoto : MainAPI() {
             else -> url
         }
 
-        // Check for hash-encoded m3u8
         getHashM3u8(normalizedUrl)?.let { m3u8 ->
             callback.invoke(
                 newExtractorLink("AniKoto", "AniKoto M3U8", m3u8, type = ExtractorLinkType.M3U8) {
@@ -311,10 +292,6 @@ class RaghavAnikoto : MainAPI() {
         }
     }
 
-    /**
-     * Inline MegaPlay/VidTube/VidWish resolution.
-     * Chain: fetch page → extract data-id → fetch getSources → get m3u8
-     */
     private suspend fun resolveMegaPlayInline(
         url: String,
         referer: String,
@@ -353,7 +330,7 @@ class RaghavAnikoto : MainAPI() {
         )
 
         try {
-            // Fetch embed page to get data-id
+
             val doc = app.get(url, headers = pageHeaders).document
             val playerEl = doc.selectFirst("#megaplay-player")
             val streamId = playerEl?.attr("data-id")
@@ -362,12 +339,10 @@ class RaghavAnikoto : MainAPI() {
                 ?: return false
             if (streamId.isBlank()) return false
 
-            // Fetch getSources
             val sourcesText = app.get("$host/stream/getSources?id=$streamId&type=$type",
                 headers = ajaxHeaders, referer = url).text
             val root = JsonParser.parseString(sourcesText).asJsonObject
 
-            // sources can be object or array
             val m3u8 = try {
                 val sourcesEl = root.get("sources")
                 if (sourcesEl?.isJsonObject == true) {
@@ -381,7 +356,6 @@ class RaghavAnikoto : MainAPI() {
                 return false
             }
 
-            // Generate m3u8 links
             val displayType = if (type == "dub") "DUB" else "SUB"
             val generated = M3u8Helper.generateM3u8(
                 "AniKoto $serverName $displayType", m3u8, host, headers = playbackHeaders
@@ -402,7 +376,6 @@ class RaghavAnikoto : MainAPI() {
                 )
             }
 
-            // Subtitles
             try {
                 val tracks = root.getAsJsonArray("tracks")
                 if (tracks != null) {

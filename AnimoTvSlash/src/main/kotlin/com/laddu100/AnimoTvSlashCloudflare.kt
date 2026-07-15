@@ -1,4 +1,4 @@
-package com.laddu100.raghavanime
+package com.laddu100
 
 import android.annotation.SuppressLint
 import android.app.Dialog
@@ -25,7 +25,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.fragment.app.FragmentActivity
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -40,26 +39,26 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-private const val TAG = "Anidap_CFBypass"
+private const val CF_TAG = "AnimoTvSlash_CFBypass"
 
-private const val CHAD_HOST = "https://chad.anidap.se"
-
-private const val CF_TRIGGER_URL = "$CHAD_HOST/rest/api/servers?id=one-piece-p8k27&epNum=1"
-
-private val BLOCK_PHRASES = listOf(
-    "bot_detected", "missing_ua", "access denied", "forbidden",
-    "rate_limit", "blocked", "just a moment", "checking your browser",
-    "cloudflare", "challenge-platform", "enable javascript"
+private val CF_BLOCKER_PHRASES = listOf(
+    "just a moment", "checking your browser", "ddos-guard",
+    "attention required", "verify you are human", "cloudflare",
+    "challenge-platform", "cf-ray", "enable javascript"
 )
 
-private object AnidapCFStore {
-    private const val PREFS_NAME = "AnidapCFBypass"
+private val CF_CHALLENGE_TITLES = listOf(
+    "just a moment", "just a moment...", "checking your browser",
+    "attention required", "ddos-guard", "one more step"
+)
+
+private object AnimoTvSlashCFStore {
+    private const val PREFS_NAME = "AnimoTvSlashCFBypass"
     private const val KEY_COOKIES = "cf_cookies"
     private const val KEY_UA = "cf_user_agent"
     private const val KEY_HOST = "cf_cookie_host"
     private const val KEY_TIMESTAMP = "cf_timestamp"
-
-    private const val COOKIE_TTL_MS = 45 * 60 * 1000L
+    private const val COOKIE_TTL_MS = 45 * 60 * 1000L // 45 minutes (cf_clearance ~1hr)
 
     private var prefs: android.content.SharedPreferences? = null
     private var cachedCookies: String? = null
@@ -113,26 +112,27 @@ private object AnidapCFStore {
     fun hasValidCookies(): Boolean = getCookies() != null
 }
 
-fun isAnidapBlocked(response: NiceResponse): Boolean {
+fun isAnimoTvSlashCloudflareBlocked(response: NiceResponse): Boolean {
     if (response.code != 403 && response.code != 503) return false
     val body = response.text.lowercase()
+    return CF_BLOCKER_PHRASES.any { body.contains(it) }
+}
 
-    if (response.text.length < 200) {
-        return BLOCK_PHRASES.any { body.contains(it) } || body.contains("error")
-    }
-    return BLOCK_PHRASES.any { body.contains(it) }
+private fun isChallengeTitle(title: String): Boolean {
+    val lower = title.lowercase()
+    return CF_CHALLENGE_TITLES.any { lower.contains(it) }
 }
 
 private val cfBypassMutex = Mutex()
 
-class AnidapCFDialog(
-    private val targetUrl: String = CF_TRIGGER_URL,
+class AnimoTvSlashCFDialog(
+    private val targetUrl: String,
     private val onFinished: ((Boolean) -> Unit)? = null
 ) : BottomSheetDialogFragment() {
 
     companion object {
-        private const val POLL_INTERVAL_MS = 1500L
-        private const val POLL_TIMEOUT_MS = 90000L
+        private const val POLL_INTERVAL_MS = 2000L
+        private const val POLL_TIMEOUT_MS = 120000L
     }
 
     private var webView: WebView? = null
@@ -157,14 +157,22 @@ class AnidapCFDialog(
             CookieManager.getInstance().flush()
             val cookieStr = CookieManager.getInstance().getCookie(targetHost) ?: ""
 
+            // Use cfRegex (cf_clearance with 15+ char value) — AnimePahe/Cinemacity pattern
+            val cfRegex = Regex("cf_clearance=[^;]{15,}")
             when {
-                cookieStr.contains("_amx_id") -> {
-
-                    if (pollElapsedMs >= 3000) saveCookiesAndDismiss(cookieStr)
-                    else scheduleNextPoll()
+                cfRegex.containsMatchIn(cookieStr) -> {
+                    saveCookiesAndDismiss(cookieStr)
+                }
+                cookieStr.contains("__ddg2_") || cookieStr.contains("__ddg1_") -> {
+                    // DDoS-Guard: require 60s stability before saving
+                    if (pollElapsedMs >= 60000) {
+                        saveCookiesAndDismiss(cookieStr)
+                    } else {
+                        scheduleNextPoll()
+                    }
                 }
                 pollElapsedMs >= POLL_TIMEOUT_MS -> {
-                    updateStatus("Timed out. Try opening anidap.se in a browser, then tap Bypass again.")
+                    updateStatus("⏱️ Timed out. Try solving the CAPTCHA then tap Bypass again.")
                 }
                 else -> scheduleNextPoll()
             }
@@ -173,7 +181,7 @@ class AnidapCFDialog(
 
     private fun scheduleNextPoll() {
         pollElapsedMs += POLL_INTERVAL_MS
-        updateStatus("Loading anidap.se in browser… (${pollElapsedMs / 1000}s)")
+        updateStatus("⏳ Waiting for cookies… (${pollElapsedMs / 1000}s)")
         handler.postDelayed(cookiePollRunnable, POLL_INTERVAL_MS)
     }
 
@@ -211,7 +219,7 @@ class AnidapCFDialog(
         }
 
         root.addView(TextView(requireContext()).apply {
-            text = "Anidap – Anti-Bot Bypass"
+            text = "🛡️ ANIMOTVSLASH – Cloudflare Bypass"
             textSize = 18f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -219,14 +227,14 @@ class AnidapCFDialog(
         })
 
         TextView(requireContext()).apply {
-            text = "Loading anidap.se in browser…"
+            text = "Loading challenge page…"
             textSize = 13f
             setTextColor(Color.parseColor("#A0A0B0"))
             setPadding(0, 0, 0, (4 * dp).toInt())
         }.also { statusText = it; root.addView(it) }
 
         root.addView(TextView(requireContext()).apply {
-            text = "This solves the 'bot_detected' 403 error. The dialog closes automatically once the cookie is captured."
+            text = "Solve any CAPTCHA shown below. The dialog will close automatically once done."
             textSize = 11f
             setTextColor(Color.parseColor("#707080"))
             setPadding(0, 0, 0, (12 * dp).toInt())
@@ -249,13 +257,23 @@ class AnidapCFDialog(
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
+        // Clear stale CF cookies before loading (AnimePahe/Cinemacity 6-cookie pattern — 3 domain forms each)
+        // Stale cf_clearance in CookieManager can cause the WebView to think it's already bypassed
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
-
-            listOf("_amx_id", "cf_clearance", "__ddg1_", "__ddg2_").forEach { name ->
-                setCookie(targetHost, "$name=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
+            // Compute domain (strip leading www.)
+            val host = try {
+                Uri.parse(targetHost).host ?: targetHost
+            } catch (e: Exception) { targetHost }
+            val domain = if (host.startsWith("www.")) host.substring(4) else host
+            Log.d(CF_TAG, "onViewCreated: host=$host domain=$domain")
+            // 6 cookies to clear: cf_clearance, cf_chl_rc_ni, cf_chl_prog, __ddg1_, __ddg2_, __cfruid
+            // 3 forms each: domain=, domain=.<domain>, bare
+            listOf("cf_clearance", "cf_chl_rc_ni", "cf_chl_prog", "__ddg1_", "__ddg2_", "__cfruid").forEach { name ->
+                setCookie(targetHost, "$name=; domain=$domain; path=/; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                setCookie(targetHost, "$name=; domain=.$domain; path=/; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                setCookie(targetHost, "$name=; path=/; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
             }
             flush()
         }
@@ -276,7 +294,6 @@ class AnidapCFDialog(
                 allowContentAccess = true
                 allowFileAccess = true
                 loadsImagesAutomatically = true
-
                 userAgentString = settings.userAgentString
             }
             webChromeClient = object : WebChromeClient() {
@@ -290,9 +307,14 @@ class AnidapCFDialog(
                 override fun onPageFinished(view: WebView?, url: String?) {
                     if (cookiesSaved) return
                     val title = view?.title ?: ""
-                    Log.d(TAG, "onPageFinished title='$title' url=$url")
+                    Log.d(CF_TAG, "onPageFinished title='$title' url=$url")
 
-                    updateStatus("Page loaded – checking cookies…")
+                    if (isChallengeTitle(title)) {
+                        updateStatus("🔄 Challenge active – solve the CAPTCHA above")
+                        return
+                    }
+
+                    updateStatus("✏️ Page loaded – checking cookies…")
                     CookieManager.getInstance().flush()
 
                     val cookiesFromTarget = CookieManager.getInstance().getCookie(targetHost) ?: ""
@@ -304,17 +326,14 @@ class AnidapCFDialog(
                     } ?: ""
 
                     val bestCookies = when {
-                        cookiesFromTarget.contains("_amx_id") -> cookiesFromTarget
-                        cookiesFromUrl.contains("_amx_id") -> cookiesFromUrl
+                        cookiesFromTarget.contains("cf_clearance") -> cookiesFromTarget
+                        cookiesFromUrl.contains("cf_clearance") -> cookiesFromUrl
                         else -> null
                     }
 
                     if (bestCookies != null) {
                         handler.removeCallbacks(cookiePollRunnable)
-
-                        handler.postDelayed({
-                            if (!cookiesSaved) saveCookiesAndDismiss(bestCookies)
-                        }, 1500)
+                        saveCookiesAndDismiss(bestCookies)
                     }
                 }
             }
@@ -327,9 +346,9 @@ class AnidapCFDialog(
         handler.removeCallbacks(cookiePollRunnable)
 
         val ua = webView?.settings?.userAgentString ?: ""
-        AnidapCFStore.save(cookieStr, ua, targetHost)
+        AnimoTvSlashCFStore.save(cookieStr, ua, targetHost)
 
-        updateStatus("Done! Cookie captured.")
+        updateStatus("✅ Done! Cookies saved.")
 
         webView?.postDelayed({
             if (isAdded) {
@@ -370,30 +389,29 @@ class AnidapCFDialog(
     }
 }
 
-private suspend fun showCFBypassDialogAndWait(url: String = CF_TRIGGER_URL): Boolean = withContext(Dispatchers.Main) {
+private suspend fun showCFBypassDialogAndWait(url: String): Boolean = withContext(Dispatchers.Main) {
     val activity = CommonActivity.activity as? AppCompatActivity
     if (activity == null || activity.isFinishing || activity.isDestroyed) {
-        Log.e(TAG, "No activity available to show Anidap CF dialog")
+        Log.e(CF_TAG, "No activity available to show CF dialog")
         return@withContext false
     }
     suspendCancellableCoroutine { cont ->
-        val dialog = AnidapCFDialog(url) { success ->
+        val dialog = AnimoTvSlashCFDialog(url) { success ->
             if (cont.isActive) cont.resume(success)
         }
         try {
-            dialog.show(activity.supportFragmentManager, "AnidapCFDialog")
+            dialog.show(activity.supportFragmentManager, "AnimoTvSlashCFDialog")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to show Anidap CF dialog: ${e.message}")
+            Log.e(CF_TAG, "Failed to show CF dialog: ${e.message}")
             if (cont.isActive) cont.resume(false)
         }
         cont.invokeOnCancellation { dialog.dismissAllowingStateLoss() }
     }
 }
 
-suspend fun cfAppGetAnidap(
+suspend fun cfAppGet(
     url: String,
-    headers: Map<String, String> = emptyMap(),
-    timeout: Long = 30_000L
+    headers: Map<String, String> = emptyMap()
 ): NiceResponse {
     val targetHost = try {
         val uri = Uri.parse(url)
@@ -402,30 +420,20 @@ suspend fun cfAppGetAnidap(
 
     fun buildCfHeaders(): Map<String, String> {
         val h = headers.toMutableMap()
-
         if (!h.containsKey("Accept")) {
-            h["Accept"] = "application/json, text/plain, */*"
+            h["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
         if (!h.containsKey("Accept-Language")) {
-            h["Accept-Language"] = "en-US,en;q=0.9"
-        }
-        if (!h.containsKey("Origin")) {
-            h["Origin"] = "https://anidap.se"
-        }
-        if (!h.containsKey("Sec-Fetch-Dest")) {
-            h["Sec-Fetch-Dest"] = "empty"
-            h["Sec-Fetch-Mode"] = "cors"
-            h["Sec-Fetch-Site"] = "same-site"
+            h["Accept-Language"] = "en-US,en;q=0.5"
         }
         h["sec-ch-ua-mobile"] = "?1"
         h["sec-ch-ua-platform"] = "\"Android\""
-        AnidapCFStore.getCookies()?.let { cookies ->
+        AnimoTvSlashCFStore.getCookies()?.let { cookies ->
             h["Cookie"] = cookies
         }
-        AnidapCFStore.getUserAgent()?.let { ua ->
+        AnimoTvSlashCFStore.getUserAgent()?.let { ua ->
             h["User-Agent"] = ua
         } ?: run {
-
             if (!h.containsKey("User-Agent")) {
                 h["User-Agent"] = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
             }
@@ -434,46 +442,45 @@ suspend fun cfAppGetAnidap(
     }
 
     var response = try {
-        app.get(url, headers = buildCfHeaders(), timeout = timeout)
+        app.get(url, headers = buildCfHeaders())
     } catch (e: Exception) {
-        Log.e(TAG, "Request failed: ${e.message}")
+        Log.e(CF_TAG, "Request failed: ${e.message}")
         throw e
     }
 
-    if (!isAnidapBlocked(response)) return response
+    if (!isAnimoTvSlashCloudflareBlocked(response)) return response
 
-    Log.d(TAG, "Anidap anti-bot blocked (HTTP ${response.code}) for $url — triggering bypass")
+    Log.d(CF_TAG, "Cloudflare blocked (HTTP ${response.code}) for $url — triggering bypass")
 
     cfBypassMutex.withLock {
-
-        val cachedCookies = AnidapCFStore.getCookies()
-        if (cachedCookies != null) {
-            response = try { app.get(url, headers = buildCfHeaders(), timeout = timeout) } catch (e: Exception) { throw e }
-            if (!isAnidapBlocked(response)) return response
+        val cachedCookies = AnimoTvSlashCFStore.getCookies()
+        if (cachedCookies != null && AnimoTvSlashCFStore.getHost() == targetHost) {
+            response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
+            if (!isAnimoTvSlashCloudflareBlocked(response)) return response
         }
 
-        AnidapCFStore.clear()
-        val bypassSuccess = showCFBypassDialogAndWait()
+        AnimoTvSlashCFStore.clear()
+        val bypassSuccess = showCFBypassDialogAndWait(url)
 
         if (!bypassSuccess) {
-            Log.e(TAG, "Anidap CF bypass dialog failed/cancelled")
+            Log.e(CF_TAG, "CF bypass dialog failed/cancelled")
             return@withLock
         }
 
         for (attempt in 1..2) {
-            response = try { app.get(url, headers = buildCfHeaders(), timeout = timeout) } catch (e: Exception) { throw e }
-            if (!isAnidapBlocked(response)) {
-                Log.d(TAG, " Request succeeded after Anidap CF bypass (attempt $attempt)")
+            response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
+            if (!isAnimoTvSlashCloudflareBlocked(response)) {
+                Log.d(CF_TAG, " Request succeeded after CF bypass (attempt $attempt)")
                 return@withLock
             }
-            Log.e(TAG, "Still blocked after retry $attempt")
+            Log.e(CF_TAG, "Still CF-blocked after retry $attempt")
         }
     }
 
     return response
 }
 
-fun initAnidapCFBypass(context: Context) {
-    AnidapCFStore.init(context)
-    Log.d(TAG, "Anidap CF bypass initialized")
+fun initAnimoTvSlashCFBypass(context: Context) {
+    AnimoTvSlashCFStore.init(context)
+    Log.d(CF_TAG, "ANIMOTVSLASH CF bypass initialized")
 }

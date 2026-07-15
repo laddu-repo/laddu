@@ -251,7 +251,6 @@ class RaghavEnma : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val animeId = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
 
-        // Fetch anime info
         val infoText = try {
             app.get("$apiUrl/info?id=$animeId", headers = headers).text
         } catch (e: Exception) {
@@ -281,7 +280,6 @@ class RaghavEnma : MainAPI() {
             else -> TvType.Anime
         }
 
-        // Fetch episodes
         val epsText = try {
             app.get("$apiUrl/episodes/$animeId", headers = headers).text
         } catch (e: Exception) {
@@ -354,7 +352,6 @@ class RaghavEnma : MainAPI() {
         val type = loadData.type
         val epNum = loadData.episodeNum
 
-        // Fetch available servers
         val servers = try {
             val serversText = app.get("$apiUrl/servers/$animeId?ep=$epNum", headers = headers).text
             parseJson<EnmaServersResponse>(serversText).results ?: emptyList()
@@ -384,13 +381,6 @@ class RaghavEnma : MainAPI() {
                 val domain = Regex("""https?://([^/]+)""").find(iframe)?.groupValues?.get(1) ?: ""
                 val displayType = if (type == "dub") "DUB" else "SUB"
 
-                // Route to the correct resolver based on the embed domain.
-                // Each HD-* server uses a different embed provider:
-                //   HD-1 → megaplay.buzz    (MegaPlay resolver)
-                //   HD-2 → tryembed.us.cc   (VideoJS + nonce-protected stream_data API)
-                //   HD-3 → vidnest.fun      (React SPA, uses upcloud.animanga.fun proxy)
-                //   HD-4 → cdn.4animo.xyz   (JW Player + getSources endpoint)
-                //   HD-5 → cdn.4animo.xyz   (same as HD-4 but hd-2 server)
                 val resolved = when {
                     domain.contains("megaplay", ignoreCase = true) ->
                         resolveMegaPlay(iframe, serverName, type, subtitleCallback, callback)
@@ -416,12 +406,6 @@ class RaghavEnma : MainAPI() {
         return found
     }
 
-    /**
-     * Resolve a cdn.4animo.xyz embed (HD-4, HD-5).
-     * Flow: fetch embed page → extract getSourcesUrl → fetch getSources → get m3u8.
-     * The getSources response has sources[] with relative /p/vp or /p URLs that
-     * resolve to m3u8 playlists at the same host.
-     */
     private suspend fun resolve4Animo(
         iframeUrl: String,
         serverName: String,
@@ -437,7 +421,7 @@ class RaghavEnma : MainAPI() {
                 "Referer" to "$mainUrl/"
             )
             val doc = app.get(iframeUrl, headers = pageHeaders).document
-            // The getSourcesUrl is in a JS config object on the page
+
             val getSourcesUrl = Regex("""getSourcesUrl\s*:\s*["']([^"']+)["']""").find(doc.html())?.groupValues?.get(1)
                 ?: return false
             val sourcesApiUrl = if (getSourcesUrl.startsWith("http")) getSourcesUrl else "$host$getSourcesUrl"
@@ -450,7 +434,6 @@ class RaghavEnma : MainAPI() {
             val sourcesText = app.get(sourcesApiUrl, headers = ajaxHeaders).text
             val root = JsonParser.parseString(sourcesText).asJsonObject
 
-            // sources can be array [{file, type}] or object {file, type}
             val m3u8 = try {
                 val sourcesEl = root.get("sources")
                 if (sourcesEl?.isJsonArray == true && sourcesEl.asJsonArray.size() > 0) {
@@ -460,10 +443,8 @@ class RaghavEnma : MainAPI() {
                 } else null
             } catch (_: Exception) { null } ?: return false
 
-            // Resolve relative URL
             val fullM3u8 = if (m3u8.startsWith("http")) m3u8 else "$host$m3u8"
 
-            // The m3u8 URL itself returns the playlist (it's a proxy endpoint)
             val m3u8Headers = mapOf(
                 "Referer" to "$host/",
                 "Origin" to host,
@@ -488,7 +469,6 @@ class RaghavEnma : MainAPI() {
                 )
             }
 
-            // Subtitles
             try {
                 val tracks = root.getAsJsonArray("tracks")
                 if (tracks != null) {
@@ -509,12 +489,6 @@ class RaghavEnma : MainAPI() {
         }
     }
 
-    /**
-     * Resolve a vidnest.fun embed (HD-3).
-     * vidnest.fun is a React SPA that proxies m3u8 through upcloud.animanga.fun.
-     * The m3u8 URL is built client-side from the anilist ID + episode + type.
-     * We use WebViewResolver to let the SPA build the URL and intercept the m3u8.
-     */
     private suspend fun resolveVidnest(
         iframeUrl: String,
         serverName: String,
@@ -533,7 +507,7 @@ class RaghavEnma : MainAPI() {
             )
             val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
             if (resolved.contains(".m3u8", true)) {
-                // The m3u8 is proxied through upcloud.animanga.fun — use that as referer
+
                 val proxyHost = Regex("""(https?://[^/]+)""").find(resolved)?.groupValues?.get(1) ?: host
                 M3u8Helper.generateM3u8(
                     "Enma $serverName $displayType", resolved, proxyHost
@@ -546,12 +520,6 @@ class RaghavEnma : MainAPI() {
         }
     }
 
-    /**
-     * Resolve a tryembed.us.cc embed (HD-2).
-     * tryembed uses VideoJS with a nonce-protected /api/stream_data endpoint.
-     * The nonce is generated client-side, so we use WebViewResolver to intercept
-     * the m3u8 that VideoJS requests after solving the nonce.
-     */
     private suspend fun resolveTryEmbed(
         iframeUrl: String,
         serverName: String,
@@ -581,9 +549,6 @@ class RaghavEnma : MainAPI() {
         }
     }
 
-    /**
-     * Resolve a megaplay.buzz iframe URL to m3u8 + subtitles.
-     */
     private suspend fun resolveMegaPlay(
         iframeUrl: String,
         serverName: String,
@@ -605,7 +570,6 @@ class RaghavEnma : MainAPI() {
                 "Referer" to "$mainUrl/",
             )
 
-            // Fetch the megaplay page to get data-id
             val doc = app.get(iframeUrl, headers = pageHeaders).document
             val playerEl = doc.selectFirst("#megaplay-player")
             val streamId = playerEl?.attr("data-id")
@@ -613,7 +577,6 @@ class RaghavEnma : MainAPI() {
                 ?: return false
             if (streamId.isBlank()) return false
 
-            // Fetch getSources
             val ajaxHeaders = mapOf(
                 "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
                 "Accept" to "*/*",
@@ -626,7 +589,6 @@ class RaghavEnma : MainAPI() {
             val sourcesText = app.get(sourcesUrl, headers = ajaxHeaders, referer = iframeUrl).text
             val root = JsonParser.parseString(sourcesText).asJsonObject
 
-            // sources can be object {file:...} or array [{file:...}]
             val m3u8 = try {
                 val sourcesEl = root.get("sources")
                 if (sourcesEl?.isJsonObject == true) {
@@ -640,7 +602,6 @@ class RaghavEnma : MainAPI() {
                 return false
             }
 
-            // Generate m3u8 links
             val displayType = if (type == "dub") "DUB" else "SUB"
             val m3u8Headers = mapOf(
                 "Referer" to "$host/",
@@ -667,7 +628,6 @@ class RaghavEnma : MainAPI() {
                 )
             }
 
-            // Subtitles
             try {
                 val tracks = root.getAsJsonArray("tracks")
                 if (tracks != null) {

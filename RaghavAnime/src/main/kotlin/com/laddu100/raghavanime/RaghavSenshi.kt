@@ -27,11 +27,9 @@ class RaghavSenshi : MainAPI() {
 
     private val TAG = "Senshi"
 
-    // Mobile browser UA — senshi's CDN accepts requests with this + Referer
     private val ua =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
-    // Browser-fingerprint headers for the search POST (senshi checks Referer+Origin)
     private val searchHeaders = mapOf(
         "User-Agent" to ua,
         "Accept" to "application/json, text/plain, */*",
@@ -41,7 +39,6 @@ class RaghavSenshi : MainAPI() {
         "Origin" to mainUrl
     )
 
-    // GET endpoints just need a UA + Referer (no CF challenge normally)
     private val getHeaders = mapOf(
         "User-Agent" to ua,
         "Accept" to "application/json, text/plain, */*",
@@ -52,10 +49,6 @@ class RaghavSenshi : MainAPI() {
     private val subDubCache = mutableMapOf<Int, Pair<Boolean, Boolean>>()
     private val subDubCacheMutex = Mutex()
 
-    /**
-     * Probe whether an anime has sub and/or dub streams available.
-     * Uses cached result if available. Falls back to (true, false) on error.
-     */
     private suspend fun probeSubDub(malId: Int): Pair<Boolean, Boolean> {
         subDubCacheMutex.withLock {
             subDubCache[malId]?.let { return it }
@@ -78,7 +71,7 @@ class RaghavSenshi : MainAPI() {
         } catch (e: Exception) {
             Log.e(TAG, "probeSubDub($malId) failed: ${e.message}")
         }
-        if (!hasSub && !hasDub) hasSub = true // fallback: assume sub exists
+        if (!hasSub && !hasDub) hasSub = true
         val result = Pair(hasSub, hasDub)
         subDubCacheMutex.withLock {
             subDubCache[malId] = result
@@ -86,7 +79,6 @@ class RaghavSenshi : MainAPI() {
         return result
     }
 
-    /** Probe multiple anime IDs in parallel (fast — all concurrent). */
     private suspend fun probeSubDubBatch(malIds: List<Int>): Map<Int, Pair<Boolean, Boolean>> =
         coroutineScope {
             malIds.distinct().map { id ->
@@ -134,7 +126,7 @@ class RaghavSenshi : MainAPI() {
                 }
 
                 "random" -> {
-                    // Fetch several random anime to fill the row
+
                     val items = mutableListOf<AnimeItem>()
                     repeat(20) {
                         try {
@@ -185,9 +177,7 @@ class RaghavSenshi : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        // URL format: https://senshi.live/anime/{mal_id}?t={urlencoded_title}
-        // The title is encoded by toSearchResponse() so we can search for metadata
-        // (senshi has no GET /anime/{id} endpoint — the filter POST is the only way).
+
         val pathPart = url.substringBefore("?").substringAfterLast("/")
         val malId = pathPart.toIntOrNull()
         if (malId == null) {
@@ -215,11 +205,11 @@ class RaghavSenshi : MainAPI() {
         } catch (e: Exception) {
             Log.e(TAG, "load probe failed (will assume sub-only): ${e.message}")
         }
-        // Fallback: if probe failed entirely, assume sub exists
+
         if (!hasSub && !hasDub) {
             hasSub = true
         }
-        // Cache the probe result so search/homepage posters show accurate badges
+
         subDubCacheMutex.withLock {
             subDubCache[malId] = Pair(hasSub, hasDub)
         }
@@ -255,7 +245,7 @@ class RaghavSenshi : MainAPI() {
                 subEps.add(newEpisode(data) {
                     this.episode = num
                     this.name = title
-                    if (ep.ep_filler == true) this.episode = num // keep number; filler noted in name
+                    if (ep.ep_filler == true) this.episode = num
                 })
             }
             if (hasDub) {
@@ -275,10 +265,10 @@ class RaghavSenshi : MainAPI() {
                 val metaRes = cfPost("$mainUrl/anime/filter", body = body, headers = searchHeaders)
                 if (metaRes.code == 200 || metaRes.code == 201) {
                     val resp = parseJson<FilterResponse>(metaRes.text)
-                    // Find the exact anime by mal_id (title search may return multiple)
+
                     meta = resp.data.firstOrNull { it.id == malId }
                     if (meta == null && resp.data.isNotEmpty()) {
-                        // Fallback: use the first result if id match fails
+
                         meta = resp.data[0]
                     }
                 }
@@ -289,8 +279,6 @@ class RaghavSenshi : MainAPI() {
             Log.d(TAG, "load: no title in URL, skipping metadata fetch")
         }
 
-        // Determine TV type. For movies with both sub+dub, use TvType.Anime so the
-        // sub/dub selector appears (AnimeMovie hides the selector).
         val aniType = meta?.type?.uppercase() ?: "TV"
         val baseType = when (aniType) {
             "MOVIE" -> TvType.AnimeMovie
@@ -330,7 +318,6 @@ class RaghavSenshi : MainAPI() {
             return false
         }
 
-        // Fetch fresh embeds (token is time-limited, so always get a fresh URL)
         val embedsText = try {
             val r = cfGet("$mainUrl/episode-embeds/${epData.malId}/${epData.epNum}", headers = getHeaders)
             r.text
@@ -347,8 +334,6 @@ class RaghavSenshi : MainAPI() {
             return false
         }
 
-        // - streamType "sub" -> only embeds with status Sub/HardSub
-        // - streamType "dub" -> only embeds with status Dub
         val targetStreamType = epData.streamType.lowercase()
         val matching = embeds.filter { emb ->
             val st = emb.status?.lowercase() ?: ""
@@ -361,8 +346,7 @@ class RaghavSenshi : MainAPI() {
 
         if (matching.isEmpty()) {
             Log.e(TAG, "loadLinks: NO embeds match streamType='$targetStreamType'")
-            // Last resort: if the requested type has no embeds, return ALL embeds
-            // so the user at least gets something. (Shouldn't happen due to load() probe.)
+
             Log.d(TAG, "loadLinks: falling back to ALL embeds")
             embeds.forEach { addEmbedLink(it, callback) }
             return embeds.isNotEmpty()
@@ -373,13 +357,10 @@ class RaghavSenshi : MainAPI() {
         return true
     }
 
-    // Helper: convert a StreamEmbed into ExtractorLink(s). Uses M3u8Helper to
-    // parse the master playlist and emit one link per quality (1080p/720p/360p).
     private suspend fun addEmbedLink(embed: StreamEmbed, callback: (ExtractorLink) -> Unit) {
         val streamUrl = embed.url ?: return
         val status = embed.status ?: "Unknown"
 
-        // Play headers — the ninstream.com CDN REQUIRES Referer: https://senshi.live/
         val playHeaders = mapOf(
             "User-Agent" to ua,
             "Referer" to "$mainUrl/",
@@ -404,7 +385,7 @@ class RaghavSenshi : MainAPI() {
                 )
             }
         } else {
-            // Non-m3u8 (mp4 etc.) — add directly
+
             Log.d(TAG, "addEmbedLink: non-m3u8 stream, adding INFER_TYPE link")
             callback.invoke(
                 newExtractorLink("$name $status", "$name $status", streamUrl, type = INFER_TYPE) {
@@ -418,8 +399,7 @@ class RaghavSenshi : MainAPI() {
     private fun AnimeItem.toSearchResponse(subDub: Pair<Boolean, Boolean>? = null): SearchResponse? {
         val id = this.id ?: return null
         val title = this.title ?: this.title_english ?: return null
-        // Encode the title in the URL so load() can search for full metadata
-        // (senshi has no GET /anime/{id} endpoint — title search is the only way).
+
         val encodedTitle = try { URLEncoder.encode(title, "UTF-8") } catch (e: Exception) { "" }
         val loadUrl = "$mainUrl/anime/$id?t=$encodedTitle"
         val (hasSub, hasDub) = subDub ?: Pair(true, false)
@@ -443,7 +423,7 @@ class RaghavSenshi : MainAPI() {
         val anime = this.anime ?: return null
         val id = anime.id ?: return null
         val title = anime.title ?: anime.title_english ?: return null
-        // Encode title for load() metadata fetch (same as AnimeItem.toSearchResponse)
+
         val encodedTitle = try { URLEncoder.encode(title, "UTF-8") } catch (e: Exception) { "" }
         val loadUrl = "$mainUrl/anime/$id?t=$encodedTitle"
         val (hasSub, hasDub) = subDub ?: Pair(true, false)
@@ -453,11 +433,10 @@ class RaghavSenshi : MainAPI() {
         }
     }
 
-    /** Per-episode payload stored in EpisodeData for loadLinks. */
     data class SenshiEpData(
         val malId: Int,
         val epNum: Int,
-        val streamType: String // "sub" or "dub"
+        val streamType: String
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)

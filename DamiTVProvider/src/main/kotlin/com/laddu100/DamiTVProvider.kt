@@ -241,6 +241,7 @@ class DamiTVProvider : MainAPI() {
     data class ExtractUrlResponse(
         @JsonProperty("success") val success: Boolean,
         @JsonProperty("hlsUrl") val hlsUrl: String?,
+        @JsonProperty("sdUrl") val sdUrl: String? = null,
         @JsonProperty("embedUrl") val embedUrl: String?,
         @JsonProperty("matchId") val matchId: String?,
         @JsonProperty("substreams") val substreams: List<DamiSubstream>?,
@@ -634,11 +635,35 @@ class DamiTVProvider : MainAPI() {
                         val playHeaders = hlsPlayHeaders
 
                         if (!response.hlsUrl.isNullOrBlank()) {
+                            val hlsUrl = if (response.hlsUrl.startsWith("http")) {
+                                response.hlsUrl
+                            } else {
+                                "$mainUrl${response.hlsUrl}"
+                            }
                             callback.invoke(
                                 newExtractorLink(
                                     source = this.name,
                                     name = "${stream.name} (Direct)",
-                                    url = response.hlsUrl,
+                                    url = hlsUrl,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.headers = playHeaders
+                                }
+                            )
+                            foundAny = true
+                        }
+
+                        if (!response.sdUrl.isNullOrBlank()) {
+                            val sdUrl = if (response.sdUrl.startsWith("http")) {
+                                response.sdUrl
+                            } else {
+                                "$mainUrl${response.sdUrl}"
+                            }
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = "${stream.name} (SD)",
+                                    url = sdUrl,
                                     type = ExtractorLinkType.M3U8
                                 ) {
                                     this.headers = playHeaders

@@ -1,4 +1,4 @@
-version = 26
+version = 4
 
 android {
     buildFeatures {
@@ -12,7 +12,7 @@ dependencies {
 
 cloudstream {
     language = "en"
-    description = "ONE STOP SOLUTION FOR ANIME(SUB,DUB) - Raghav Aggregated Anime Pluginn )"
+    description = "Anime from ANIMOTVSLASH with Sub and Dub (self-hosted Videas CDN)"
     authors = listOf("raghav")
 
     status = 1
@@ -21,5 +21,5 @@ cloudstream {
         "AnimeMovie",
         "OVA"
     )
-    iconUrl = "https://www.pngall.com/wp-content/uploads/13/Anime-Logo-PNG-Images.png"
+    iconUrl = "https://animotvslash.org/favicon.ico"
 }

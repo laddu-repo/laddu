@@ -14,24 +14,6 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import java.net.URLEncoder
 
-/**
- * RaghavAnidap — Anidap wrapper for the RaghavAnime aggregator.
- *
- * Anidap (https://anidap.se) uses its own anime ID system (AniList-based but with
- * custom slugs). The RaghavAnime aggregator passes (anilistId, title, episode, isDub).
- * This wrapper:
- *   1. Searches anidap.se by TITLE (since we can't map anilistId → anidapId directly)
- *   2. Loads the matching anime to get its slug + per-anime providers (sub/dub)
- *   3. Calls the chad.anidap.se sources API for each provider to get stream URLs
- *   4. Passes the EXACT headers from the API to each ExtractorLink (critical for
- *      uwu/kiwi/sora which need Origin/UA, not just Referer)
- *
- * Sub/Dub separation:
- *   - Sub tab → fetches sources with type=sub for all subProviders
- *   - Dub tab → fetches sources with type=dub for all dubProviders
- *   - Anidap's servers API returns separate subProviders[] and dubProviders[] lists,
- *     so the separation is clean and authoritative.
- */
 class RaghavAnidap : MainAPI() {
     override var mainUrl = "https://anidap.se"
     override var name = "Anidap"
@@ -187,7 +169,7 @@ class RaghavAnidap : MainAPI() {
         val animeId = url.removePrefix("$mainUrl/").removePrefix("$mainUrl|").trim()
 
         return try {
-            // Fetch anime detail
+
             val detailRes = app.get("$mainUrl/api/anime/$animeId", headers = baseHeaders, timeout = 30_000L)
             val detailRoot = parseJson<com.fasterxml.jackson.databind.JsonNode>(detailRes.text)
             val dataNode = detailRoot.path("data")
@@ -200,7 +182,6 @@ class RaghavAnidap : MainAPI() {
 
             Log.d(TAG, "load: title='$title' slug=$slug eps=$totalEps")
 
-            // Fetch servers via cfAppGet
             val serversUrl = "$chadUrl/servers?id=$slug&epNum=1"
             val serversRes = cfAppGetAnidap(
                 serversUrl,
@@ -305,7 +286,6 @@ class RaghavAnidap : MainAPI() {
 
                 if (sources.isEmpty()) continue
 
-                // Pass subtitles (fix malformed URLs)
                 for (track in tracks) {
                     var trackUrl = track.url ?: continue
                     if (trackUrl.isBlank()) continue
@@ -316,7 +296,6 @@ class RaghavAnidap : MainAPI() {
                     }
                 }
 
-                // Use direct ExtractorLink with full headers
                 for (source in sources) {
                     val sourceUrl = source.url ?: continue
                     if (sourceUrl.isBlank()) continue

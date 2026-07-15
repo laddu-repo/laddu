@@ -42,14 +42,12 @@ import kotlin.coroutines.resume
 
 private const val TAG = "AniDB_CFBypass"
 
-// Phrases that indicate a Cloudflare challenge page
 private val CF_BLOCKER_PHRASES = listOf(
     "just a moment", "checking your browser", "ddos-guard",
     "attention required", "verify you are human", "cloudflare",
     "challenge-platform", "cf-ray", "enable javascript"
 )
 
-// Page titles that indicate an active challenge
 private val CF_CHALLENGE_TITLES = listOf(
     "just a moment", "just a moment...", "checking your browser",
     "attention required", "ddos-guard", "one more step"
@@ -61,7 +59,7 @@ private object AniDbCFStore {
     private const val KEY_UA = "cf_user_agent"
     private const val KEY_HOST = "cf_cookie_host"
     private const val KEY_TIMESTAMP = "cf_timestamp"
-    private const val COOKIE_TTL_MS = 45 * 60 * 1000L // 45 minutes (cf_clearance ~1hr)
+    private const val COOKIE_TTL_MS = 45 * 60 * 1000L
 
     private var prefs: android.content.SharedPreferences? = null
     private var cachedCookies: String? = null
@@ -213,7 +211,6 @@ class AniDbCFDialog(
             layoutParams = ViewGroup.LayoutParams(-1, -2)
         }
 
-        // Title
         root.addView(TextView(requireContext()).apply {
             text = "AniDB – Cloudflare Bypass"
             textSize = 18f
@@ -222,7 +219,6 @@ class AniDbCFDialog(
             setPadding(0, 0, 0, (8 * dp).toInt())
         })
 
-        // Status text
         TextView(requireContext()).apply {
             text = "Loading challenge page…"
             textSize = 13f
@@ -230,7 +226,6 @@ class AniDbCFDialog(
             setPadding(0, 0, 0, (4 * dp).toInt())
         }.also { statusText = it; root.addView(it) }
 
-        // Hint
         root.addView(TextView(requireContext()).apply {
             text = "Solve any CAPTCHA shown below. The dialog will close automatically once done."
             textSize = 11f
@@ -238,13 +233,11 @@ class AniDbCFDialog(
             setPadding(0, 0, 0, (12 * dp).toInt())
         })
 
-        // Progress bar
         ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = (12 * dp).toInt() }
         }.also { progressBar = it; root.addView(it) }
 
-        // WebView container
         FrameLayout(requireContext()).apply {
             layoutParams = LinearLayout.LayoutParams(-1, webViewHeight)
             webView = buildWebView()
@@ -257,12 +250,11 @@ class AniDbCFDialog(
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        // Clear stale CF cookies before loading (Cinemacity's approach — fixes 1% failure rate)
-        // Stale cf_clearance in CookieManager can cause the WebView to think it's already bypassed
+
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
-            // Clear stale CF challenge cookies
+
             listOf("cf_clearance", "cf_chl_rc_ni", "cf_chl_prog").forEach { name ->
                 setCookie(targetHost, "$name=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
             }
@@ -285,7 +277,7 @@ class AniDbCFDialog(
                 allowContentAccess = true
                 allowFileAccess = true
                 loadsImagesAutomatically = true
-                userAgentString = settings.userAgentString // keep default WebView UA
+                userAgentString = settings.userAgentString
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -308,7 +300,6 @@ class AniDbCFDialog(
                     updateStatus("Page loaded – checking cookies…")
                     CookieManager.getInstance().flush()
 
-                    // Check cookies from both the target host and the current URL
                     val cookiesFromTarget = CookieManager.getInstance().getCookie(targetHost) ?: ""
                     val cookiesFromUrl = url?.let {
                         try {
@@ -410,10 +401,9 @@ suspend fun cfAppGet(
         "${uri.scheme}://${uri.host}"
     } catch (e: Exception) { url }
 
-    // Build headers with stored CF cookies + UA + browser fingerprint
     fun buildCfHeaders(): Map<String, String> {
         val h = headers.toMutableMap()
-        // Browser fingerprint headers (Cloudflare checks these — same as phisher's interceptor)
+
         if (!h.containsKey("Accept")) {
             h["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         }
@@ -422,14 +412,14 @@ suspend fun cfAppGet(
         }
         h["sec-ch-ua-mobile"] = "?1"
         h["sec-ch-ua-platform"] = "\"Android\""
-        // Stored CF cookies + UA
+
         AniDbCFStore.getCookies()?.let { cookies ->
             h["Cookie"] = cookies
         }
         AniDbCFStore.getUserAgent()?.let { ua ->
             h["User-Agent"] = ua
         } ?: run {
-            // Default browser-like UA if no stored UA
+
             if (!h.containsKey("User-Agent")) {
                 h["User-Agent"] = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
             }
@@ -437,7 +427,6 @@ suspend fun cfAppGet(
         return h
     }
 
-    // First attempt (with stored cookies if available)
     var response = try {
         app.get(url, headers = buildCfHeaders())
     } catch (e: Exception) {
@@ -447,28 +436,24 @@ suspend fun cfAppGet(
 
     if (!isCloudflareBlocked(response)) return response
 
-    // CF blocked — need to bypass
     Log.d(TAG, "Cloudflare blocked (HTTP ${response.code}) for $url — triggering bypass")
 
-    // Use mutex so only ONE bypass dialog shows at a time
     cfBypassMutex.withLock {
-        // Double-check: another coroutine may have already bypassed while we waited
+
         val cachedCookies = AniDbCFStore.getCookies()
         if (cachedCookies != null && AniDbCFStore.getHost() == targetHost) {
             response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) return response
         }
 
-        // Clear stale cookies and show bypass dialog
         AniDbCFStore.clear()
         val bypassSuccess = showCFBypassDialogAndWait(url)
 
         if (!bypassSuccess) {
             Log.e(TAG, "CF bypass dialog failed/cancelled")
-            return@withLock // response is still the blocked one
+            return@withLock
         }
 
-        // Retry with new cookies (up to 2 attempts)
         for (attempt in 1..2) {
             response = try { app.get(url, headers = buildCfHeaders()) } catch (e: Exception) { throw e }
             if (!isCloudflareBlocked(response)) {

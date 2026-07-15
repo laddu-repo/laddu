@@ -62,7 +62,7 @@ class RaghavTwoDHive : MainAPI() {
 
     private fun parseSection(soup: Document, sectionName: String): List<SearchResponse> {
         val header = soup.select("h2").firstOrNull { it.text().contains(sectionName, ignoreCase = true) }
-        val headerDiv = header?.parent()?.parent() // Outer container flex div
+        val headerDiv = header?.parent()?.parent()
         val grid = headerDiv?.nextElementSibling()
 
         val results = mutableListOf<SearchResponse>()
@@ -215,7 +215,7 @@ class RaghavTwoDHive : MainAPI() {
                 return m3u8.substringBefore("/m3u8-proxy") + "/m3u8-proxy"
             }
         } catch (e: Exception) {
-            // ignore - fallback will be used
+
         }
         return "https://anicloud-hls-proxy.n3779118.workers.dev/m3u8-proxy"
     }
@@ -229,12 +229,11 @@ class RaghavTwoDHive : MainAPI() {
         val parts = data.split("|")
         if (parts.size < 2) return@coroutineScope false
         val epUrl = parts[0]
-        val type = parts[1] // "sub" or "dub"
+        val type = parts[1]
 
         val html = quickGet(epUrl)
         val soup = Jsoup.parse(html)
 
-        // Find MultiServerPlayer props in Astro Island
         val island = soup.select("astro-island").firstOrNull {
             it.attr("component-url").contains("MultiServerPlayer", ignoreCase = true)
         } ?: return@coroutineScope false
@@ -244,7 +243,6 @@ class RaghavTwoDHive : MainAPI() {
         val props = mapper.readTree(propsStr)
         val decoded = decodeAstro(props)
 
-        // MAL ID parsing with fallback
         val malId = decoded.get("animeIdOrName")?.let { node ->
             if (node.isNumber) node.asInt() else node.asText().toIntOrNull()
         } ?: epUrl.substringAfter("anime=").substringBefore("&").toIntOrNull()
@@ -254,7 +252,6 @@ class RaghavTwoDHive : MainAPI() {
 
         val loadedResults = mutableListOf<Deferred<Boolean>>()
 
-        // Process parsed servers from page props
         if (serversList != null && serversList.isArray) {
             serversList.forEach { serverItem ->
                 val serverName = serverItem.get("server_name")?.asText()?.trim() ?: ""
@@ -360,9 +357,8 @@ class RaghavTwoDHive : MainAPI() {
             }
         }
 
-        // Extra servers if MAL ID is available
         if (malId != null) {
-            // MegaPlay (Sub / Dub depending on the selected tab)
+
             loadedResults.add(async {
                 try {
                     val megaplayUrl = "https://megaplay.buzz/stream/mal/$malId/$epNum/$type"
@@ -400,7 +396,6 @@ class RaghavTwoDHive : MainAPI() {
                             sources?.get("file")?.asText()
                         }
 
-                        // Handle subtitles
                         val tracks = sourcesJson.get("tracks")
                         if (tracks != null && tracks.isArray) {
                             tracks.forEach { track ->
@@ -413,7 +408,6 @@ class RaghavTwoDHive : MainAPI() {
                         if (!m3u8Url.isNullOrEmpty()) {
                             val displayName = if (type == "sub") "MegaPlay Sub" else "MegaPlay Dub"
 
-                            // Direct link
                             callback(
                                 newExtractorLink(
                                     source = displayName,
@@ -430,7 +424,6 @@ class RaghavTwoDHive : MainAPI() {
                                 }
                             )
 
-                            // Proxy link
                             val proxyPrefix = getProxyUrl(malId, epNum)
                             val encodedTarget = URLEncoder.encode(m3u8Url, "UTF-8")
                             val encodedHeaders = URLEncoder.encode("{\"referer\":\"https://megaplay.buzz/\"}", "UTF-8")
