@@ -110,6 +110,7 @@ class RaghavAnime : MainAPI() {
                 }
             }
         } catch (e: Exception) {
+            Log.d("RaghavAnime", "getMainPage error: ${e.message}")
             val cached = homePageCache[request.data]
             if (cached != null) {
                 cached.mapNotNull { media ->
@@ -146,6 +147,7 @@ class RaghavAnime : MainAPI() {
                 }
             }
         } catch (e: Exception) {
+            Log.d("RaghavAnime", "search error: ${e.message}")
             emptyList()
         }
     }
@@ -158,7 +160,7 @@ class RaghavAnime : MainAPI() {
             val infoResponse = parseJson<AniListResponse>(infoText)
             infoResponse.data?.Media
         } catch (e: Exception) {
-            Log.e("RaghavAnime", "load: ${e.message}")
+            Log.d("RaghavAnime", "load error: ${e.message}")
             return null
         } ?: run {
             Log.e("RaghavAnime", "load: null Media for id=$anilistId")
