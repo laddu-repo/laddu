@@ -95,8 +95,9 @@ private fun bypassHeaders(base: String): Map<String, String> = mapOf(
     "Accept-Language" to "en-US,en;q=0.9",
     "Cache-Control" to "max-age=0",
     "Connection" to "keep-alive",
-    "Origin" to base,
-    "Referer" to "$base/verify2",
+    "Content-Type" to "application/x-www-form-urlencoded",
+    "Origin" to "https://net22.cc",
+    "Referer" to "https://net22.cc/verify2",
     "sec-ch-ua" to "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
     "sec-ch-ua-mobile" to "?0",
     "sec-ch-ua-platform" to "\"Windows\"",
@@ -136,7 +137,7 @@ private suspend fun tryBypassDomain(domain: String): String {
         .add("g-recaptcha-response", UUID.randomUUID().toString())
         .build()
     val postReq = Request.Builder()
-        .url("$base/verify.php")
+        .url("https://net52.cc/verify.php")
         .post(formBody)
         .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
         .build()
