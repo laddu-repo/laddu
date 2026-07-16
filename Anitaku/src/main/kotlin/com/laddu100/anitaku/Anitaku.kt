@@ -1,9 +1,12 @@
 package com.laddu100.anitaku
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -74,15 +77,13 @@ class Anitaku : MainAPI() {
             val hasDub = el.attr("data-dub") == "1"
 
             if (hasSub) {
-                subEpisodes.add(newEpisode("sub|$epSlug") {
+                subEpisodes.add(newEpisode("sub|$epSlug", name = "Episode $epNum") {
                     this.episode = epNum
-                    this.name = "Episode $epNum"
                 })
             }
             if (hasDub) {
-                dubEpisodes.add(newEpisode("dub|$epSlug") {
+                dubEpisodes.add(newEpisode("dub|$epSlug", name = "Episode $epNum") {
                     this.episode = epNum
-                    this.name = "Episode $epNum"
                 })
             }
         }
@@ -176,7 +177,7 @@ class Anitaku : MainAPI() {
 
             if (m3u8.contains(".m3u8")) {
                 M3u8Helper.generateM3u8(
-                    source = "$name - $serverName",
+                    name = "$name - $serverName",
                     streamUrl = m3u8,
                     referer = embedUrl
                 ).forEach(callback)
@@ -213,7 +214,7 @@ class Anitaku : MainAPI() {
             val resolved = app.get(embedUrl, referer = mainUrl, interceptor = resolver).url
             if (resolved.contains(".m3u8")) {
                 M3u8Helper.generateM3u8(
-                    source = "$name - $serverName",
+                    name = "$name - $serverName",
                     streamUrl = resolved,
                     referer = embedUrl
                 ).forEach(callback)
@@ -247,7 +248,7 @@ class Anitaku : MainAPI() {
         return try {
             val response = app.post(
                 "https://graphql.anilist.co",
-                json = request,
+                data = toJson(request),
                 headers = mapOf("Content-Type" to "application/json"),
                 timeout = 15_000L
             )
@@ -330,18 +331,48 @@ data class AniListMeta(
     val episodeTitles: Map<Int, String>
 )
 
-data class AniListResponse(val data: AniListData? = null)
-data class AniListData(val media: AniListMedia? = null)
-data class AniListMedia(
-    val id: Int? = null,
-    val title: AniListTitle? = null,
-    val description: String? = null,
-    val coverImage: CoverImage? = null,
-    val genres: List<String>? = null
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniListResponse(
+    @JsonProperty("data") val data: AniListData? = null
 )
-data class AniListTitle(val english: String? = null, val romaji: String? = null)
-data class CoverImage(val large: String? = null)
 
-data class AniZipResponse(val episodes: Map<String, AniZipEpisode>? = null)
-data class AniZipEpisode(val title: AniZipTitle? = null)
-data class AniZipTitle(val english: String? = null, val romaji: String? = null)
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniListData(
+    @JsonProperty("Media") val media: AniListMedia? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniListMedia(
+    @JsonProperty("id") val id: Int? = null,
+    @JsonProperty("title") val title: AniListTitle? = null,
+    @JsonProperty("description") val description: String? = null,
+    @JsonProperty("coverImage") val coverImage: CoverImage? = null,
+    @JsonProperty("genres") val genres: List<String>? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniListTitle(
+    @JsonProperty("english") val english: String? = null,
+    @JsonProperty("romaji") val romaji: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class CoverImage(
+    @JsonProperty("large") val large: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniZipResponse(
+    @JsonProperty("episodes") val episodes: Map<String, AniZipEpisode>? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniZipEpisode(
+    @JsonProperty("title") val title: AniZipTitle? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AniZipTitle(
+    @JsonProperty("english") val english: String? = null,
+    @JsonProperty("romaji") val romaji: String? = null
+)
