@@ -116,23 +116,6 @@ private suspend fun tryBypassDomain(domain: String): String {
         .followSslRedirects(false)
         .build()
 
-    try {
-        val getReq = Request.Builder()
-            .url("$base/verify2")
-            .get()
-            .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
-            .build()
-        client.newCall(getReq).execute().use { resp ->
-            resp.headers("Set-Cookie").forEach { sc ->
-                val name = sc.substringBefore("=", "").trim()
-                val value = sc.substringAfter("=", "").substringBefore(";").trim()
-                if (name.isNotEmpty() && value.isNotEmpty()) {
-                    // collected but not strictly needed
-                }
-            }
-        }
-    } catch (_: Exception) { }
-
     val formBody = FormBody.Builder()
         .add("g-recaptcha-response", UUID.randomUUID().toString())
         .build()
@@ -144,7 +127,7 @@ private suspend fun tryBypassDomain(domain: String): String {
 
     return try {
         client.newCall(postReq).execute().use { response ->
-            Log.d(TAG, "bypass: $base/verify.php HTTP ${response.code}")
+            Log.d(TAG, "bypass: verify.php HTTP ${response.code}")
             response.headers("Set-Cookie")
                 .firstOrNull { it.startsWith("t_hash_t=") }
                 ?.substringAfter("t_hash_t=")
@@ -152,7 +135,7 @@ private suspend fun tryBypassDomain(domain: String): String {
                 .orEmpty()
         }
     } catch (e: Exception) {
-        Log.d(TAG, "bypass: $base exception: ${e.message}")
+        Log.d(TAG, "bypass: exception: ${e.message}")
         ""
     }
 }
@@ -160,17 +143,15 @@ private suspend fun tryBypassDomain(domain: String): String {
 suspend fun bypass(mainUrl: String): String {
     val (savedCookie, savedTimestamp) = NetflixMirrorStorage.getCookie()
 
-    if (!savedCookie.isNullOrEmpty() && System.currentTimeMillis() - savedTimestamp < 300_000) {
+    if (!savedCookie.isNullOrEmpty() && System.currentTimeMillis() - savedTimestamp < 54_000_000) {
         return savedCookie
     }
 
-    for (domain in candidateDomains) {
-        val cookie = tryBypassDomain(domain)
-        if (cookie.isNotEmpty()) {
-            netMirrorWorkingDomain = domain
-            NetflixMirrorStorage.saveCookie(cookie)
-            return cookie
-        }
+    val cookie = tryBypassDomain("https://net52.cc")
+    if (cookie.isNotEmpty()) {
+        netMirrorWorkingDomain = "https://net52.cc"
+        NetflixMirrorStorage.saveCookie(cookie)
+        return cookie
     }
 
     NetflixMirrorStorage.clearCookie()
@@ -301,22 +282,11 @@ suspend fun loadNewTvLinks(
 suspend fun getNewTvUserToken(apiBase: String, ott: String): String {
     val (savedToken, savedTs) = NetflixMirrorStorage.getUserToken(ott)
     if (!savedToken.isNullOrEmpty() && System.currentTimeMillis() - savedTs < 86_400_000) {
-        Log.d(TAG, "getNewTvUserToken: using cached token for ott=$ott")
         return savedToken
     }
 
-    val otpHeaders = mapOf(
-        "accept" to "application/json, text/plain, */*",
-        "cache-control" to "no-cache, no-store, must-revalidate",
-        "Connection" to "Keep-Alive",
-        "expires" to "0",
-        "otp" to "111111",
-        "pragma" to "no-cache",
-        "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.Gatu v1.0"
-    )
-
     val resp = try {
-        val r = app.get("$apiBase/newtv/otp.php", headers = otpHeaders)
+        val r = app.get("$apiBase/newtv/otp.php", headers = buildNewTvHeaders(ott))
         Log.d(TAG, "getNewTvUserToken: otp.php HTTP ${r.code} body=${r.text.take(200)}")
         r.parsedSafe<NewTvOtpResponse>()
     } catch (e: Exception) {
