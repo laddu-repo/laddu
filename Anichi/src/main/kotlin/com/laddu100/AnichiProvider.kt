@@ -3,6 +3,7 @@ package com.laddu100
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.fasterxml.jackson.annotation.JsonProperty
 import org.jsoup.Jsoup
 import java.net.URLEncoder
@@ -28,9 +29,22 @@ class AnichiProvider : MainAPI() {
         "top" to "Top Anime"
     )
 
+    private val cfKiller = CloudflareKiller()
+
+    private suspend fun quickGet(url: String, referer: String = "$mainUrl/"): String {
+        return app.get(
+            url = url,
+            headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer" to referer
+            ),
+            interceptor = cfKiller
+        ).text
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(request.name, emptyList())
-        val html = app.get("$mainUrl/home").text
+        val html = quickGet("$mainUrl/home")
         val soup = Jsoup.parse(html)
 
         val section = when (request.data) {
@@ -61,10 +75,7 @@ class AnichiProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val searchJsonText = try {
-            app.get(
-                url = "$mainUrl/ajax/anime/search?keyword=$encodedQuery",
-                headers = mapOf("Referer" to "$mainUrl/")
-            ).text
+            quickGet("$mainUrl/ajax/anime/search?keyword=$encodedQuery")
         } catch (e: Exception) {
             ""
         }
@@ -91,7 +102,7 @@ class AnichiProvider : MainAPI() {
         }
         
         if (results.isEmpty()) {
-            val html = app.get("$mainUrl/filter?keyword=$encodedQuery").text
+            val html = quickGet("$mainUrl/filter?keyword=$encodedQuery")
             val soup = Jsoup.parse(html)
             soup.select(".item").forEach { item ->
                 val a = if (item.tagName() == "a") item else item.selectFirst("a[href]")
@@ -109,7 +120,7 @@ class AnichiProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val html = app.get(url).text
+        val html = quickGet(url)
         val soup = Jsoup.parse(html)
 
         val dataId = soup.selectFirst(".watch-wrap")?.attr("data-id")
@@ -146,11 +157,13 @@ class AnichiProvider : MainAPI() {
         val genres = soup.select(".meta a[href*='/genre/'], .bmeta a[href*='/genre/'], .data a[href*='/genre/']").map { it.text().trim() }
 
         val epsResponseText = app.get(
-            url = "$mainUrl/ajax/episode/list/$dataId?vrf=$dataId",
+            url = "$mainUrl/ajax/episode/list/$dataId?style=&vrf=$dataId",
             headers = mapOf(
-                "X-Requested-With" to "XMLHttpRequest",
-                "Referer" to url
-            )
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer" to url,
+                "X-Requested-With" to "XMLHttpRequest"
+            ),
+            interceptor = cfKiller
         ).text
 
         val epsJson = parseJson<EpsResponse>(epsResponseText)
@@ -219,9 +232,11 @@ class AnichiProvider : MainAPI() {
         val serverListResponseText = app.get(
             url = "$baseUrl/ajax/server/list?servers=$dataIds",
             headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Referer" to "$baseUrl/watch/",
                 "X-Requested-With" to "XMLHttpRequest"
-            )
+            ),
+            interceptor = cfKiller
         ).text
 
         val serverListJson = parseJson<EpsResponse>(serverListResponseText)
@@ -257,9 +272,11 @@ class AnichiProvider : MainAPI() {
                     val serverInfoText = app.get(
                         url = "$baseUrl/ajax/server?get=$linkId",
                         headers = mapOf(
+                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                             "Referer" to "$baseUrl/watch/",
                             "X-Requested-With" to "XMLHttpRequest"
-                        )
+                        ),
+                        interceptor = cfKiller
                     ).text
 
                     val serverInfoJson = parseJson<ServerInfoResponse>(serverInfoText)
