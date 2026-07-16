@@ -646,17 +646,19 @@ class AnicineProvider : MainAPI() {
         @JsonProperty("format") val format: String? = null,
         @JsonProperty("nextAiringEpisode") val nextAiringEpisode: NextAiring? = null,
         @JsonProperty("recommendations") val recommendations: Recommendations? = null
-    ) {
-        fun toSearchResponse(): SearchResponse? {
-            val id = id ?: return null
-            val t = title?.english?.takeIf { it.isNotBlank() }
-                ?: title?.romaji?.takeIf { it.isNotBlank() }
-                ?: title?.native ?: return null
-            val poster = coverImage?.extraLarge ?: coverImage?.large
-            return newAnimeSearchResponse(t, "$mainUrl/watch/anime/$id-${slugify(t)}", TvType.Anime) {
-                this.posterUrl = poster
-                this.year = seasonYear
-            }
+    )
+
+    /** Convert an AniList Media item to a CloudStream SearchResponse.
+     *  Defined as a member extension on Media so it can access AnicineProvider.mainUrl. */
+    private fun Media.toSearchResponse(): SearchResponse? {
+        val id = id ?: return null
+        val t = title?.english?.takeIf { it.isNotBlank() }
+            ?: title?.romaji?.takeIf { it.isNotBlank() }
+            ?: title?.native ?: return null
+        val poster = coverImage?.extraLarge ?: coverImage?.large
+        return newAnimeSearchResponse(t, "$mainUrl/watch/anime/$id-${slugify(t)}", TvType.Anime) {
+            this.posterUrl = poster
+            this.year = seasonYear
         }
     }
 
