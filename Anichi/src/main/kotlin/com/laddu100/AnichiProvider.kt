@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.api.Log
 import com.fasterxml.jackson.annotation.JsonProperty
 import org.jsoup.Jsoup
 import java.net.URLEncoder
@@ -123,9 +124,17 @@ class AnichiProvider : MainAPI() {
         val html = quickGet(url)
         val soup = Jsoup.parse(html)
 
-        val dataId = soup.selectFirst(".watch-wrap")?.attr("data-id")
-            ?: soup.selectFirst(".page-anime")?.attr("data-id")
-            ?: return null
+        val dataId = (
+            soup.selectFirst("#series-page")?.attr("data-id")?.takeIf { it.isNotBlank() }
+            ?: soup.selectFirst("#watch-main")?.attr("data-id")?.takeIf { it.isNotBlank() }
+            ?: soup.selectFirst(".watch-wrap")?.attr("data-id")?.takeIf { it.isNotBlank() }
+            ?: soup.selectFirst(".page-anime")?.attr("data-id")?.takeIf { it.isNotBlank() }
+            ?: soup.selectFirst(".series-fav")?.attr("data-id")?.takeIf { it.isNotBlank() }
+            ?: soup.select("[data-id]").map { it.attr("data-id") }.firstOrNull { it.isNotBlank() && it.matches(Regex("""\d+""")) }
+        )
+
+        Log.d("Anichi", "URL: $url, Parsed dataId: $dataId")
+        if (dataId == null) return null
 
         val title = soup.selectFirst("h1.title")?.text()?.trim()
             ?: soup.selectFirst("meta[property=og:title]")?.attr("content")?.substringBefore(" Episode")?.trim()
