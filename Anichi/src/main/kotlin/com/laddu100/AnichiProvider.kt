@@ -1,16 +1,16 @@
 package com.laddu100
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.api.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.network.CloudflareKiller
-import com.lagradost.api.Log
-import com.fasterxml.jackson.annotation.JsonProperty
-import org.jsoup.Jsoup
-import java.net.URLEncoder
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import org.jsoup.Jsoup
+import java.net.URLEncoder
 
 class AnichiProvider : MainAPI() {
     override var mainUrl = "https://anichi.to"
@@ -30,22 +30,43 @@ class AnichiProvider : MainAPI() {
         "top" to "Top Anime"
     )
 
-    private val cfKiller = CloudflareKiller()
+    private val baseHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "en-US,en;q=0.9",
+        "Referer" to "$mainUrl/",
+        "Cookie" to "country_code=IN"
+    )
 
-    private suspend fun quickGet(url: String, referer: String = "$mainUrl/"): String {
-        return app.get(
-            url = url,
-            headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer" to referer
-            ),
-            interceptor = cfKiller
-        ).text
+    private val ajaxHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "Accept" to "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language" to "en-US,en;q=0.9",
+        "X-Requested-With" to "XMLHttpRequest",
+        "Cookie" to "country_code=IN"
+    )
+
+    private suspend fun fetchHtml(url: String, referer: String = "$mainUrl/"): String {
+        return try {
+            app.get(url, headers = baseHeaders + ("Referer" to referer)).text
+        } catch (e: Exception) {
+            Log.d("Anichi", "fetchHtml failed: $url — ${e.message}")
+            ""
+        }
+    }
+
+    private suspend fun fetchAjax(url: String, referer: String): String {
+        return try {
+            app.get(url, headers = ajaxHeaders + ("Referer" to referer)).text
+        } catch (e: Exception) {
+            Log.d("Anichi", "fetchAjax failed: $url — ${e.message}")
+            ""
+        }
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) return newHomePageResponse(request.name, emptyList())
-        val html = quickGet("$mainUrl/home")
+        val html = fetchHtml("$mainUrl/home")
         val soup = Jsoup.parse(html)
 
         val section = when (request.data) {
@@ -59,8 +80,8 @@ class AnichiProvider : MainAPI() {
         section?.select(".item, .rank-item")?.forEach { item ->
             val a = if (item.tagName() == "a") item else item.selectFirst("a[href]")
             val href = a?.attr("href")?.takeIf { it.isNotBlank() } ?: return@forEach
-            val title = item.selectFirst(".name")?.text()?.trim() 
-                ?: item.selectFirst(".rank-title")?.text()?.trim() 
+            val title = item.selectFirst(".name")?.text()?.trim()
+                ?: item.selectFirst(".rank-title")?.text()?.trim()
                 ?: a.text().trim()
             val img = item.selectFirst("img")
             val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
@@ -75,14 +96,10 @@ class AnichiProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val searchJsonText = try {
-            quickGet("$mainUrl/ajax/anime/search?keyword=$encodedQuery")
-        } catch (e: Exception) {
-            ""
-        }
-        
+        val searchJsonText = fetchAjax("$mainUrl/ajax/anime/search?keyword=$encodedQuery", "$mainUrl/")
+
         val results = mutableListOf<SearchResponse>()
-        if (searchJsonText.isNotBlank()) {
+        if (searchJsonText.isNotBlank() && !searchJsonText.startsWith("<")) {
             try {
                 val json = parseJson<SearchJsonResponse>(searchJsonText)
                 val html = json.result?.html
@@ -98,12 +115,12 @@ class AnichiProvider : MainAPI() {
                     }
                 }
             } catch (e: Exception) {
-                // Ignore and fallback
+                Log.d("Anichi", "search parse: ${e.message}")
             }
         }
-        
+
         if (results.isEmpty()) {
-            val html = quickGet("$mainUrl/filter?keyword=$encodedQuery")
+            val html = fetchHtml("$mainUrl/filter?keyword=$encodedQuery")
             val soup = Jsoup.parse(html)
             soup.select(".item").forEach { item ->
                 val a = if (item.tagName() == "a") item else item.selectFirst("a[href]")
@@ -116,12 +133,16 @@ class AnichiProvider : MainAPI() {
                 })
             }
         }
-        
+
         return results
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val html = quickGet(url)
+        val html = fetchHtml(url)
+        if (html.isBlank() || html.contains("404")) {
+            Log.d("Anichi", "load: page empty or 404 for $url")
+            return null
+        }
         val soup = Jsoup.parse(html)
 
         val dataId = (
@@ -133,7 +154,7 @@ class AnichiProvider : MainAPI() {
             ?: soup.select("[data-id]").map { it.attr("data-id") }.firstOrNull { it.isNotBlank() && it.matches(Regex("""\d+""")) }
         )
 
-        Log.d("Anichi", "URL: $url, Parsed dataId: $dataId")
+        Log.d("Anichi", "load: url=$url dataId=$dataId")
         if (dataId == null) return null
 
         val title = soup.selectFirst("h1.title")?.text()?.trim()
@@ -165,28 +186,39 @@ class AnichiProvider : MainAPI() {
 
         val genres = soup.select(".meta a[href*='/genre/'], .bmeta a[href*='/genre/'], .data a[href*='/genre/']").map { it.text().trim() }
 
-        val epsResponseText = app.get(
-            url = "$mainUrl/ajax/episode/list/$dataId?style=&vrf=$dataId",
-            headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer" to url,
-                "X-Requested-With" to "XMLHttpRequest"
-            ),
-            interceptor = cfKiller
-        ).text
+        val epsResponseText = fetchAjax(
+            "$mainUrl/ajax/episode/list/$dataId?style=&vrf=$dataId",
+            url
+        )
 
-        val epsJson = parseJson<EpsResponse>(epsResponseText)
-        val epsHtml = epsJson.result ?: return null
+        if (epsResponseText.isBlank() || epsResponseText.startsWith("<")) {
+            Log.d("Anichi", "load: episode list response is not JSON (empty or HTML)")
+            return null
+        }
+
+        val epsJson = try { parseJson<EpsResponse>(epsResponseText) } catch (e: Exception) {
+            Log.d("Anichi", "load: episode list parse failed: ${e.message}")
+            return null
+        }
+        val epsHtml = epsJson.result ?: run {
+            Log.d("Anichi", "load: episode list result is null")
+            return null
+        }
         val epsSoup = Jsoup.parse(epsHtml)
 
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
 
-        epsSoup.select("a[data-ids]").forEach { epLink ->
-            val epNum = epLink.attr("data-num").toIntOrNull() ?: epLink.attr("data-slug").toIntOrNull() ?: 1
-            val epName = epLink.selectFirst(".ep-name")?.text()?.trim() 
+        val epLinks = epsSoup.select("a[data-ids]")
+        Log.d("Anichi", "load: found ${epLinks.size} episode links")
+
+        epLinks.forEach { epLink ->
+            val epNum = epLink.attr("data-num").toIntOrNull()
+                ?: epLink.attr("data-slug").toIntOrNull()
+                ?: (subEpisodes.size + dubEpisodes.size + 1)
+            val epName = epLink.selectFirst(".ep-name")?.text()?.trim()
+                ?: epLink.selectFirst(".ep-name-l")?.text()?.trim()
                 ?: epLink.attr("title").takeIf { it.isNotBlank() }
-                ?: epLink.attr("data-num").takeIf { it.isNotBlank() }?.let { "Episode $it" }
                 ?: "Episode $epNum"
             val dataIds = epLink.attr("data-ids").takeIf { it.isNotBlank() } ?: return@forEach
             val hasSub = epLink.attr("data-sub") == "1"
@@ -206,12 +238,28 @@ class AnichiProvider : MainAPI() {
             }
         }
 
+        if (subEpisodes.isEmpty() && dubEpisodes.isEmpty()) {
+            Log.d("Anichi", "load: no episodes found in HTML, trying fallback")
+            val allLinks = epsSoup.select("a[data-ids]")
+            allLinks.forEach { epLink ->
+                val dataIds = epLink.attr("data-ids").takeIf { it.isNotBlank() } ?: return@forEach
+                val epNum = epLink.attr("data-num").toIntOrNull() ?: 1
+                val epName = epLink.selectFirst(".ep-name")?.text()?.trim() ?: "Episode $epNum"
+                subEpisodes.add(newEpisode("$mainUrl|$dataId|$epNum|$dataIds|sub") {
+                    this.episode = epNum
+                    this.name = epName
+                })
+            }
+        }
+
         val typeStr = soup.selectFirst(".bmeta .meta div:contains(Type) span")?.text()?.trim() ?: ""
         val tvType = when (typeStr.lowercase()) {
             "movie" -> TvType.AnimeMovie
             "ova", "ona", "special" -> TvType.OVA
             else -> TvType.Anime
         }
+
+        Log.d("Anichi", "load: ${subEpisodes.size} sub, ${dubEpisodes.size} dub episodes")
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
@@ -236,19 +284,22 @@ class AnichiProvider : MainAPI() {
         val animeId = parts[1]
         val epNum = parts[2]
         val dataIds = parts[3]
-        val selectedType = parts[4] // "sub" or "dub"
+        val selectedType = parts[4]
 
-        val serverListResponseText = app.get(
-            url = "$baseUrl/ajax/server/list?servers=$dataIds",
-            headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Referer" to "$baseUrl/watch/",
-                "X-Requested-With" to "XMLHttpRequest"
-            ),
-            interceptor = cfKiller
-        ).text
+        val serverListText = fetchAjax(
+            "$baseUrl/ajax/server/list?servers=$dataIds",
+            "$baseUrl/watch/"
+        )
 
-        val serverListJson = parseJson<EpsResponse>(serverListResponseText)
+        if (serverListText.isBlank() || serverListText.startsWith("<")) {
+            Log.d("Anichi", "loadLinks: server list response is not JSON")
+            return@coroutineScope false
+        }
+
+        val serverListJson = try { parseJson<EpsResponse>(serverListText) } catch (e: Exception) {
+            Log.d("Anichi", "loadLinks: server list parse failed: ${e.message}")
+            return@coroutineScope false
+        }
         val serverListHtml = serverListJson.result ?: return@coroutineScope false
         val serverListSoup = Jsoup.parse(serverListHtml)
 
@@ -273,28 +324,25 @@ class AnichiProvider : MainAPI() {
             }
         }
 
+        Log.d("Anichi", "loadLinks: ${serversToLoad.size} servers to load for type=$selectedType")
         if (serversToLoad.isEmpty()) return@coroutineScope false
 
         val deferreds = serversToLoad.map { (serverName, linkId) ->
             async {
                 try {
-                    val serverInfoText = app.get(
-                        url = "$baseUrl/ajax/server?get=$linkId",
-                        headers = mapOf(
-                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                            "Referer" to "$baseUrl/watch/",
-                            "X-Requested-With" to "XMLHttpRequest"
-                        ),
-                        interceptor = cfKiller
-                    ).text
+                    val serverInfoText = fetchAjax(
+                        "$baseUrl/ajax/server?get=$linkId",
+                        "$baseUrl/watch/"
+                    )
 
-                    val serverInfoJson = parseJson<ServerInfoResponse>(serverInfoText)
+                    if (serverInfoText.isBlank() || serverInfoText.startsWith("<")) return@async false
+
+                    val serverInfoJson = try { parseJson<ServerInfoResponse>(serverInfoText) } catch (e: Exception) { return@async false }
                     val playerUrl = serverInfoJson.result?.url ?: return@async false
 
                     val parsedUrl = java.net.URI(playerUrl)
                     val embedBase = "${parsedUrl.scheme}://${parsedUrl.host}"
 
-                    // MewCDN/Plyr base64 decoder
                     if (playerUrl.contains("plyr.php#")) {
                         val b64 = playerUrl.substringAfter("#").substringBefore("#")
                         val decodedUrl = try {
@@ -309,7 +357,7 @@ class AnichiProvider : MainAPI() {
                                 streamUrl = mappedUrl,
                                 referer = "$embedBase/",
                                 headers = mapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                     "Referer" to "$embedBase/"
                                 )
                             ).forEach { link ->
@@ -319,18 +367,17 @@ class AnichiProvider : MainAPI() {
                         }
                     }
 
-                    // Megaplay / Vidwish / Vidtube source resolver
-                    val isMegaplayClone = playerUrl.contains("megaplay.buzz") || 
-                                          playerUrl.contains("vidwish.live") || 
-                                          playerUrl.contains("vidtube.site") ||
-                                          playerUrl.contains("vidstream") || 
-                                          playerUrl.contains("vidplay")
+                    val isMegaplayClone = playerUrl.contains("megaplay.buzz") ||
+                        playerUrl.contains("vidwish.live") ||
+                        playerUrl.contains("vidtube.site") ||
+                        playerUrl.contains("vidstream") ||
+                        playerUrl.contains("vidplay")
 
                     if (isMegaplayClone) {
                         val playerPageHtml = app.get(
                             url = playerUrl,
                             headers = mapOf(
-                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                 "Referer" to "$baseUrl/"
                             )
                         ).text
@@ -352,15 +399,15 @@ class AnichiProvider : MainAPI() {
                             val sourcesText = app.get(
                                 url = sourcesUrl,
                                 headers = mapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                     "Referer" to playerUrl,
                                     "X-Requested-With" to "XMLHttpRequest",
                                     "Origin" to embedBase
                                 )
                             ).text
 
-                            val sourcesJson = parseJson<SourcesResponse>(sourcesText)
-                            val m3u8Url = sourcesJson.sources?.file
+                            val sourcesJson = try { parseJson<SourcesResponse>(sourcesText) } catch (e: Exception) { null }
+                            val m3u8Url = sourcesJson?.sources?.file
 
                             if (!m3u8Url.isNullOrEmpty()) {
                                 M3u8Helper.generateM3u8(
@@ -368,7 +415,7 @@ class AnichiProvider : MainAPI() {
                                     streamUrl = m3u8Url,
                                     referer = embedBase,
                                     headers = mapOf(
-                                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                         "Referer" to "$embedBase/"
                                     )
                                 ).forEach { link ->
@@ -376,7 +423,7 @@ class AnichiProvider : MainAPI() {
                                 }
                             }
 
-                            sourcesJson.tracks?.forEach { track ->
+                            sourcesJson?.tracks?.forEach { track ->
                                 val file = track.file ?: return@forEach
                                 if (track.kind == "captions" || track.kind == "subtitles") {
                                     subtitleCallback(
@@ -390,10 +437,10 @@ class AnichiProvider : MainAPI() {
                         }
                     }
 
-                    // Fallback to loading via standard extractors
                     val loaded = loadExtractor(playerUrl, "$baseUrl/", subtitleCallback, callback)
                     return@async loaded
                 } catch (e: Exception) {
+                    Log.d("Anichi", "loadLinks server error: ${e.message}")
                     false
                 }
             }
@@ -440,38 +487,46 @@ class AnichiProvider : MainAPI() {
         return result
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class EpsResponse(
         @JsonProperty("status") val status: Int? = null,
         @JsonProperty("result") val result: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SearchJsonResponse(
         @JsonProperty("status") val status: Int? = null,
         @JsonProperty("result") val result: SearchJsonResult? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SearchJsonResult(
         @JsonProperty("html") val html: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class ServerInfoResponse(
         @JsonProperty("status") val status: Int? = null,
         @JsonProperty("result") val result: ServerInfoResult? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class ServerInfoResult(
         @JsonProperty("url") val url: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SourcesResponse(
         @JsonProperty("sources") val sources: SourcesFile? = null,
         @JsonProperty("tracks") val tracks: List<SourcesTrack>? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SourcesFile(
         @JsonProperty("file") val file: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SourcesTrack(
         @JsonProperty("file") val file: String? = null,
         @JsonProperty("label") val label: String? = null,
