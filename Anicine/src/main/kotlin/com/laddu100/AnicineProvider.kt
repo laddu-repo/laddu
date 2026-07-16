@@ -85,8 +85,22 @@ class AnicineProvider : MainAPI() {
     override var mainUrl = "https://anicine.xyz"
     override var name = "Anicine"
     override var lang = "en"
-    override val hasMainPage = false
+    override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
+
+    // Main page sections — uses AniList GraphQL (trending, popular, top-rated, season).
+    // CRITICAL: hasMainPage MUST be true and mainPage MUST be defined, otherwise
+    // CloudStream does not show the provider in the Providers list (it only shows
+    // providers that have a home page). This was the root cause of v1/v2 not
+    // appearing in the provider list despite loading successfully.
+    override val mainPage = mainPageOf(
+        Pair("trending", "Trending Now"),
+        Pair("popular", "All-Time Popular"),
+        Pair("top", "Top Rated"),
+        Pair("season", "This Season"),
+        Pair("movie", "Anime Movies"),
+        Pair("upcoming", "Upcoming")
+    )
 
     private val TAG = "Anicine"
     // Hardcode the API URL instead of referencing mainUrl in the initializer.
@@ -150,6 +164,91 @@ class AnicineProvider : MainAPI() {
           }
         }
     """.trimIndent()
+
+    // Browse query for main page sections. Uses AniList's Page media query with
+    // different sort/season filters per section.
+    private val browseQuery = """
+        query(${'$'}page: Int, ${'$'}sort: [MediaSort], ${'$'}season: MediaSeason, ${'$'}year: Int, ${'$'}format: MediaFormat) {
+          Page(page: ${'$'}page, perPage: 20) {
+            media(type: ANIME, sort: ${'$'}sort, season: ${'$'}season, seasonYear: ${'$'}year, format: ${'$'}format, isAdult: false) {
+              id
+              title { romaji english native }
+              coverImage { large extraLarge }
+              seasonYear
+              averageScore
+              status
+              format
+            }
+          }
+        }
+    """.trimIndent()
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MAIN PAGE (home page sections)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        Log.d(TAG, "getMainPage: section='${request.name}' data='${request.data}' page=$page")
+        val (sort, season, year, format) = when (request.data) {
+            "trending" -> Quad("[TRENDING_DESC, POPULARITY_DESC]", null, null, null)
+            "popular" -> Quad("[POPULARITY_DESC]", null, null, null)
+            "top" -> Quad("[SCORE_DESC]", null, null, null)
+            "season" -> {
+                // Current season based on month: Winter(Jan-Mar), Spring(Apr-Jun),
+                // Summer(Jul-Sep), Fall(Oct-Dec)
+                val cal = java.util.Calendar.getInstance()
+                val m = cal.get(java.util.Calendar.MONTH)
+                val curSeason = when (m) {
+                    in 0..2 -> "WINTER"
+                    in 3..5 -> "SPRING"
+                    in 6..8 -> "SUMMER"
+                    else -> "FALL"
+                }
+                val curYear = cal.get(java.util.Calendar.YEAR)
+                Quad("[POPULARITY_DESC]", curSeason, curYear, null)
+            }
+            "movie" -> Quad("[POPULARITY_DESC]", null, null, "MOVIE")
+            "upcoming" -> Quad("[START_DATE_DESC]", null, null, null)
+            else -> Quad("[TRENDING_DESC, POPULARITY_DESC]", null, null, null)
+        }
+
+        val variables = buildString {
+            append("""{"page":$page,"sort":$sort""")
+            if (season != null) append(""","season":"$season"""")
+            if (year != null) append(""","seasonYear":$year""")
+            if (format != null) append(""","format":"$format"""")
+            append("}")
+        }
+        val url = buildAnilistUrl(browseQuery, variables)
+
+        return try {
+            val resp = app.get(url, headers = mapOf(
+                "User-Agent" to ua,
+                "Accept" to "application/json",
+                "Referer" to "$mainUrl/"
+            ), timeout = 30_000L)
+            if (resp.code != 200) {
+                Log.e(TAG, "getMainPage non-200: ${resp.code}")
+                return newHomePageResponse(request.name, emptyList(), hasNext = false)
+            }
+            val parsed = parseJson<AniListPageResponse>(resp.text)
+            val media = parsed.data?.page?.media ?: emptyList()
+            Log.d(TAG, "getMainPage parsed ${media.size} items for '${request.name}'")
+            val home = media.mapNotNull { it.toSearchResponse() }
+            newHomePageResponse(request.name, home, hasNext = home.size == 20)
+        } catch (e: Exception) {
+            Log.e(TAG, "getMainPage FAILED: ${e.message}")
+            newHomePageResponse(request.name, emptyList(), hasNext = false)
+        }
+    }
+
+    /** Simple 4-tuple for browse query params. */
+    private data class Quad(
+        val sort: String,
+        val season: String?,
+        val year: Int?,
+        val format: String?
+    )
 
     // ═══════════════════════════════════════════════════════════════════════
     //  SEARCH

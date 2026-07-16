@@ -1,4 +1,4 @@
-version = 2
+version = 3
 
 cloudstream {
     language = "en"
@@ -11,5 +11,5 @@ cloudstream {
         "AnimeMovie",
         "OVA"
     )
-    iconUrl = "https://anicine.xyz/favicon.ico"
+    iconUrl = "https://anicine.xyz/icons/icon-192.png"
 }
