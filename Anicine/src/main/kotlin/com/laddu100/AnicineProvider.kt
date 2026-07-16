@@ -86,11 +86,14 @@ class AnicineProvider : MainAPI() {
     override var name = "Anicine"
     override var lang = "en"
     override val hasMainPage = false
-    override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     private val TAG = "Anicine"
-    private val anilistApi = "$mainUrl/api/anilist"
+    // Hardcode the API URL instead of referencing mainUrl in the initializer.
+    // In Kotlin, property initializers run top-to-bottom, and while mainUrl IS
+    // declared before this line, using a hardcoded string avoids any potential
+    // initialization-order issues with the MainAPI superclass.
+    private val anilistApi = "https://anicine.xyz/api/anilist"
 
     // Use a desktop Chrome UA — matches what anicine.xyz expects (HAR was
     // captured on Chrome 150 / Windows 10). MegaPlay's CDN validates Referer
