@@ -32,9 +32,9 @@ class AnichiProvider : MainAPI() {
 
     private val baseHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept" to "text/html",
         "Accept-Language" to "en-US,en;q=0.9",
-        "Referer" to "$mainUrl/",
+        "X-Requested-With" to "XMLHttpRequest",
         "Cookie" to "country_code=IN"
     )
 
@@ -48,7 +48,14 @@ class AnichiProvider : MainAPI() {
 
     private suspend fun fetchHtml(url: String, referer: String = "$mainUrl/"): String {
         return try {
-            app.get(url, headers = baseHeaders + ("Referer" to referer)).text
+            val res = app.get(url, headers = baseHeaders + ("Referer" to referer))
+            val body = res.text
+            if (body.isBlank()) {
+                Log.d("Anichi", "fetchHtml: empty response for $url (status=${res.code})")
+            } else if (body.length < 500 && body.contains("404", ignoreCase = true)) {
+                Log.d("Anichi", "fetchHtml: 404 page for $url (len=${body.length})")
+            }
+            body
         } catch (e: Exception) {
             Log.d("Anichi", "fetchHtml failed: $url — ${e.message}")
             ""
@@ -57,7 +64,12 @@ class AnichiProvider : MainAPI() {
 
     private suspend fun fetchAjax(url: String, referer: String): String {
         return try {
-            app.get(url, headers = ajaxHeaders + ("Referer" to referer)).text
+            val res = app.get(url, headers = ajaxHeaders + ("Referer" to referer))
+            val body = res.text
+            if (body.isBlank()) {
+                Log.d("Anichi", "fetchAjax: empty response for $url (status=${res.code})")
+            }
+            body
         } catch (e: Exception) {
             Log.d("Anichi", "fetchAjax failed: $url — ${e.message}")
             ""
@@ -139,8 +151,12 @@ class AnichiProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val html = fetchHtml(url)
-        if (html.isBlank() || html.contains("404")) {
-            Log.d("Anichi", "load: page empty or 404 for $url")
+        if (html.isBlank()) {
+            Log.d("Anichi", "load: page empty for $url")
+            return null
+        }
+        if (html.length < 1000 && html.contains("not found", ignoreCase = true)) {
+            Log.d("Anichi", "load: 404 not found page for $url (len=${html.length})")
             return null
         }
         val soup = Jsoup.parse(html)
@@ -192,7 +208,7 @@ class AnichiProvider : MainAPI() {
         )
 
         if (epsResponseText.isBlank() || epsResponseText.startsWith("<")) {
-            Log.d("Anichi", "load: episode list response is not JSON (empty or HTML)")
+            Log.d("Anichi", "load: episode list response is not JSON (len=${epsResponseText.length}, starts=${epsResponseText.take(80)})")
             return null
         }
 
@@ -201,9 +217,14 @@ class AnichiProvider : MainAPI() {
             return null
         }
         val epsHtml = epsJson.result ?: run {
-            Log.d("Anichi", "load: episode list result is null")
+            Log.d("Anichi", "load: episode list result is null (status=${epsJson.status})")
             return null
         }
+        if (epsHtml.isBlank()) {
+            Log.d("Anichi", "load: episode list result HTML is empty")
+            return null
+        }
+        Log.d("Anichi", "load: episode list HTML length=${epsHtml.length}")
         val epsSoup = Jsoup.parse(epsHtml)
 
         val subEpisodes = mutableListOf<Episode>()
