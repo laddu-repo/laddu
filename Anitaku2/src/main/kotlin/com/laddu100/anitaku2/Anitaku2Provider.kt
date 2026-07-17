@@ -293,7 +293,7 @@ class Anitaku2Provider : MainAPI() {
         for (type in typeSelectors) {
             val serverDiv = doc.selectFirst(".server-items[data-type=$type]") ?: continue
             serverDiv.select("a.server-video").forEach { a ->
-                val videoUrl = a.attr("data-video") ?: return@forEach
+                val videoUrl = a.attr("data-video")
                 if (videoUrl.isBlank()) return@forEach
                 val serverName = a.ownText().trim().replace("Choose this server", "").trim()
                 val fullUrl = if (videoUrl.startsWith("//")) "https:$videoUrl" else videoUrl
@@ -308,7 +308,7 @@ class Anitaku2Provider : MainAPI() {
         // Fallback: if no type-specific servers found, try all servers
         if (servers.isEmpty()) {
             doc.select("a.server-video").forEach { a ->
-                val videoUrl = a.attr("data-video") ?: return@forEach
+                val videoUrl = a.attr("data-video")
                 if (videoUrl.isBlank()) return@forEach
                 val serverName = a.ownText().trim().replace("Choose this server", "").trim()
                 val fullUrl = if (videoUrl.startsWith("//")) "https:$videoUrl" else videoUrl
@@ -681,7 +681,7 @@ class Anitaku2Provider : MainAPI() {
         // We need to convert episode links to category links
         val link = selectFirst("a[href]") ?: return null
         val href = link.attr("href").ifBlank { return null }
-        val rawTitle = link.attr("title")?.trim().orEmpty()
+        val rawTitle = link.attr("title").trim()
         val title = if (rawTitle.isNotBlank()) rawTitle else {
             selectFirst("p a, .name a")?.text()?.trim() ?: return null
         }
@@ -703,7 +703,7 @@ class Anitaku2Provider : MainAPI() {
         // List items from search, popular, season, movies pages
         val link = selectFirst("a[href*=/category/]") ?: return null
         val href = link.attr("href").ifBlank { return null }
-        val title = selectFirst("p a, a[title]")?.text()?.trim() ?: link.attr("title")?.trim() ?: return null
+        val title = selectFirst("p a, a[title]")?.text()?.trim() ?: link.attr("title").trim().ifBlank { return null }
 
         val poster = selectFirst("img")?.let { it.attr("src").ifBlank { it.attr("data-src") } }
         val hasDub = selectFirst(".ic-dub") != null
