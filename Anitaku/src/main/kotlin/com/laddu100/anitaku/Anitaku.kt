@@ -7,6 +7,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import com.lagradost.nicehttp.RequestBodyTypes
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -77,12 +80,14 @@ class Anitaku : MainAPI() {
             val hasDub = el.attr("data-dub") == "1"
 
             if (hasSub) {
-                subEpisodes.add(newEpisode("sub|$epSlug", name = "Episode $epNum") {
+                subEpisodes.add(newEpisode("sub|$epSlug") {
+                    this.name = "Episode $epNum"
                     this.episode = epNum
                 })
             }
             if (hasDub) {
-                dubEpisodes.add(newEpisode("dub|$epSlug", name = "Episode $epNum") {
+                dubEpisodes.add(newEpisode("dub|$epSlug") {
+                    this.name = "Episode $epNum"
                     this.episode = epNum
                 })
             }
@@ -145,7 +150,7 @@ class Anitaku : MainAPI() {
 
             val subtitleUrl = extractSubtitleUrl(embedUrl)
             if (subtitleUrl != null && audioType != "dub") {
-                subtitleCallback.invoke(SubtitleFile("English", subtitleUrl))
+                subtitleCallback.invoke(newSubtitleFile("English", subtitleUrl))
             }
 
             when {
@@ -177,9 +182,9 @@ class Anitaku : MainAPI() {
 
             if (m3u8.contains(".m3u8")) {
                 M3u8Helper.generateM3u8(
-                    name = "$name - $serverName",
-                    streamUrl = m3u8,
-                    referer = embedUrl
+                    "$name - $serverName",
+                    m3u8,
+                    embedUrl
                 ).forEach(callback)
                 true
             } else false
@@ -204,24 +209,9 @@ class Anitaku : MainAPI() {
         if (extractorWorked) return true
 
         return try {
-            val resolver = WebViewResolver(
-                interceptUrl = Regex("""(?i)\.(m3u8|mp4)(?:\?|$)"""),
-                additionalUrls = listOf(Regex("""(?i)\.(m3u8|mp4)(?:\?|$)""")),
-                script = """document.querySelector('button,[role="button"],.jw-icon-display')?.click();""",
-                useOkhttp = false,
-                timeout = 20_000L
-            )
-            val resolved = app.get(embedUrl, referer = mainUrl, interceptor = resolver).url
-            if (resolved.contains(".m3u8")) {
-                M3u8Helper.generateM3u8(
-                    name = "$name - $serverName",
-                    streamUrl = resolved,
-                    referer = embedUrl
-                ).forEach(callback)
-                true
-            } else false
+            loadExtractor(embedUrl, embedUrl, subtitleCallback, callback)
         } catch (e: Exception) {
-            Log.e(TAG, "webview fallback failed: ${e.message}")
+            Log.e(TAG, "extractor fallback failed: ${e.message}")
             false
         }
     }
@@ -246,9 +236,11 @@ class Anitaku : MainAPI() {
         )
 
         return try {
+            val requestBody = request.toJson()
+                .toRequestBody(RequestBodyTypes.JSON.toMediaTypeOrNull())
             val response = app.post(
                 "https://graphql.anilist.co",
-                data = toJson(request),
+                requestBody = requestBody,
                 headers = mapOf("Content-Type" to "application/json"),
                 timeout = 15_000L
             )
