@@ -1,13 +1,13 @@
-version = 1
+version = 5
 
 cloudstream {
     language = "en"
-    description = "Live Sports Events and some Live TV Channels from TimStreams"
+    description = "Live Sports, Events, Replays & Live TV Channels from TimStreams"
     authors = listOf("raghav")
 
     status = 1
     tvTypes = listOf(
         "Live"
     )
-    iconUrl = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSEcz-sR5DKHHDqsTKkQ08izA6E8HqZQnbWiTqJL3XjO-eLoixqbHx47INk&s=10"
+    iconUrl = "https://i.ibb.co/7tBHzxnY/ff.png"
 }
