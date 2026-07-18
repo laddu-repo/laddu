@@ -67,7 +67,7 @@ class Animo : MainAPI() {
         val url = "$apiUrl/anime/$endpoint?page=$page&limit=20"
         Log.d(TAG, "getMainPage Fetching: $url")
         return try {
-            val response = app.get(url, headers = apiHeaders)
+            val response = app.get(url, headers = apiHeaders, timeout = 30_000L)
             val text = response.text
             Log.d(TAG, "getMainPage Response: HTTP ${response.code}, length=${text.length}")
             Log.d(TAG, "getMainPage Body preview: ${text.take(500)}")
@@ -108,7 +108,7 @@ class Animo : MainAPI() {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val url = "$apiUrl/anime/search?keyword=$encoded&page=1&limit=20"
             Log.d(TAG, "search Fetching: $url")
-            val response = app.get(url, headers = apiHeaders)
+            val response = app.get(url, headers = apiHeaders, timeout = 30_000L)
             val text = response.text
             Log.d(TAG, "search Response: HTTP ${response.code}, length=${text.length}")
             Log.d(TAG, "search Body preview: ${text.take(500)}")
@@ -132,7 +132,7 @@ class Animo : MainAPI() {
         Log.d(TAG, "load parsed animeId=$animeId")
 
         val animeText = try {
-            val r = app.get("$apiUrl/anime/$animeId", headers = apiHeaders)
+            val r = app.get("$apiUrl/anime/$animeId", headers = apiHeaders, timeout = 60_000L)
             Log.d(TAG, "load details Response: HTTP ${r.code}, length=${r.text.length}")
             r.text
         } catch (e: Exception) {
@@ -155,7 +155,7 @@ class Animo : MainAPI() {
         Log.d(TAG, "load title='$title', type=${anime.type}, status=${anime.status}")
 
         val epText = try {
-            val r = app.get("$apiUrl/anime/$animeId/episodes", headers = apiHeaders)
+            val r = app.get("$apiUrl/anime/$animeId/episodes", headers = apiHeaders, timeout = 60_000L)
             Log.d(TAG, "load episodes Response: HTTP ${r.code}, length=${r.text.length}")
             r.text
         } catch (e: Exception) {
