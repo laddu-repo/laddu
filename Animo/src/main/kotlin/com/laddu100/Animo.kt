@@ -189,7 +189,7 @@ class Animo : MainAPI() {
             }
             val epName = ep.titles?.en ?: ep.titles?.romaji ?: "Episode $num"
             if (ep.sub == true) {
-                val epData = EpisodeData(animeId, epId, ep.embed_id, num, anime.slug ?: "", "sub").toJson()
+                val epData = EpisodeData(animeId, epId, ep.embed_id, num, anime.slug ?: "", "sub", ep.ani, anime.al_id).toJson()
                 subEps.add(newEpisode(epData) {
                     this.episode = num
                     this.name = epName
@@ -197,7 +197,7 @@ class Animo : MainAPI() {
                 })
             }
             if (ep.dub == true) {
-                val epData = EpisodeData(animeId, epId, ep.embed_id, num, anime.slug ?: "", "dub").toJson()
+                val epData = EpisodeData(animeId, epId, ep.embed_id, num, anime.slug ?: "", "dub", ep.ani, anime.al_id).toJson()
                 dubEps.add(newEpisode(epData) {
                     this.episode = num
                     this.name = epName
@@ -252,12 +252,19 @@ class Animo : MainAPI() {
         var found = false
         val typesToTry = if (epData.streamType == "dub") listOf("dub", "sub") else listOf("sub", "dub")
         for (type in typesToTry) {
-            // Subtitles are forwarded once per type on the first hd variant that
-            // actually returns tracks, so a failing hd=1 does not block subs for
-            // the whole type (the previous `hd == 1` gate did exactly that).
             var subsPassedForType = false
             for (hd in 1..4) {
-                val sourcesUrl = "$cdnUrl/stream/getSources?hd=$hd&id=${epData.animeId}&episode=${epData.episodeNum}&type=$type"
+                val sourcesUrl = if (hd == 4 && epData.ani != null) {
+                    val encodedId = java.net.URLEncoder.encode("anilist:${epData.ani}", "UTF-8")
+                    "$cdnUrl/stream/getSources?id=$encodedId&server=hd-4&type=$type"
+                } else {
+                    "$cdnUrl/stream/getSources?hd=$hd&id=${epData.animeId}&episode=${epData.episodeNum}&type=$type"
+                }
+                val referer = if (hd == 4 && epData.ani != null && epData.alId != null) {
+                    "$cdnUrl/embed/hd-4/ani/${epData.alId}/${epData.episodeNum}/$type"
+                } else {
+                    "$cdnUrl/embed/hd-$hd/${epData.animeId}/${epData.episodeNum}/$type"
+                }
                 Log.d(TAG, "loadLinks Fetching getSources (type=$type, hd=$hd): $sourcesUrl")
                 try {
                     val response = app.get(
@@ -265,7 +272,7 @@ class Animo : MainAPI() {
                         headers = mapOf(
                             "User-Agent" to ua,
                             "Accept" to "application/json, text/plain, */*",
-                            "Referer" to "$cdnUrl/embed/hd-$hd/${epData.animeId}/${epData.episodeNum}/$type",
+                            "Referer" to referer,
                             "Origin" to cdnUrl
                         ),
                         timeout = 30_000L
@@ -457,7 +464,9 @@ class Animo : MainAPI() {
         val embedId: String?,
         val episodeNum: Int,
         val slug: String,
-        val streamType: String
+        val streamType: String,
+        val ani: String? = null,
+        val alId: Int? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -506,7 +515,9 @@ class Animo : MainAPI() {
         val score: Double? = null,
         val rating: String? = null,
         val air: Air? = null,
-        val genres: List<String>? = null
+        val genres: List<String>? = null,
+        val al_id: Int? = null,
+        val mal_id: Int? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -535,7 +546,9 @@ class Animo : MainAPI() {
         val sub: Boolean? = null,
         val dub: Boolean? = null,
         @com.fasterxml.jackson.annotation.JsonProperty("embed_id")
-        val embed_id: String? = null
+        val embed_id: String? = null,
+        val ani: String? = null,
+        val mal: String? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
