@@ -44,6 +44,7 @@ class AnimelokProvider : MainAPI() {
             val results = parseSearchResults(resp.text)
             newHomePageResponse(request.name, results, hasNext = false)
         } catch (e: Exception) {
+            Log.e(TAG, "getMainPage failed: ${e.message}")
             newHomePageResponse(request.name, emptyList(), hasNext = false)
         }
     }
@@ -55,16 +56,13 @@ class AnimelokProvider : MainAPI() {
             val resp = app.get(url, headers = baseHeaders)
             parseSearchResults(resp.text)
         } catch (e: Exception) {
+            Log.e(TAG, "search failed: ${e.message}")
             emptyList()
         }
     }
 
     private fun parseSearchResults(html: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
-
-        // Match BOTH URL formats:
-        //   /anime/one-piece-21          (slug format — home page, trending)
-        //   /anime/9b1efcffb7cb          (hash format — search page)
         val hrefRegex = Regex("""href="(/anime/[a-z0-9][a-z0-9-]+)"[^>]*>""")
         val altRegex = Regex("<img[^>]*alt=\"([^\"]+)\"")
         val h3Regex = Regex("<h3[^>]*>([^<]+)</h3>")
@@ -79,105 +77,19 @@ class AnimelokProvider : MainAPI() {
         hrefRegex.findAll(html).forEach { match ->
             val href = match.groupValues[1]
             val after = html.substring(match.range.last, (match.range.last + 2000).coerceAtMost(html.length))
-
-            // Try <img alt="..."> first, then <h3>...</h3>
             val title = altRegex.find(after)?.groupValues?.get(1)
                 ?: h3Regex.find(after)?.groupValues?.get(1)
                 ?: return@forEach
-
             val decodedTitle = title.replace("&#x27;", "'").replace("&amp;", "&")
                 .replace("&quot;", "\"").replace("&#x2F;", "/").trim()
-
             if (decodedTitle.length < 2 || decodedTitle.length > 200) return@forEach
-
-            // For hash URLs, look up the slug. For slug URLs, use directly.
             val slug = slugMap[href] ?: href.removePrefix("/anime/")
-
             val poster = imgSrcRegex.find(after)?.groupValues?.get(1) ?: ""
-
             results.add(newAnimeSearchResponse(decodedTitle, slug, TvType.Anime) {
                 this.posterUrl = poster
             })
         }
-
         return results.distinctBy { it.name }
-    }
-
-    private data class AnimeDetail(
-        val title: String,
-        val slug: String,
-        val description: String?,
-        val format: String?,
-        val status: String?,
-        val year: Int?,
-        val rating: Int?,
-        val duration: String?,
-        val genres: List<String>?,
-        val languageEpisodes: Map<String, Int>?,
-        val totalEpisodes: Int?
-    )
-
-    private suspend fun fetchAnimeDetail(slug: String): AnimeDetail? {
-        val url = "$mainUrl/search?keyword=" + URLEncoder.encode(slug, "UTF-8")
-        val postBody = "[\"$slug\"]"
-        return try {
-            val resp = app.post(
-                url,
-                headers = mapOf(
-                    "User-Agent" to ua,
-                    "Accept" to "text/x-component",
-                    "Content-Type" to "text/plain;charset=UTF-8",
-                    "Origin" to mainUrl,
-                    "Referer" to "$mainUrl/search?keyword=" + URLEncoder.encode(slug, "UTF-8")
-                ),
-                requestBody = postBody.toRequestBody("text/plain;charset=UTF-8".toMediaType()),
-                timeout = 30_000L
-            )
-            val text = resp.text
-            val jsonRegex = Regex("""\{[^{}]*"title":"[^"]+"[^{}]*"slug":"[^"]+"[^{}]*\}""")
-            jsonRegex.findAll(text).forEach { match ->
-                val s = match.value
-                if (s.contains("\"format\"") && s.contains("\"languageEpisodes\"")) {
-                    try {
-                        val j = parseJson<AnimeDetailJson>(s)
-                        return AnimeDetail(
-                            title = j.title ?: return@forEach,
-                            slug = j.slug ?: return@forEach,
-                            description = j.description,
-                            format = j.format,
-                            status = j.status,
-                            year = j.year,
-                            rating = j.rating,
-                            duration = j.duration,
-                            genres = j.genres?.mapNotNull { it.name },
-                            languageEpisodes = j.languageEpisodes,
-                            totalEpisodes = j.totalEpisodes
-                        )
-                    } catch (_: Exception) {}
-                }
-            }
-            null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class AnimeDetailJson(
-        @JsonProperty("title") val title: String? = null,
-        @JsonProperty("slug") val slug: String? = null,
-        @JsonProperty("description") val description: String? = null,
-        @JsonProperty("format") val format: String? = null,
-        @JsonProperty("status") val status: String? = null,
-        @JsonProperty("year") val year: Int? = null,
-        @JsonProperty("rating") val rating: Int? = null,
-        @JsonProperty("duration") val duration: String? = null,
-        @JsonProperty("genres") val genres: List<Genre>? = null,
-        @JsonProperty("languageEpisodes") val languageEpisodes: Map<String, Int>? = null,
-        @JsonProperty("totalEpisodes") val totalEpisodes: Int? = null
-    ) {
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        data class Genre(@JsonProperty("name") val name: String? = null)
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -194,92 +106,18 @@ class AnimelokProvider : MainAPI() {
         )
     }
 
-    override suspend fun load(url: String): LoadResponse? {
-        val slug = url.removePrefix("$mainUrl/anime/").removePrefix("/")
-        val detail = fetchAnimeDetail(slug) ?: return null
-
-        val title = detail.title
-        val plot = detail.description?.let { stripHtml(it) }
-        val year = detail.year
-        val tags = detail.genres?.filterNotNull()?.takeIf { it.isNotEmpty() }
-        val tvType = when (detail.format?.uppercase()) {
-            "MOVIE" -> TvType.AnimeMovie
-            "OVA", "ONA", "SPECIAL" -> TvType.OVA
-            else -> TvType.Anime
-        }
-
-        val langEps = detail.languageEpisodes ?: emptyMap()
-        val hasJapanese = (langEps["JAPANESE"] ?: 0) > 0 || langEps.isEmpty()
-        val hasEnglish = (langEps["ENGLISH"] ?: 0) > 0
-        val hasIndianLang = listOf("HINDI", "TELUGU", "TAMIL", "MALAYALAM").any { (langEps[it] ?: 0) > 0 }
-
-        val subEpCount = langEps["JAPANESE"] ?: detail.totalEpisodes ?: 0
-        val dubEpCount = if (hasEnglish || hasIndianLang) {
-            maxOf(
-                langEps["ENGLISH"] ?: 0,
-                langEps["HINDI"] ?: 0,
-                langEps["TELUGU"] ?: 0,
-                langEps["TAMIL"] ?: 0,
-                langEps["MALAYALAM"] ?: 0
-            ).coerceAtLeast(if (hasEnglish) subEpCount else 0)
-        } else 0
-
-        val subEps = fetchAllEpisodes(slug, "JAPANESE", subEpCount)
-        val dubEps = if (dubEpCount > 0) fetchAllEpisodes(slug, "ENGLISH", dubEpCount) else emptyList()
-
-        val finalType = if (tvType == TvType.AnimeMovie && dubEps.isNotEmpty()) TvType.Anime else tvType
-
-        return newAnimeLoadResponse(title, slug, finalType) {
-            this.posterUrl = null
-            this.plot = plot
-            this.year = year
-            this.tags = tags
-            if (detail.rating != null) {
-                this.score = Score.from10((detail.rating / 10.0).toString())
-            }
-            if (subEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
-            if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEps)
-        }
-    }
-
-    private suspend fun fetchAllEpisodes(slug: String, lang: String, totalCount: Int): List<Episode> {
-        val episodes = mutableListOf<Episode>()
-        var page = 0
-        while (episodes.size < totalCount) {
-            val url = "$mainUrl/api/anime/$slug/episodes-range?page=$page&lang=$lang&pageSize=100"
-            try {
-                val resp = app.get(url, headers = mapOf(
-                    "User-Agent" to ua,
-                    "Accept" to "*/*",
-                    "Referer" to "$mainUrl/watch/$slug"
-                ), timeout = 30_000L)
-                if (resp.code != 200) break
-                val parsed = parseJson<EpisodesRangeResponse>(resp.text)
-                val eps = parsed.episodes ?: break
-                if (eps.isEmpty()) break
-                eps.forEach { ep ->
-                    val num = ep.number ?: return@forEach
-                    val epName = ep.name?.takeIf { it.isNotBlank() }
-                    val fillerSuffix = if (ep.isFiller == true) " (Filler)" else ""
-                    episodes.add(newEpisode("$slug|$num|$lang") {
-                        this.episode = num
-                        this.name = if (epName != null) "$epName$fillerSuffix" else "Episode $num$fillerSuffix"
-                        this.posterUrl = ep.img
-                        this.description = ep.description
-                    })
-                }
-                if (eps.size < 100) break
-                page++
-            } catch (e: Exception) {
-                break
-            }
-        }
-        return episodes
-    }
-
     @JsonIgnoreProperties(ignoreUnknown = true)
     private data class EpisodeApiResponse(
+        @JsonProperty("anime") val anime: AnimeInfo? = null,
         @JsonProperty("episode") val episode: EpisodeData? = null
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class AnimeInfo(
+        @JsonProperty("id") val id: Int? = null,
+        @JsonProperty("anilistId") val anilistId: Int? = null,
+        @JsonProperty("slug") val slug: String? = null,
+        @JsonProperty("title") val title: String? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -311,6 +149,96 @@ class AnimelokProvider : MainAPI() {
         @JsonProperty("url") val url: String? = null
     )
 
+    override suspend fun load(url: String): LoadResponse? {
+        val slug = url.removePrefix("$mainUrl/anime/").removePrefix("/")
+        Log.d(TAG, "load: slug=$slug")
+
+        val apiHeaders = mapOf(
+            "User-Agent" to ua,
+            "Accept" to "*/*",
+            "Referer" to "$mainUrl/watch/$slug"
+        )
+
+        val ep1Url = "$mainUrl/api/anime/$slug/episodes/1"
+        val ep1Resp = try {
+            app.get(ep1Url, headers = apiHeaders, timeout = 30_000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "load: episodes/1 fetch failed: ${e.message}")
+            return null
+        }
+        if (ep1Resp.code != 200) {
+            Log.e(TAG, "load: episodes/1 non-200: ${ep1Resp.code}")
+            return null
+        }
+
+        val ep1Data = try {
+            parseJson<EpisodeApiResponse>(ep1Resp.text)
+        } catch (e: Exception) {
+            Log.e(TAG, "load: episodes/1 parse failed: ${e.message}")
+            return null
+        }
+
+        val animeTitle = ep1Data.anime?.title ?: "Anime"
+        val languages = ep1Data.episode?.languages ?: emptyList()
+        Log.d(TAG, "load: title=$animeTitle, languages=$languages")
+
+        val hasJapanese = languages.contains("JAPANESE") || languages.isEmpty()
+        val hasEnglish = languages.contains("ENGLISH")
+        val hasIndianLang = listOf("HINDI", "TELUGU", "TAMIL", "MALAYALAM").any { languages.contains(it) }
+
+        val subEps = if (hasJapanese) fetchAllEpisodes(slug, "JAPANESE") else emptyList()
+        val dubEps = if (hasEnglish) fetchAllEpisodes(slug, "ENGLISH") else emptyList()
+
+        val tvType = TvType.Anime
+        val finalType = if (dubEps.isNotEmpty()) TvType.Anime else tvType
+
+        Log.d(TAG, "load: subEps=${subEps.size}, dubEps=${dubEps.size}")
+
+        return newAnimeLoadResponse(animeTitle, slug, finalType) {
+            this.plot = ep1Data.episode?.description
+            if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
+            if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEps)
+            if (subEps.isNotEmpty() && dubEps.isEmpty()) addEpisodes(DubStatus.Subbed, subEps)
+        }
+    }
+
+    private suspend fun fetchAllEpisodes(slug: String, lang: String): List<Episode> {
+        val episodes = mutableListOf<Episode>()
+        val apiHeaders = mapOf(
+            "User-Agent" to ua,
+            "Accept" to "*/*",
+            "Referer" to "$mainUrl/watch/$slug"
+        )
+        var page = 0
+        while (page < 20) {
+            val url = "$mainUrl/api/anime/$slug/episodes-range?page=$page&lang=$lang&pageSize=100"
+            try {
+                val resp = app.get(url, headers = apiHeaders, timeout = 30_000L)
+                if (resp.code != 200) break
+                val parsed = parseJson<EpisodesRangeResponse>(resp.text)
+                val eps = parsed.episodes ?: break
+                if (eps.isEmpty()) break
+                eps.forEach { ep ->
+                    val num = ep.number ?: return@forEach
+                    val epName = ep.name?.takeIf { it.isNotBlank() }
+                    val fillerSuffix = if (ep.isFiller == true) " (Filler)" else ""
+                    episodes.add(newEpisode("$slug|$num|$lang") {
+                        this.episode = num
+                        this.name = if (epName != null) "$epName$fillerSuffix" else "Episode $num$fillerSuffix"
+                        this.posterUrl = ep.img
+                        this.description = ep.description
+                    })
+                }
+                if (eps.size < 100) break
+                page++
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchAllEpisodes page=$page failed: ${e.message}")
+                break
+            }
+        }
+        return episodes
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -321,7 +249,7 @@ class AnimelokProvider : MainAPI() {
         if (parts.size < 3) return false
         val slug = parts[0]
         val epNum = parts[1].toIntOrNull() ?: return false
-        val preferredLang = parts[2]
+        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum")
 
         val url = "$mainUrl/api/anime/$slug/episodes/$epNum"
         val resp = try {
@@ -331,15 +259,23 @@ class AnimelokProvider : MainAPI() {
                 "Referer" to "$mainUrl/watch/$slug"
             ), timeout = 30_000L)
         } catch (e: Exception) {
+            Log.e(TAG, "loadLinks: fetch failed: ${e.message}")
             return false
         }
-        if (resp.code != 200) return false
+        if (resp.code != 200) {
+            Log.e(TAG, "loadLinks: non-200: ${resp.code}")
+            return false
+        }
 
         val episodeData = try {
             parseJson<EpisodeApiResponse>(resp.text).episode
         } catch (e: Exception) {
+            Log.e(TAG, "loadLinks: parse failed: ${e.message}")
             return false
-        } ?: return false
+        } ?: run {
+            Log.e(TAG, "loadLinks: episode data is null")
+            return false
+        }
 
         val servers = episodeData.servers ?: emptyList()
         val subtitles = episodeData.subtitles ?: emptyList()
@@ -418,30 +354,10 @@ class AnimelokProvider : MainAPI() {
                         found = true
                     }
                 }
-
-                tip.equals("Abyess", ignoreCase = true) -> {
-                    val langLabel = serverName
-                    val label = "Animelok - Abyess ($langLabel)"
-                    try {
-                        val resolved = resolveAbyessServer(serverUrl)
-                        if (resolved != null) {
-                            callback.invoke(
-                                newExtractorLink(label, label, resolved, type = ExtractorLinkType.M3U8) {
-                                    this.referer = "https://abyssplayer.com/"
-                                    this.headers = mapOf(
-                                        "Origin" to "https://abyssplayer.com",
-                                        "Referer" to "https://abyssplayer.com/",
-                                        "User-Agent" to ua
-                                    )
-                                }
-                            )
-                            found = true
-                        }
-                    } catch (_: Exception) {}
-                }
             }
         }
 
+        Log.d(TAG, "loadLinks: found=$found")
         return found
     }
 
@@ -473,6 +389,7 @@ class AnimelokProvider : MainAPI() {
             val j = parseJson<MultiVideoResponse>(resp.text)
             j.videoSource?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
+            Log.e(TAG, "resolveMultiServer failed: ${e.message}")
             null
         }
     }
@@ -482,48 +399,4 @@ class AnimelokProvider : MainAPI() {
         @JsonProperty("videoSource") val videoSource: String? = null,
         @JsonProperty("hls") val hls: Boolean? = null
     )
-
-    private suspend fun resolveAbyessServer(shortUrl: String): String? {
-        return try {
-            val resp = app.get(shortUrl, headers = mapOf(
-                "User-Agent" to ua,
-                "Referer" to "$mainUrl/"
-            ), allowRedirects = true, timeout = 15_000L)
-            val finalUrl = resp.url
-            if (finalUrl.contains("abyssplayer.com")) {
-                val code = finalUrl.substringAfterLast("/").takeIf { it.isNotBlank() } ?: return null
-                val apiUrl = "https://abyssplayer.com/api/source/$code"
-                val apiResp = app.get(apiUrl, headers = mapOf(
-                    "User-Agent" to ua,
-                    "Referer" to "https://abyssplayer.com/$code",
-                    "Accept" to "application/json"
-                ), timeout = 15_000L)
-                if (apiResp.code == 200) {
-                    val j = parseJson<AbyessResponse>(apiResp.text)
-                    j.data?.firstOrNull()?.file?.takeIf { it.isNotBlank() }
-                } else null
-            } else null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class AbyessResponse(
-        @JsonProperty("data") val data: List<AbyessSource>? = null
-    )
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class AbyessSource(
-        @JsonProperty("file") val file: String? = null,
-        @JsonProperty("label") val label: String? = null
-    )
-
-    private fun stripHtml(s: String): String {
-        return s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<[^>]+>"), "")
-            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
-            .trim()
-    }
 }
