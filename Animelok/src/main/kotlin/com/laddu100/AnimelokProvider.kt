@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
@@ -38,25 +39,32 @@ class AnimelokProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        Log.d(TAG, "getMainPage: section='${request.name}' url='${request.data}'")
         val url = "$mainUrl${request.data}"
         return try {
             val resp = app.get(url, headers = baseHeaders)
+            Log.d(TAG, "getMainPage: response code=${resp.code} len=${resp.text.length}")
             val results = parseSearchResults(resp.text)
+            Log.d(TAG, "getMainPage: parsed ${results.size} results for '${request.name}'")
             newHomePageResponse(request.name, results, hasNext = false)
         } catch (e: Exception) {
-            Log.e(TAG, "getMainPage failed: ${e.message}")
+            Log.e(TAG, "getMainPage FAILED: ${e.message}")
             newHomePageResponse(request.name, emptyList(), hasNext = false)
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        Log.d(TAG, "search: query='$query'")
         if (query.isBlank()) return emptyList()
         val url = "$mainUrl/search?keyword=" + URLEncoder.encode(query, "UTF-8")
         return try {
             val resp = app.get(url, headers = baseHeaders)
-            parseSearchResults(resp.text)
+            Log.d(TAG, "search: response code=${resp.code} len=${resp.text.length}")
+            val results = parseSearchResults(resp.text)
+            Log.d(TAG, "search: parsed ${results.size} results")
+            results
         } catch (e: Exception) {
-            Log.e(TAG, "search failed: ${e.message}")
+            Log.e(TAG, "search FAILED: ${e.message}")
             emptyList()
         }
     }
@@ -151,6 +159,13 @@ class AnimelokProvider : MainAPI() {
         @JsonProperty("url") val url: String? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class EpisodeLoadData(
+        @JsonProperty("slug") val slug: String? = null,
+        @JsonProperty("epNum") val epNum: Int? = null,
+        @JsonProperty("lang") val lang: String? = null
+    )
+
     override suspend fun load(url: String): LoadResponse? {
         val slug = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
         Log.d(TAG, "load: url=$url, slug=$slug")
@@ -161,13 +176,15 @@ class AnimelokProvider : MainAPI() {
             "Referer" to "$mainUrl/watch/$slug"
         )
 
+        Log.d(TAG, "load: fetching episodes/1 for slug=$slug")
         val ep1Url = "$mainUrl/api/anime/$slug/episodes/1"
         val ep1Resp = try {
             app.get(ep1Url, headers = apiHeaders, timeout = 30_000L)
         } catch (e: Exception) {
-            Log.e(TAG, "load: episodes/1 fetch failed: ${e.message}")
+            Log.e(TAG, "load: episodes/1 fetch FAILED: ${e.message}")
             return null
         }
+        Log.d(TAG, "load: episodes/1 response code=${ep1Resp.code} len=${ep1Resp.text.length}")
         if (ep1Resp.code != 200) {
             Log.e(TAG, "load: episodes/1 non-200: ${ep1Resp.code}")
             return null
@@ -176,34 +193,36 @@ class AnimelokProvider : MainAPI() {
         val ep1Data = try {
             parseJson<EpisodeApiResponse>(ep1Resp.text)
         } catch (e: Exception) {
-            Log.e(TAG, "load: episodes/1 parse failed: ${e.message}")
+            Log.e(TAG, "load: episodes/1 parse FAILED: ${e.message}")
             return null
         }
 
         val animeTitle = ep1Data.anime?.title ?: "Anime"
         val languages = ep1Data.episode?.languages ?: emptyList()
-        Log.d(TAG, "load: title=$animeTitle, languages=$languages")
+        val plot = ep1Data.episode?.description?.let { stripHtml(it) }
+        Log.d(TAG, "load: title='$animeTitle', languages=$languages")
 
         val hasJapanese = languages.contains("JAPANESE") || languages.isEmpty()
         val hasEnglish = languages.contains("ENGLISH")
-        val hasIndianLang = listOf("HINDI", "TELUGU", "TAMIL", "MALAYALAM").any { languages.contains(it) }
 
+        Log.d(TAG, "load: fetching episodes for JAPANESE (hasJapanese=$hasJapanese)")
         val subEps = if (hasJapanese) fetchAllEpisodes(slug, "JAPANESE") else emptyList()
+        Log.d(TAG, "load: fetching episodes for ENGLISH (hasEnglish=$hasEnglish)")
         val dubEps = if (hasEnglish) fetchAllEpisodes(slug, "ENGLISH") else emptyList()
-
-        val tvType = TvType.Anime
-        val finalType = if (dubEps.isNotEmpty()) TvType.Anime else tvType
 
         Log.d(TAG, "load: subEps=${subEps.size}, dubEps=${dubEps.size}")
 
+        val finalType = TvType.Anime
+
         return newAnimeLoadResponse(animeTitle, slug, finalType) {
-            this.plot = ep1Data.episode?.description?.let { stripHtml(it) }
+            this.plot = plot
             if (subEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
             if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEps)
         }
     }
 
     private suspend fun fetchAllEpisodes(slug: String, lang: String): List<Episode> {
+        Log.d(TAG, "fetchAllEpisodes: slug=$slug, lang=$lang")
         val episodes = mutableListOf<Episode>()
         val apiHeaders = mapOf(
             "User-Agent" to ua,
@@ -213,17 +232,28 @@ class AnimelokProvider : MainAPI() {
         var page = 0
         while (page < 20) {
             val url = "$mainUrl/api/anime/$slug/episodes-range?page=$page&lang=$lang&pageSize=100"
+            Log.d(TAG, "fetchAllEpisodes: page=$page url=$url")
             try {
                 val resp = app.get(url, headers = apiHeaders, timeout = 30_000L)
-                if (resp.code != 200) break
+                Log.d(TAG, "fetchAllEpisodes: page=$page code=${resp.code} len=${resp.text.length}")
+                if (resp.code != 200) {
+                    Log.e(TAG, "fetchAllEpisodes: page=$page non-200, stopping")
+                    break
+                }
                 val parsed = parseJson<EpisodesRangeResponse>(resp.text)
                 val eps = parsed.episodes ?: break
+                Log.d(TAG, "fetchAllEpisodes: page=$page parsed ${eps.size} episodes")
                 if (eps.isEmpty()) break
                 eps.forEach { ep ->
                     val num = ep.number ?: return@forEach
                     val epName = ep.name?.takeIf { it.isNotBlank() }
                     val fillerSuffix = if (ep.isFiller == true) " (Filler)" else ""
-                    episodes.add(newEpisode("$slug|$num|$lang") {
+                    val loadData = EpisodeLoadData(
+                        slug = slug,
+                        epNum = num,
+                        lang = lang
+                    ).toJson()
+                    episodes.add(newEpisode(loadData) {
                         this.episode = num
                         this.name = if (epName != null) "$epName$fillerSuffix" else "Episode $num$fillerSuffix"
                         this.posterUrl = ep.img
@@ -233,10 +263,11 @@ class AnimelokProvider : MainAPI() {
                 if (eps.size < 100) break
                 page++
             } catch (e: Exception) {
-                Log.e(TAG, "fetchAllEpisodes page=$page failed: ${e.message}")
+                Log.e(TAG, "fetchAllEpisodes: page=$page FAILED: ${e.message}")
                 break
             }
         }
+        Log.d(TAG, "fetchAllEpisodes: total ${episodes.size} episodes for lang=$lang")
         return episodes
     }
 
@@ -246,13 +277,27 @@ class AnimelokProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val parts = data.split("|")
-        if (parts.size < 3) return false
-        val slug = parts[0]
-        val epNum = parts[1].toIntOrNull() ?: return false
-        Log.d(TAG, "loadLinks: slug=$slug epNum=$epNum")
+        Log.d(TAG, "loadLinks: data=$data")
+
+        val loadData = try {
+            parseJson<EpisodeLoadData>(data)
+        } catch (e: Exception) {
+            Log.e(TAG, "loadLinks: failed to parse JSON data: ${e.message}")
+            return false
+        }
+
+        val slug = loadData.slug ?: run {
+            Log.e(TAG, "loadLinks: slug is null")
+            return false
+        }
+        val epNum = loadData.epNum ?: run {
+            Log.e(TAG, "loadLinks: epNum is null")
+            return false
+        }
+        Log.d(TAG, "loadLinks: slug=$slug, epNum=$epNum, lang=${loadData.lang}")
 
         val url = "$mainUrl/api/anime/$slug/episodes/$epNum"
+        Log.d(TAG, "loadLinks: fetching $url")
         val resp = try {
             app.get(url, headers = mapOf(
                 "User-Agent" to ua,
@@ -260,9 +305,10 @@ class AnimelokProvider : MainAPI() {
                 "Referer" to "$mainUrl/watch/$slug"
             ), timeout = 30_000L)
         } catch (e: Exception) {
-            Log.e(TAG, "loadLinks: fetch failed: ${e.message}")
+            Log.e(TAG, "loadLinks: fetch FAILED: ${e.message}")
             return false
         }
+        Log.d(TAG, "loadLinks: response code=${resp.code} len=${resp.text.length}")
         if (resp.code != 200) {
             Log.e(TAG, "loadLinks: non-200: ${resp.code}")
             return false
@@ -271,7 +317,7 @@ class AnimelokProvider : MainAPI() {
         val episodeData = try {
             parseJson<EpisodeApiResponse>(resp.text).episode
         } catch (e: Exception) {
-            Log.e(TAG, "loadLinks: parse failed: ${e.message}")
+            Log.e(TAG, "loadLinks: parse FAILED: ${e.message}")
             return false
         } ?: run {
             Log.e(TAG, "loadLinks: episode data is null")
@@ -280,6 +326,7 @@ class AnimelokProvider : MainAPI() {
 
         val servers = episodeData.servers ?: emptyList()
         val subtitles = episodeData.subtitles ?: emptyList()
+        Log.d(TAG, "loadLinks: ${servers.size} servers, ${subtitles.size} subtitles")
         var found = false
 
         val playHeaders = mapOf(
@@ -291,6 +338,7 @@ class AnimelokProvider : MainAPI() {
             val subUrl = sub.url ?: continue
             if (subUrl.isBlank()) continue
             val subLabel = sub.name ?: "English"
+            Log.d(TAG, "loadLinks: subtitle '$subLabel' -> $subUrl")
             subtitleCallback.invoke(
                 newSubtitleFile(subLabel, subUrl) {
                     this.headers = playHeaders
@@ -304,11 +352,13 @@ class AnimelokProvider : MainAPI() {
             val serverName = server.name ?: "unknown"
             val tip = server.tip ?: ""
             val langs = server.languages ?: emptyList()
+            Log.d(TAG, "loadLinks: server name=$serverName tip=$tip langs=$langs url=${serverUrl.take(80)}")
 
             when {
                 serverName.equals("bato", ignoreCase = true) -> {
                     val langLabel = if (langs.contains("ENGLISH")) "English Dub" else "Japanese Sub"
                     val label = "Animelok - bato ($langLabel)"
+                    Log.d(TAG, "loadLinks: adding bato source '$label'")
                     callback.invoke(
                         newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
                             this.referer = "$mainUrl/"
@@ -319,12 +369,15 @@ class AnimelokProvider : MainAPI() {
                 }
 
                 serverName.equals("pahe", ignoreCase = true) -> {
+                    Log.d(TAG, "loadLinks: parsing pahe JSON: ${serverUrl.take(100)}")
                     try {
                         val qualities = parseJson<List<PaheQuality>>(serverUrl)
+                        Log.d(TAG, "loadLinks: pahe has ${qualities.size} qualities")
                         for (q in qualities) {
                             val qUrl = q.url ?: continue
                             val quality = q.quality ?: "unknown"
                             val label = "Animelok - pahe (Hardsub, $quality)"
+                            Log.d(TAG, "loadLinks: adding pahe source '$label'")
                             callback.invoke(
                                 newExtractorLink(label, label, qUrl, type = ExtractorLinkType.M3U8) {
                                     this.referer = "$mainUrl/"
@@ -333,12 +386,16 @@ class AnimelokProvider : MainAPI() {
                             )
                             found = true
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e(TAG, "loadLinks: pahe JSON parse FAILED: ${e.message}")
+                    }
                 }
 
                 serverName.equals("Multi", ignoreCase = true) || tip.equals("Multi", ignoreCase = true) -> {
+                    Log.d(TAG, "loadLinks: resolving Multi server")
                     val resolved = resolveMultiServer(serverUrl)
                     if (resolved != null) {
+                        Log.d(TAG, "loadLinks: Multi resolved to $resolved")
                         val multiHeaders = mapOf(
                             "Referer" to "https://as-cdn21.top/",
                             "Origin" to "https://as-cdn21.top",
@@ -353,12 +410,18 @@ class AnimelokProvider : MainAPI() {
                             }
                         )
                         found = true
+                    } else {
+                        Log.e(TAG, "loadLinks: Multi resolution FAILED")
                     }
+                }
+
+                else -> {
+                    Log.d(TAG, "loadLinks: skipping server '$serverName' (unsupported)")
                 }
             }
         }
 
-        Log.d(TAG, "loadLinks: found=$found")
+        Log.d(TAG, "loadLinks: END found=$found")
         return found
     }
 
@@ -370,6 +433,7 @@ class AnimelokProvider : MainAPI() {
 
     private suspend fun resolveMultiServer(serverUrl: String): String? {
         val hash = serverUrl.substringAfterLast("/").takeIf { it.isNotBlank() } ?: return null
+        Log.d(TAG, "resolveMultiServer: hash=$hash")
         val postUrl = "https://as-cdn21.top/player/index.php?data=$hash&do=getVideo"
         val postBody = "hash=$hash&r=" + URLEncoder.encode("$mainUrl/", "UTF-8")
         return try {
@@ -386,11 +450,14 @@ class AnimelokProvider : MainAPI() {
                 requestBody = postBody.toRequestBody("application/x-www-form-urlencoded; charset=UTF-8".toMediaType()),
                 timeout = 30_000L
             )
+            Log.d(TAG, "resolveMultiServer: POST response code=${resp.code} len=${resp.text.length}")
             if (resp.code != 200) return null
             val j = parseJson<MultiVideoResponse>(resp.text)
-            j.videoSource?.takeIf { it.isNotBlank() }
+            val src = j.videoSource?.takeIf { it.isNotBlank() }
+            Log.d(TAG, "resolveMultiServer: videoSource=$src")
+            src
         } catch (e: Exception) {
-            Log.e(TAG, "resolveMultiServer failed: ${e.message}")
+            Log.e(TAG, "resolveMultiServer FAILED: ${e.message}")
             null
         }
     }
