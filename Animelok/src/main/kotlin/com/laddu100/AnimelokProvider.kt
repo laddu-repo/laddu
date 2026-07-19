@@ -285,7 +285,7 @@ class AnimelokProvider : MainAPI() {
                     episodes.add(newEpisode(loadData) {
                         this.episode = num
                         this.name = if (epName != null) "$epName$fillerSuffix" else "Episode $num$fillerSuffix"
-                        this.posterUrl = ep.img
+                        this.posterUrl = ep.img?.takeIf { it.isNotBlank() && !it.contains("proxy.animetsu") }
                         this.description = ep.description
                     })
                 }
@@ -407,32 +407,9 @@ class AnimelokProvider : MainAPI() {
                     }
                 }
 
-                serverUrl.startsWith("[") -> {
-                    Log.d(TAG, "loadLinks: parsing pahe JSON")
-                    try {
-                        val qualities = parseJson<List<PaheQuality>>(serverUrl)
-                        Log.d(TAG, "loadLinks: pahe has ${qualities.size} qualities")
-                        for (q in qualities) {
-                            val qUrl = q.url ?: continue
-                            val quality = q.quality ?: "unknown"
-                            val label = "Animelok - Hardsub ($quality)"
-                            Log.d(TAG, "loadLinks: adding pahe source '$label'")
-                            callback.invoke(
-                                newExtractorLink(label, label, qUrl, type = ExtractorLinkType.M3U8) {
-                                    this.referer = "$mainUrl/"
-                                    this.headers = playHeaders
-                                }
-                            )
-                            found = true
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "loadLinks: pahe JSON parse FAILED: ${e.message}")
-                    }
-                }
-
                 serverUrl.contains("anvod") || serverUrl.contains("anvid") || serverUrl.contains(".m3u8") -> {
-                    val label = if (langs.contains("ENGLISH")) "Animelok - Dub (English)" else "Animelok - Sub (Japanese)"
-                    Log.d(TAG, "loadLinks: adding direct m3u8 source '$label'")
+                    val label = if (langs.contains("ENGLISH")) "Animelok - English Dub" else "Animelok - Japanese Sub"
+                    Log.d(TAG, "loadLinks: adding source '$label'")
                     callback.invoke(
                         newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
                             this.referer = "$mainUrl/"
@@ -443,7 +420,7 @@ class AnimelokProvider : MainAPI() {
                 }
 
                 else -> {
-                    Log.d(TAG, "loadLinks: skipping server '$serverName' (unsupported)")
+                    Log.d(TAG, "loadLinks: skipping server '$serverName'")
                 }
             }
         }
