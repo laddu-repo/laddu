@@ -407,8 +407,43 @@ class AnimelokProvider : MainAPI() {
                     }
                 }
 
+                serverUrl.startsWith("[") -> {
+                    Log.d(TAG, "loadLinks: parsing pahe JSON")
+                    try {
+                        val qualities = parseJson<List<PaheQuality>>(serverUrl)
+                        Log.d(TAG, "loadLinks: pahe has ${qualities.size} qualities")
+                        for (q in qualities) {
+                            val qUrl = q.url ?: continue
+                            val quality = q.quality ?: "unknown"
+                            val label = "Animelok - Hardsub ($quality)"
+                            Log.d(TAG, "loadLinks: adding pahe source '$label'")
+                            callback.invoke(
+                                newExtractorLink(label, label, qUrl, type = ExtractorLinkType.M3U8) {
+                                    this.referer = "$mainUrl/"
+                                    this.headers = playHeaders
+                                }
+                            )
+                            found = true
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "loadLinks: pahe JSON parse FAILED: ${e.message}")
+                    }
+                }
+
+                serverUrl.contains("anvod") || serverUrl.contains("anvid") || serverUrl.contains(".m3u8") -> {
+                    val label = if (langs.contains("ENGLISH")) "Animelok - Dub (English)" else "Animelok - Sub (Japanese)"
+                    Log.d(TAG, "loadLinks: adding direct m3u8 source '$label'")
+                    callback.invoke(
+                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
+                            this.referer = "$mainUrl/"
+                            this.headers = playHeaders
+                        }
+                    )
+                    found = true
+                }
+
                 else -> {
-                    Log.d(TAG, "loadLinks: skipping server '$serverName' (not Multi Audio)")
+                    Log.d(TAG, "loadLinks: skipping server '$serverName' (unsupported)")
                 }
             }
         }
