@@ -62,8 +62,13 @@ class AnimelokProvider : MainAPI() {
     private fun parseSearchResults(html: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
 
-        val hrefRegex = Regex("""href="(/anime/[a-f0-9]+)"[^>]*>""")
-        val altRegex = Regex("<img alt=\"([^\"]+)\"")
+        // Match BOTH URL formats:
+        //   /anime/one-piece-21          (slug format — home page, trending)
+        //   /anime/9b1efcffb7cb          (hash format — search page)
+        val hrefRegex = Regex("""href="(/anime/[a-z0-9][a-z0-9-]+)"[^>]*>""")
+        val altRegex = Regex("<img[^>]*alt=\"([^\"]+)\"")
+        val h3Regex = Regex("<h3[^>]*>([^<]+)</h3>")
+        val imgSrcRegex = Regex("""<img[^>]*src="([^"]+)"""")
         val slugRegex = Regex("\"href\":\"(/anime/[a-f0-9]+)\"[^}]*\"slug\":\"([^\"]+)\"")
 
         val slugMap = mutableMapOf<String, String>()
@@ -71,16 +76,24 @@ class AnimelokProvider : MainAPI() {
             slugMap[m.groupValues[1]] = m.groupValues[2]
         }
 
-        val imgRegex = Regex("""<img[^>]*src="([^"]+)"[^>]*/>""")
-
         hrefRegex.findAll(html).forEach { match ->
             val href = match.groupValues[1]
             val after = html.substring(match.range.last, (match.range.last + 2000).coerceAtMost(html.length))
-            val title = altRegex.find(after)?.groupValues?.get(1) ?: return@forEach
-            val decodedTitle = title.replace("&#x27;", "'").replace("&amp;", "&").replace("&quot;", "\"")
+
+            // Try <img alt="..."> first, then <h3>...</h3>
+            val title = altRegex.find(after)?.groupValues?.get(1)
+                ?: h3Regex.find(after)?.groupValues?.get(1)
+                ?: return@forEach
+
+            val decodedTitle = title.replace("&#x27;", "'").replace("&amp;", "&")
+                .replace("&quot;", "\"").replace("&#x2F;", "/").trim()
+
+            if (decodedTitle.length < 2 || decodedTitle.length > 200) return@forEach
+
+            // For hash URLs, look up the slug. For slug URLs, use directly.
             val slug = slugMap[href] ?: href.removePrefix("/anime/")
-            val imgMatch = imgRegex.find(after)
-            val poster = imgMatch?.groupValues?.get(1) ?: ""
+
+            val poster = imgSrcRegex.find(after)?.groupValues?.get(1) ?: ""
 
             results.add(newAnimeSearchResponse(decodedTitle, slug, TvType.Anime) {
                 this.posterUrl = poster
