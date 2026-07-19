@@ -152,8 +152,8 @@ class AnimelokProvider : MainAPI() {
     )
 
     override suspend fun load(url: String): LoadResponse? {
-        val slug = url.removePrefix("$mainUrl/anime/").removePrefix("/")
-        Log.d(TAG, "load: slug=$slug")
+        val slug = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
+        Log.d(TAG, "load: url=$url, slug=$slug")
 
         val apiHeaders = mapOf(
             "User-Agent" to ua,
