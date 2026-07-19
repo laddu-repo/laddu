@@ -192,7 +192,7 @@ class TwoDHiveProvider : MainAPI() {
         }
         if (episodeBrowserIsland != null) {
             val propsStr = episodeBrowserIsland.attr("props").takeIf { it.isNotEmpty() }
-            if (propsStr.isNotEmpty()) {
+            if (!propsStr.isNullOrEmpty()) {
                 try {
                     val props = mapper.readTree(propsStr)
                     val decoded = decodeAstro(props)
