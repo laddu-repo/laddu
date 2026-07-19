@@ -34,9 +34,9 @@ class TwoDHiveProvider : MainAPI() {
     private val mapper = ObjectMapper()
 
     private suspend fun quickGet(url: String, referer: String? = null): String {
-        val headersMap = mutableMapOf("User-Agent" to userAgent)
-        headersMap["Referer"] = referer ?: "$mainUrl/"
-        return app.get(url = url, headers = headersMap).text
+        val headers = mutableMapOf("User-Agent" to userAgent)
+        headers["Referer"] = referer ?: "$mainUrl/"
+        return app.get(url = url, headers = headers).text
     }
 
     private fun parseGrid(soup: Document): List<SearchResponse> {
@@ -47,7 +47,7 @@ class TwoDHiveProvider : MainAPI() {
                 ?: a.selectFirst("h3")?.text()?.trim()
                 ?: a.selectFirst("img")?.attr("alt")?.takeIf { it.isNotBlank() }
                 ?: ""
-            if (title.isBlank() || title.length < 2) return@forEach
+            if (title.length < 2) return@forEach
 
             var posterUrl: String? = null
             val img = a.selectFirst("img")
@@ -153,36 +153,27 @@ class TwoDHiveProvider : MainAPI() {
                 plot = summaryP.text().trim()
             }
         }
-        if (plot.isBlank()) {
+        if (plot.isBlank() && malId != null) {
             try {
-                if (malId != null) {
-                    val apiResp = quickGet("$mainUrl/api/anime/summary?malId=$malId")
-                    val apiJson = mapper.readTree(apiResp)
-                    plot = apiJson.get("anime")?.get("synopsis")?.asText() ?: ""
-                }
+                val apiResp = quickGet("$mainUrl/api/anime/summary?malId=$malId")
+                val apiJson = mapper.readTree(apiResp)
+                plot = apiJson.get("anime")?.get("synopsis")?.asText() ?: ""
             } catch (_: Exception) {}
         }
 
         val genres = mutableListOf<String>()
-        try {
-            if (malId != null) {
+        var year: Int? = null
+        if (malId != null) {
+            try {
                 val apiResp = quickGet("$mainUrl/api/anime/summary?malId=$malId")
                 val apiJson = mapper.readTree(apiResp)
                 val genresNode = apiJson.get("anime")?.get("genres")
                 if (genresNode != null && genresNode.isArray) {
                     genresNode.forEach { g -> genres.add(g.asText()) }
                 }
-            }
-        } catch (_: Exception) {}
-
-        var year: Int? = null
-        try {
-            if (malId != null) {
-                val apiResp = quickGet("$mainUrl/api/anime/summary?malId=$malId")
-                val apiJson = mapper.readTree(apiResp)
                 year = apiJson.get("anime")?.get("year")?.asInt()
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
         if (year == null) {
             soup.select("div, span, p, small").forEach { el ->
                 val text = el.text()
@@ -206,7 +197,6 @@ class TwoDHiveProvider : MainAPI() {
                     val props = mapper.readTree(propsStr)
                     val decoded = decodeAstro(props)
                     totalEpisodes = decoded.get("totalEpisodes")?.asInt() ?: 1
-
                     val episodeMetaNode = decoded.get("episodeMeta")
                     if (episodeMetaNode != null && episodeMetaNode.isArray) {
                         episodeMetaNode.forEach { ep ->
@@ -261,9 +251,7 @@ class TwoDHiveProvider : MainAPI() {
             }
         }
 
-        val tvType = TvType.Anime
-
-        return newAnimeLoadResponse(title, url, tvType) {
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
             this.year = year
             this.plot = plot
@@ -277,18 +265,14 @@ class TwoDHiveProvider : MainAPI() {
         try {
             val apiRespText = app.get(
                 url = "$mainUrl/api/hianime?mal_id=$malId&ep_num=$epNum",
-                headers = mapOf(
-                    "User-Agent" to userAgent,
-                    "Referer" to "$mainUrl/"
-                )
+                headers = mapOf("User-Agent" to userAgent, "Referer" to "$mainUrl/")
             ).text
             val apiJson = mapper.readTree(apiRespText)
             val m3u8 = apiJson.get("m3u8")?.asText()
             if (!m3u8.isNullOrEmpty() && m3u8.contains("/m3u8-proxy")) {
                 return m3u8.substringBefore("/m3u8-proxy") + "/m3u8-proxy"
             }
-        } catch (e: Exception) {
-        }
+        } catch (_: Exception) {}
         return "https://anicloud-hls-proxy.n3779118.workers.dev/m3u8-proxy"
     }
 
@@ -332,7 +316,6 @@ class TwoDHiveProvider : MainAPI() {
                 val animeName = serverItem.get("anime_name")?.asText()?.trim() ?: ""
 
                 val mappedServerName = if (serverName.equals("hydrax", ignoreCase = true)) "hadfree" else serverName
-
                 val isServerDub = isDub || mappedServerName.contains("dub", ignoreCase = true) || animeName.contains("dub", ignoreCase = true)
 
                 if ((type == "dub" && isServerDub) || (type == "sub" && !isServerDub)) {
@@ -342,88 +325,50 @@ class TwoDHiveProvider : MainAPI() {
                                 mappedServerName.equals("hadfree", ignoreCase = true) -> {
                                     val apiResp = app.get(
                                         url = "$mainUrl/api/hadfree?slug=$slug",
-                                        headers = mapOf(
-                                            "User-Agent" to userAgent,
-                                            "Referer" to "$mainUrl/"
-                                        )
+                                        headers = mapOf("User-Agent" to userAgent, "Referer" to "$mainUrl/")
                                     ).text
                                     val streamUrl = mapper.readTree(apiResp).get("streamUrl")?.asText()
                                     if (!streamUrl.isNullOrEmpty()) {
                                         callback(
-                                            newExtractorLink(
-                                                source = "Hadfree",
-                                                name = "Hadfree",
-                                                url = streamUrl,
-                                                type = ExtractorLinkType.VIDEO
-                                            ) {
-                                                this.headers = mapOf(
-                                                    "User-Agent" to userAgent,
-                                                    "Referer" to "$mainUrl/"
-                                                )
+                                            newExtractorLink("Hadfree", "Hadfree", streamUrl, type = ExtractorLinkType.VIDEO) {
+                                                this.headers = mapOf("User-Agent" to userAgent, "Referer" to "$mainUrl/")
                                                 this.referer = "$mainUrl/"
                                             }
                                         )
                                         true
-                                    } else {
-                                        false
-                                    }
+                                    } else false
                                 }
                                 mappedServerName.equals("mp4upload", ignoreCase = true) -> {
-                                    loadExtractor(
-                                        url = "https://www.mp4upload.com/embed-$slug.html",
-                                        referer = epUrl,
-                                        subtitleCallback = subtitleCallback,
-                                        callback = callback
-                                    )
+                                    loadExtractor("https://www.mp4upload.com/embed-$slug.html", epUrl, subtitleCallback, callback)
                                 }
                                 mappedServerName.equals("meta_media_id", ignoreCase = true) -> {
-                                    loadExtractor(
-                                        url = "https://www.facebook.com/video/embed?video_id=$slug",
-                                        referer = epUrl,
-                                        subtitleCallback = subtitleCallback,
-                                        callback = callback
-                                    )
+                                    loadExtractor("https://www.facebook.com/video/embed?video_id=$slug", epUrl, subtitleCallback, callback)
                                 }
                                 mappedServerName.equals("abyssplayer", ignoreCase = true) -> {
-                                    loadExtractor(
-                                        url = "https://abyssplayer.com/$slug",
-                                        referer = epUrl,
-                                        subtitleCallback = subtitleCallback,
-                                        callback = callback
-                                    )
+                                    loadExtractor("https://abyssplayer.com/$slug", epUrl, subtitleCallback, callback)
                                 }
                                 slug.startsWith("http://") || slug.startsWith("https://") -> {
                                     val encodedSlug = slug.replace(" ", "%20")
                                     if (encodedSlug.contains(".mp4") || encodedSlug.contains(".m3u8")) {
                                         callback(
                                             newExtractorLink(
-                                                source = mappedServerName.takeIf { it.isNotEmpty() } ?: "Direct",
-                                                name = mappedServerName.takeIf { it.isNotEmpty() } ?: "Direct Link",
-                                                url = encodedSlug,
+                                                mappedServerName.ifEmpty { "Direct" },
+                                                mappedServerName.ifEmpty { "Direct Link" },
+                                                encodedSlug,
                                                 type = if (encodedSlug.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                                             ) {
-                                                this.headers = mapOf(
-                                                    "User-Agent" to userAgent,
-                                                    "Referer" to "$mainUrl/"
-                                                )
+                                                this.headers = mapOf("User-Agent" to userAgent, "Referer" to "$mainUrl/")
                                                 this.referer = "$mainUrl/"
                                             }
                                         )
                                         true
                                     } else {
-                                        loadExtractor(
-                                            url = encodedSlug,
-                                            referer = epUrl,
-                                            subtitleCallback = subtitleCallback,
-                                            callback = callback
-                                        )
+                                        loadExtractor(encodedSlug, epUrl, subtitleCallback, callback)
                                     }
                                 }
                                 else -> false
                             }
-                        } catch (e: Exception) {
-                            false
-                        }
+                        } catch (_: Exception) { false }
                     })
                 }
             }
@@ -433,14 +378,7 @@ class TwoDHiveProvider : MainAPI() {
             loadedResults.add(async {
                 try {
                     val megaplayUrl = "https://megaplay.buzz/stream/mal/$malId/$epNum/$type"
-                    val playerPageHtml = app.get(
-                        url = megaplayUrl,
-                        headers = mapOf(
-                            "User-Agent" to userAgent,
-                            "Referer" to epUrl
-                        )
-                    ).text
-
+                    val playerPageHtml = app.get(megaplayUrl, headers = mapOf("User-Agent" to userAgent, "Referer" to epUrl)).text
                     val playerPageSoup = Jsoup.parse(playerPageHtml)
                     val playerId = playerPageSoup.selectFirst("#megaplay-player")?.attr("data-id")
                         ?: Regex("""data-id=["'](\d+)""").find(playerPageHtml)?.groupValues?.get(1)
@@ -450,7 +388,7 @@ class TwoDHiveProvider : MainAPI() {
 
                     if (playerId != null) {
                         val sourcesText = app.get(
-                            url = "https://megaplay.buzz/stream/getSources?id=$playerId&type=$type",
+                            "https://megaplay.buzz/stream/getSources?id=$playerId&type=$type",
                             headers = mapOf(
                                 "User-Agent" to userAgent,
                                 "Referer" to megaplayUrl,
@@ -480,19 +418,9 @@ class TwoDHiveProvider : MainAPI() {
 
                         if (!m3u8Url.isNullOrEmpty()) {
                             val displayName = if (type == "sub") "MegaPlay Sub" else "MegaPlay Dub"
-
                             callback(
-                                newExtractorLink(
-                                    source = displayName,
-                                    name = "$displayName (Direct)",
-                                    url = m3u8Url,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.headers = mapOf(
-                                        "User-Agent" to userAgent,
-                                        "Referer" to "https://megaplay.buzz/",
-                                        "Origin" to "https://megaplay.buzz"
-                                    )
+                                newExtractorLink(displayName, "$displayName (Direct)", m3u8Url, type = ExtractorLinkType.M3U8) {
+                                    this.headers = mapOf("User-Agent" to userAgent, "Referer" to "https://megaplay.buzz/", "Origin" to "https://megaplay.buzz")
                                     this.referer = "https://megaplay.buzz/"
                                 }
                             )
@@ -501,31 +429,16 @@ class TwoDHiveProvider : MainAPI() {
                             val encodedTarget = URLEncoder.encode(m3u8Url, "UTF-8")
                             val encodedHeaders = URLEncoder.encode("{\"referer\":\"https://megaplay.buzz/\"}", "UTF-8")
                             val wrappedUrl = "$proxyPrefix?url=$encodedTarget&headers=$encodedHeaders"
-
                             callback(
-                                newExtractorLink(
-                                    source = displayName,
-                                    name = "$displayName (Proxy)",
-                                    url = wrappedUrl,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.headers = mapOf(
-                                        "User-Agent" to userAgent,
-                                        "Referer" to "https://megaplay.buzz/"
-                                    )
+                                newExtractorLink(displayName, "$displayName (Proxy)", wrappedUrl, type = ExtractorLinkType.M3U8) {
+                                    this.headers = mapOf("User-Agent" to userAgent, "Referer" to "https://megaplay.buzz/")
                                     this.referer = "https://megaplay.buzz/"
                                 }
                             )
                             true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                } catch (e: Exception) {
-                    false
-                }
+                        } else false
+                    } else false
+                } catch (_: Exception) { false }
             })
         }
 
