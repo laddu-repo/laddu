@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -354,21 +355,42 @@ class AnimelokProvider : MainAPI() {
             val langs = server.languages ?: emptyList()
             Log.d(TAG, "loadLinks: server name=$serverName tip=$tip langs=$langs url=${serverUrl.take(80)}")
 
+            val langLabel = when {
+                langs.contains("ENGLISH") && !langs.contains("JAPANESE") -> "English"
+                langs.contains("HINDI") -> "Hindi"
+                langs.contains("TAMIL") -> "Tamil"
+                langs.contains("TELUGU") -> "Telugu"
+                langs.contains("MALAYALAM") -> "Malayalam"
+                langs.contains("JAPANESE") && langs.contains("ENGLISH") -> "Multi"
+                langs.size > 1 -> "Multi"
+                else -> serverName
+            }
+
             when {
-                serverName.equals("bato", ignoreCase = true) -> {
-                    val langLabel = if (langs.contains("ENGLISH")) "English Dub" else "Japanese Sub"
-                    val label = "Animelok - bato ($langLabel)"
-                    Log.d(TAG, "loadLinks: adding bato source '$label'")
-                    callback.invoke(
-                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
-                            this.referer = "$mainUrl/"
-                            this.headers = playHeaders
-                        }
-                    )
-                    found = true
+                serverUrl.contains("play.zephyrflick.top") || serverName.contains("multi", ignoreCase = true) || tip.contains("multi", ignoreCase = true) -> {
+                    Log.d(TAG, "loadLinks: resolving Multi server")
+                    val resolved = resolveMultiServer(serverUrl)
+                    if (resolved != null) {
+                        Log.d(TAG, "loadLinks: Multi resolved to $resolved")
+                        val multiHeaders = mapOf(
+                            "Referer" to "https://as-cdn21.top/",
+                            "Origin" to "https://as-cdn21.top",
+                            "User-Agent" to ua
+                        )
+                        val label = "Animelok - Multi ($langLabel)"
+                        callback.invoke(
+                            newExtractorLink(label, label, resolved, type = ExtractorLinkType.M3U8) {
+                                this.referer = "https://as-cdn21.top/"
+                                this.headers = multiHeaders
+                            }
+                        )
+                        found = true
+                    } else {
+                        Log.e(TAG, "loadLinks: Multi resolution FAILED")
+                    }
                 }
 
-                serverName.equals("pahe", ignoreCase = true) -> {
+                serverUrl.startsWith("[") -> {
                     Log.d(TAG, "loadLinks: parsing pahe JSON: ${serverUrl.take(100)}")
                     try {
                         val qualities = parseJson<List<PaheQuality>>(serverUrl)
@@ -376,7 +398,7 @@ class AnimelokProvider : MainAPI() {
                         for (q in qualities) {
                             val qUrl = q.url ?: continue
                             val quality = q.quality ?: "unknown"
-                            val label = "Animelok - pahe (Hardsub, $quality)"
+                            val label = "Animelok - pahe ($langLabel, $quality)"
                             Log.d(TAG, "loadLinks: adding pahe source '$label'")
                             callback.invoke(
                                 newExtractorLink(label, label, qUrl, type = ExtractorLinkType.M3U8) {
@@ -391,32 +413,39 @@ class AnimelokProvider : MainAPI() {
                     }
                 }
 
-                serverName.equals("Multi", ignoreCase = true) || tip.equals("Multi", ignoreCase = true) -> {
-                    Log.d(TAG, "loadLinks: resolving Multi server")
-                    val resolved = resolveMultiServer(serverUrl)
-                    if (resolved != null) {
-                        Log.d(TAG, "loadLinks: Multi resolved to $resolved")
-                        val multiHeaders = mapOf(
-                            "Referer" to "https://as-cdn21.top/",
-                            "Origin" to "https://as-cdn21.top",
-                            "User-Agent" to ua
-                        )
-                        val langLabel = if (langs.size > 1) "Multi" else (langs.firstOrNull() ?: "Multi")
-                        val label = "Animelok - Multi ($langLabel)"
-                        callback.invoke(
-                            newExtractorLink(label, label, resolved, type = ExtractorLinkType.M3U8) {
-                                this.referer = "https://as-cdn21.top/"
-                                this.headers = multiHeaders
-                            }
-                        )
-                        found = true
-                    } else {
-                        Log.e(TAG, "loadLinks: Multi resolution FAILED")
+                serverUrl.contains("anvod") || serverUrl.contains("anivid") || serverUrl.contains(".m3u8") -> {
+                    val label = "Animelok - $serverName ($langLabel)"
+                    Log.d(TAG, "loadLinks: adding direct m3u8 source '$label'")
+                    callback.invoke(
+                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
+                            this.referer = "$mainUrl/"
+                            this.headers = playHeaders
+                        }
+                    )
+                    found = true
+                }
+
+                serverUrl.contains("short.icu") -> {
+                    Log.d(TAG, "loadLinks: trying short.icu URL via loadExtractor")
+                    try {
+                        val loaded = loadExtractor(serverUrl, "$mainUrl/", subtitleCallback, callback)
+                        Log.d(TAG, "loadLinks: loadExtractor result=$loaded for $serverUrl")
+                        if (loaded) found = true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "loadLinks: loadExtractor FAILED for $serverUrl: ${e.message}")
                     }
                 }
 
                 else -> {
-                    Log.d(TAG, "loadLinks: skipping server '$serverName' (unsupported)")
+                    Log.d(TAG, "loadLinks: trying unknown URL as direct link")
+                    val label = "Animelok - $serverName ($langLabel)"
+                    callback.invoke(
+                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.headers = playHeaders
+                        }
+                    )
+                    found = true
                 }
             }
         }
