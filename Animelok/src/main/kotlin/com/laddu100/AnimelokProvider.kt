@@ -104,7 +104,7 @@ class AnimelokProvider : MainAPI() {
 
     private suspend fun fetchAnimeDetail(slug: String): AnimeDetail? {
         val url = "$mainUrl/search?keyword=" + URLEncoder.encode(slug, "UTF-8")
-        val body = "[\"$slug\"]".toByteArray()
+        val postBody = "[\"$slug\"]"
         return try {
             val resp = app.post(
                 url,
@@ -115,7 +115,7 @@ class AnimelokProvider : MainAPI() {
                     "Origin" to mainUrl,
                     "Referer" to "$mainUrl/search?keyword=" + URLEncoder.encode(slug, "UTF-8")
                 ),
-                data = body,
+                requestBody = postBody,
                 timeout = 30_000L
             )
             val text = resp.text
@@ -451,7 +451,7 @@ class AnimelokProvider : MainAPI() {
                     "Referer" to "https://as-cdn21.top/video/$hash",
                     "X-Requested-With" to "XMLHttpRequest"
                 ),
-                data = postBody.toByteArray(),
+                requestBody = postBody,
                 timeout = 30_000L
             )
             if (resp.code != 200) return null
