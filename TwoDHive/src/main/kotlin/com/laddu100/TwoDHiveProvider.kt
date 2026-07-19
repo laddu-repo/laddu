@@ -43,25 +43,34 @@ class TwoDHiveProvider : MainAPI() {
         val results = mutableListOf<SearchResponse>()
         soup.select("a[href*=\"/anime?anime=\"]").forEach { a ->
             val href = a.attr("href")
-            val title = a.selectFirst("h3")?.text()?.trim()
-                ?: a.selectFirst("strong")?.text()?.trim()
-                ?: a.text().trim().replace("Play Now", "").replace("Details", "").trim()
+            val title = a.selectFirst("h3 span.truncate")?.text()?.trim()
+                ?: a.selectFirst("h3")?.text()?.trim()
+                ?: a.selectFirst("img")?.attr("alt")?.takeIf { it.isNotBlank() }
+                ?: ""
             if (title.isBlank() || title.length < 2) return@forEach
 
             var posterUrl: String? = null
-            var parent = a.parent()
-            repeat(5) {
-                if (parent != null && posterUrl == null) {
-                    val img = parent!!.selectFirst("img")
-                    if (img != null) {
-                        val src = img.attr("src").takeIf { it.isNotBlank() }
-                            ?: img.attr("data-src").takeIf { it.isNotBlank() }
-                        if (src != null && (src.contains("anilist") || src.contains("myanimelist") || src.contains("tmdb"))) {
-                            posterUrl = src
+            val img = a.selectFirst("img")
+            if (img != null) {
+                val src = img.attr("src").takeIf { it.isNotBlank() }
+                if (src != null && (src.contains("anilist") || src.contains("myanimelist") || src.contains("tmdb"))) {
+                    posterUrl = src
+                }
+            }
+            if (posterUrl == null) {
+                var parent = a.parent()
+                repeat(5) {
+                    if (parent != null && posterUrl == null) {
+                        val pImg = parent!!.selectFirst("img")
+                        if (pImg != null) {
+                            val src = pImg.attr("src").takeIf { it.isNotBlank() }
+                            if (src != null && (src.contains("anilist") || src.contains("myanimelist") || src.contains("tmdb"))) {
+                                posterUrl = src
+                            }
                         }
                     }
+                    parent = parent?.parent()
                 }
-                parent = parent?.parent()
             }
 
             results.add(newAnimeSearchResponse(title, href, TvType.Anime) {
@@ -252,7 +261,7 @@ class TwoDHiveProvider : MainAPI() {
             }
         }
 
-        val tvType = if (totalEpisodes == 1) TvType.AnimeMovie else TvType.Anime
+        val tvType = TvType.Anime
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
