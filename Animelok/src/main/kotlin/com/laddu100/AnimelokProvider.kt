@@ -124,6 +124,8 @@ class AnimelokProvider : MainAPI() {
     private data class EpisodeData(
         @JsonProperty("number") val number: Int? = null,
         @JsonProperty("name") val name: String? = null,
+        @JsonProperty("description") val description: String? = null,
+        @JsonProperty("img") val img: String? = null,
         @JsonProperty("introStart") val introStart: Int? = null,
         @JsonProperty("introEnd") val introEnd: Int? = null,
         @JsonProperty("outroStart") val outroStart: Int? = null,
