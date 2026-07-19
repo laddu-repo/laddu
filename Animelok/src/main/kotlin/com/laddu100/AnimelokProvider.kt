@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.INFER_TYPE
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import okhttp3.MediaType.Companion.toMediaType
@@ -440,7 +441,7 @@ class AnimelokProvider : MainAPI() {
                     Log.d(TAG, "loadLinks: trying unknown URL as direct link")
                     val label = "Animelok - $serverName ($langLabel)"
                     callback.invoke(
-                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.INFER_TYPE) {
+                        newExtractorLink(label, label, serverUrl, type = INFER_TYPE) {
                             this.referer = "$mainUrl/"
                             this.headers = playHeaders
                         }
