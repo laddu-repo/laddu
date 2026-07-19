@@ -232,22 +232,21 @@ class AnimelokProvider : MainAPI() {
         val plot = ep1Data.episode?.description?.let { stripHtml(it) }
         Log.d(TAG, "load: title='$animeTitle', languages=$languages")
 
-        val hasJapanese = languages.contains("JAPANESE") || languages.isEmpty()
-        val hasEnglish = languages.contains("ENGLISH")
-
-        Log.d(TAG, "load: fetching episodes for JAPANESE (hasJapanese=$hasJapanese)")
-        val subEps = if (hasJapanese) fetchAllEpisodes(slug, "JAPANESE") else emptyList()
-        Log.d(TAG, "load: fetching episodes for ENGLISH (hasEnglish=$hasEnglish)")
-        val dubEps = if (hasEnglish) fetchAllEpisodes(slug, "ENGLISH") else emptyList()
-
-        Log.d(TAG, "load: subEps=${subEps.size}, dubEps=${dubEps.size}")
+        val fetchLang = when {
+            languages.contains("JAPANESE") -> "JAPANESE"
+            languages.contains("ENGLISH") -> "ENGLISH"
+            languages.isNotEmpty() -> languages.first()
+            else -> "JAPANESE"
+        }
+        Log.d(TAG, "load: fetching episodes for lang=$fetchLang")
+        val episodes = fetchAllEpisodes(slug, fetchLang)
+        Log.d(TAG, "load: episodes=${episodes.size}")
 
         val finalType = TvType.Anime
 
         return newAnimeLoadResponse(animeTitle, slug, finalType) {
             this.plot = plot
-            if (subEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
-            if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEps)
+            if (episodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -384,20 +383,9 @@ class AnimelokProvider : MainAPI() {
             val langs = server.languages ?: emptyList()
             Log.d(TAG, "loadLinks: server name=$serverName tip=$tip langs=$langs url=${serverUrl.take(80)}")
 
-            val langLabel = when {
-                langs.contains("ENGLISH") && !langs.contains("JAPANESE") -> "English"
-                langs.contains("HINDI") -> "Hindi"
-                langs.contains("TAMIL") -> "Tamil"
-                langs.contains("TELUGU") -> "Telugu"
-                langs.contains("MALAYALAM") -> "Malayalam"
-                langs.contains("JAPANESE") && langs.contains("ENGLISH") -> "Multi"
-                langs.size > 1 -> "Multi"
-                else -> serverName
-            }
-
             when {
                 serverUrl.contains("play.zephyrflick.top") || serverName.contains("multi", ignoreCase = true) || tip.contains("multi", ignoreCase = true) -> {
-                    Log.d(TAG, "loadLinks: resolving Multi server")
+                    Log.d(TAG, "loadLinks: resolving Multi Audio server")
                     val resolved = resolveMultiServer(serverUrl)
                     if (resolved != null) {
                         Log.d(TAG, "loadLinks: Multi resolved to $resolved")
@@ -406,7 +394,7 @@ class AnimelokProvider : MainAPI() {
                             "Origin" to "https://as-cdn21.top",
                             "User-Agent" to ua
                         )
-                        val label = "Animelok - Multi ($langLabel)"
+                        val label = "Animelok - Multi Audio"
                         callback.invoke(
                             newExtractorLink(label, label, resolved, type = ExtractorLinkType.M3U8) {
                                 this.referer = "https://as-cdn21.top/"
@@ -419,62 +407,8 @@ class AnimelokProvider : MainAPI() {
                     }
                 }
 
-                serverUrl.startsWith("[") -> {
-                    Log.d(TAG, "loadLinks: parsing pahe JSON: ${serverUrl.take(100)}")
-                    try {
-                        val qualities = parseJson<List<PaheQuality>>(serverUrl)
-                        Log.d(TAG, "loadLinks: pahe has ${qualities.size} qualities")
-                        for (q in qualities) {
-                            val qUrl = q.url ?: continue
-                            val quality = q.quality ?: "unknown"
-                            val label = "Animelok - pahe ($langLabel, $quality)"
-                            Log.d(TAG, "loadLinks: adding pahe source '$label'")
-                            callback.invoke(
-                                newExtractorLink(label, label, qUrl, type = ExtractorLinkType.M3U8) {
-                                    this.referer = "$mainUrl/"
-                                    this.headers = playHeaders
-                                }
-                            )
-                            found = true
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "loadLinks: pahe JSON parse FAILED: ${e.message}")
-                    }
-                }
-
-                serverUrl.contains("anvod") || serverUrl.contains("anivid") || serverUrl.contains(".m3u8") -> {
-                    val label = "Animelok - $serverName ($langLabel)"
-                    Log.d(TAG, "loadLinks: adding direct m3u8 source '$label'")
-                    callback.invoke(
-                        newExtractorLink(label, label, serverUrl, type = ExtractorLinkType.M3U8) {
-                            this.referer = "$mainUrl/"
-                            this.headers = playHeaders
-                        }
-                    )
-                    found = true
-                }
-
-                serverUrl.contains("short.icu") -> {
-                    Log.d(TAG, "loadLinks: trying short.icu URL via loadExtractor")
-                    try {
-                        val loaded = loadExtractor(serverUrl, "$mainUrl/", subtitleCallback, callback)
-                        Log.d(TAG, "loadLinks: loadExtractor result=$loaded for $serverUrl")
-                        if (loaded) found = true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "loadLinks: loadExtractor FAILED for $serverUrl: ${e.message}")
-                    }
-                }
-
                 else -> {
-                    Log.d(TAG, "loadLinks: trying unknown URL as direct link")
-                    val label = "Animelok - $serverName ($langLabel)"
-                    callback.invoke(
-                        newExtractorLink(label, label, serverUrl, type = INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.headers = playHeaders
-                        }
-                    )
-                    found = true
+                    Log.d(TAG, "loadLinks: skipping server '$serverName' (not Multi Audio)")
                 }
             }
         }
