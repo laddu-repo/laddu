@@ -77,11 +77,12 @@ class AnimelokProvider : MainAPI() {
         val altRegex = Regex("<img[^>]*alt=\"([^\"]+)\"")
         val h3Regex = Regex("<h3[^>]*>([^<]+)</h3>")
         val imgSrcRegex = Regex("""<img[^>]*src="([^"]+)"""")
-        val slugRegex = Regex("\"href\":\"(/anime/[a-f0-9]+)\"[^}]*\"slug\":\"([^\"]+)\"")
 
+        // RSC data has escaped quotes: \"href\":\"/anime/HASH\"...\"slug\":\"SLUG\"
+        val slugRegexEscaped = Regex("\\\\\"href\\\\\":\\\\\"/anime/([a-f0-9]+)\\\\\"[^}]*\\\\\"slug\\\\\":\\\\\"([^\\\\\"]+)\\\\\"")
         val slugMap = mutableMapOf<String, String>()
-        slugRegex.findAll(html).forEach { m ->
-            slugMap[m.groupValues[1]] = m.groupValues[2]
+        slugRegexEscaped.findAll(html).forEach { m ->
+            slugMap["/anime/${m.groupValues[1]}"] = m.groupValues[2]
         }
 
         hrefRegex.findAll(html).forEach { match ->
@@ -94,7 +95,12 @@ class AnimelokProvider : MainAPI() {
                 .replace("&quot;", "\"").replace("&#x2F;", "/").trim()
             if (decodedTitle.length < 2 || decodedTitle.length > 200) return@forEach
             val slug = slugMap[href] ?: href.removePrefix("/anime/")
-            val poster = imgSrcRegex.find(after)?.groupValues?.get(1) ?: ""
+            var poster = imgSrcRegex.find(after)?.groupValues?.get(1) ?: ""
+            // Unwrap wsrv.nl proxy URLs to get the direct image URL
+            if (poster.contains("wsrv.nl/?url=")) {
+                val encodedUrl = poster.substringAfter("url=").substringBefore("&")
+                poster = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            }
             results.add(newAnimeSearchResponse(decodedTitle, slug, TvType.Anime) {
                 this.posterUrl = poster
             })
@@ -169,7 +175,7 @@ class AnimelokProvider : MainAPI() {
     )
 
     override suspend fun load(url: String): LoadResponse? {
-        val slug = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
+        var slug = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
         Log.d(TAG, "load: url=$url, slug=$slug")
 
         val apiHeaders = mapOf(
@@ -179,14 +185,36 @@ class AnimelokProvider : MainAPI() {
         )
 
         Log.d(TAG, "load: fetching episodes/1 for slug=$slug")
-        val ep1Url = "$mainUrl/api/anime/$slug/episodes/1"
-        val ep1Resp = try {
+        var ep1Url = "$mainUrl/api/anime/$slug/episodes/1"
+        var ep1Resp = try {
             app.get(ep1Url, headers = apiHeaders, timeout = 30_000L)
         } catch (e: Exception) {
             Log.e(TAG, "load: episodes/1 fetch FAILED: ${e.message}")
             return null
         }
         Log.d(TAG, "load: episodes/1 response code=${ep1Resp.code} len=${ep1Resp.text.length}")
+
+        if (ep1Resp.code == 404) {
+            Log.d(TAG, "load: got 404, trying to resolve hash→slug from anime page")
+            val resolvedSlug = resolveSlugFromPage(slug)
+            if (resolvedSlug != null && resolvedSlug != slug) {
+                slug = resolvedSlug
+                Log.d(TAG, "load: resolved slug=$slug")
+                ep1Url = "$mainUrl/api/anime/$slug/episodes/1"
+                ep1Resp = try {
+                    app.get(ep1Url, headers = mapOf(
+                        "User-Agent" to ua,
+                        "Accept" to "*/*",
+                        "Referer" to "$mainUrl/watch/$slug"
+                    ), timeout = 30_000L)
+                } catch (e: Exception) {
+                    Log.e(TAG, "load: episodes/1 retry FAILED: ${e.message}")
+                    return null
+                }
+                Log.d(TAG, "load: retry response code=${ep1Resp.code}")
+            }
+        }
+
         if (ep1Resp.code != 200) {
             Log.e(TAG, "load: episodes/1 non-200: ${ep1Resp.code}")
             return null
@@ -497,6 +525,24 @@ class AnimelokProvider : MainAPI() {
         @JsonProperty("videoSource") val videoSource: String? = null,
         @JsonProperty("hls") val hls: Boolean? = null
     )
+
+    private suspend fun resolveSlugFromPage(hashOrSlug: String): String? {
+        val pageUrl = "$mainUrl/anime/$hashOrSlug"
+        Log.d(TAG, "resolveSlugFromPage: fetching $pageUrl")
+        return try {
+            val resp = app.get(pageUrl, headers = baseHeaders, timeout = 15_000L)
+            val html = resp.text
+            // RSC data has: \"slug\":\"one-piece-21\"
+            val slugRegex = Regex("\\\\\"slug\\\\\":\\\\\"([^\\\\\"]+)\\\\\"")
+            val match = slugRegex.find(html)
+            val slug = match?.groupValues?.get(1)
+            Log.d(TAG, "resolveSlugFromPage: found slug=$slug")
+            slug
+        } catch (e: Exception) {
+            Log.e(TAG, "resolveSlugFromPage FAILED: ${e.message}")
+            null
+        }
+    }
 
     private fun stripHtml(s: String): String {
         return s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
