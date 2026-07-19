@@ -195,10 +195,9 @@ class AnimelokProvider : MainAPI() {
         Log.d(TAG, "load: subEps=${subEps.size}, dubEps=${dubEps.size}")
 
         return newAnimeLoadResponse(animeTitle, slug, finalType) {
-            this.plot = ep1Data.episode?.description
-            if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
+            this.plot = ep1Data.episode?.description?.let { stripHtml(it) }
+            if (subEps.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEps)
             if (dubEps.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEps)
-            if (subEps.isNotEmpty() && dubEps.isEmpty()) addEpisodes(DubStatus.Subbed, subEps)
         }
     }
 
@@ -399,4 +398,12 @@ class AnimelokProvider : MainAPI() {
         @JsonProperty("videoSource") val videoSource: String? = null,
         @JsonProperty("hls") val hls: Boolean? = null
     )
+
+    private fun stripHtml(s: String): String {
+        return s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<[^>]+>"), "")
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            .trim()
+    }
 }
