@@ -114,13 +114,13 @@ private suspend fun tryBypassDomain(domain: String): String {
 
     try {
         val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base))
-        val setCookies = resp.headers("Set-Cookie")
-        for (sc in setCookies) {
+        val setCookies = resp.headers["set-cookie"] ?: ""
+        for (sc in setCookies.split(", t_hash_t=").filter { it.startsWith("t_hash_t=") || it.contains("t_hash_t=") }) {
             if (sc.startsWith("t_hash_t=")) {
                 return sc.substringAfter("t_hash_t=").substringBefore(";")
             }
         }
-        val cookieHeader = resp.headers["Cookie"] ?: ""
+        val cookieHeader = resp.headers["cookie"] ?: "" ?: ""
         val tHashMatch = Regex("t_hash_t=([^;]+)").find(cookieHeader)
         if (tHashMatch != null) return tHashMatch.groupValues[1]
     } catch (_: Exception) { }
@@ -152,7 +152,8 @@ private suspend fun tryBypassDomain(domain: String): String {
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,*/*"
         ))
-        for (sc in verifyResp.headers("Set-Cookie")) {
+        val verifyCookies = verifyResp.headers["set-cookie"] ?: ""
+        for (sc in verifyCookies.split(", ").filter { it.startsWith("t_hash_t=") }) {
             if (sc.startsWith("t_hash_t=")) {
                 return sc.substringAfter("t_hash_t=").substringBefore(";")
             }
