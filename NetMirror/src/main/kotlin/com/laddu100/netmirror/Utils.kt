@@ -111,48 +111,56 @@ private fun bypassHeaders(base: String): Map<String, String> = mapOf(
 
 private suspend fun tryBypassDomain(domain: String): String {
     val base = domain.trimEnd('/')
-    val client = app.baseClient.newBuilder()
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .build()
 
     try {
-        val getReq = Request.Builder()
+        val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base))
+        val setCookies = resp.headers("Set-Cookie")
+        for (sc in setCookies) {
+            if (sc.startsWith("t_hash_t=")) {
+                return sc.substringAfter("t_hash_t=").substringBefore(";")
+            }
+        }
+        val cookieHeader = resp.headers["Cookie"] ?: ""
+        val tHashMatch = Regex("t_hash_t=([^;]+)").find(cookieHeader)
+        if (tHashMatch != null) return tHashMatch.groupValues[1]
+    } catch (_: Exception) { }
+
+    try {
+        val formBody = FormBody.Builder()
+            .add("g-recaptcha-response", UUID.randomUUID().toString())
+            .build()
+        val client = app.baseClient.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+        val postReq = Request.Builder()
             .url("$base/mobile/verify2.php")
-            .get()
+            .post(formBody)
             .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
             .build()
-        client.newCall(getReq).execute().use { resp ->
-            resp.headers("Set-Cookie").forEach { sc ->
-                val name = sc.substringBefore("=", "").trim()
-                val value = sc.substringAfter("=", "").substringBefore(";").trim()
-                if (name.isNotEmpty() && value.isNotEmpty()) {
-                    // collected but not strictly needed
+        client.newCall(postReq).execute().use { response ->
+            for (sc in response.headers("Set-Cookie")) {
+                if (sc.startsWith("t_hash_t=")) {
+                    return sc.substringAfter("t_hash_t=").substringBefore(";")
                 }
             }
         }
     } catch (_: Exception) { }
 
-    val formBody = FormBody.Builder()
-        .add("g-recaptcha-response", UUID.randomUUID().toString())
-        .build()
-    val postReq = Request.Builder()
-        .url("$base/mobile/verify2.php")
-        .post(formBody)
-        .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
-        .build()
-
     return try {
-        client.newCall(postReq).execute().use { response ->
-            Log.d(TAG, "bypass: $base/mobile/verify2.php HTTP ${response.code}")
-            response.headers("Set-Cookie")
-                .firstOrNull { it.startsWith("t_hash_t=") }
-                ?.substringAfter("t_hash_t=")
-                ?.substringBefore(";")
-                .orEmpty()
+        val verifyResp = app.get("https://userver.net52.cc/?jjoii=", headers = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+            "Accept" to "text/html,application/xhtml+xml,*/*"
+        ))
+        for (sc in verifyResp.headers("Set-Cookie")) {
+            if (sc.startsWith("t_hash_t=")) {
+                return sc.substringAfter("t_hash_t=").substringBefore(";")
+            }
         }
-    } catch (e: Exception) {
-        Log.d(TAG, "bypass: $base exception: ${e.message}")
+        val body = verifyResp.text
+        val match = Regex("t_hash_t=([a-f0-9]+)").find(body)
+        match?.groupValues?.get(1) ?: ""
+    } catch (_: Exception) {
         ""
     }
 }
