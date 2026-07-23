@@ -96,7 +96,7 @@ private fun bypassHeaders(base: String): Map<String, String> = mapOf(
     "Cache-Control" to "max-age=0",
     "Connection" to "keep-alive",
     "Origin" to base,
-    "Referer" to "$base/verify2",
+    "Referer" to "$base/mobile/verify2.php",
     "sec-ch-ua" to "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
     "sec-ch-ua-mobile" to "?0",
     "sec-ch-ua-platform" to "\"Windows\"",
@@ -117,7 +117,7 @@ private suspend fun tryBypassDomain(domain: String): String {
 
     try {
         val getReq = Request.Builder()
-            .url("$base/verify2")
+            .url("$base/mobile/verify2.php")
             .get()
             .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
             .build()
@@ -136,14 +136,14 @@ private suspend fun tryBypassDomain(domain: String): String {
         .add("g-recaptcha-response", UUID.randomUUID().toString())
         .build()
     val postReq = Request.Builder()
-        .url("$base/verify.php")
+        .url("$base/mobile/verify2.php")
         .post(formBody)
         .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
         .build()
 
     return try {
         client.newCall(postReq).execute().use { response ->
-            Log.d(TAG, "bypass: $base/verify.php HTTP ${response.code}")
+            Log.d(TAG, "bypass: $base/mobile/verify2.php HTTP ${response.code}")
             response.headers("Set-Cookie")
                 .firstOrNull { it.startsWith("t_hash_t=") }
                 ?.substringAfter("t_hash_t=")
@@ -259,76 +259,93 @@ suspend fun loadNewTvLinks(
     callback: (ExtractorLink) -> Unit,
     subtitleCallback: (SubtitleFile) -> Unit
 ): Boolean {
-    val apiBase = try {
-        resolveApiUrl()
-    } catch (_: Exception) {
-        return false
+    val base = netMirrorWorkingDomain
+    val cookies = mapOf(
+        "t_hash_t" to NetflixMirrorStorage.getCookie().first.orEmpty(),
+        "hd" to "on",
+        "ott" to ott
+    )
+    val playlistPath = when (ott) {
+        "nf" -> "/mobile/playlist.php?id="
+        "hs" -> "/mobile/hs/playlist.php?id="
+        "pv" -> "/mobile/pv/playlist.php?id="
+        else -> "/mobile/playlist.php?id="
     }
-
-    val token = getNewTvUserToken(apiBase, ott)
-    if (token.isEmpty()) return false
-
-    val headers = buildNewTvHeaders(ott, mapOf("Usertoken" to token))
     val resp = try {
-        app.get("$apiBase/newtv/player.php?id=$id", headers = headers).parsedSafe<NewTvPlayerResponse>()
+        app.get("$base$playlistPath$id", headers = playlistHeaders, cookies = cookies, referer = "$base/home")
+            .parsedSafe<PlayListResponse>()
     } catch (_: Exception) {
         null
     } ?: return false
 
-    val videoLink = resp.video_link
-    if (videoLink.isNullOrBlank()) return false
-
-    callback.invoke(
-        newExtractorLink(providerName, providerName, videoLink, type = ExtractorLinkType.M3U8) {
-            this.referer = resp.referer ?: apiBase
+    val sources = resp.sources ?: return false
+    sources.forEach { source ->
+        val file = source.file ?: return@forEach
+        if (file.isNotBlank()) {
+            callback.invoke(
+                newExtractorLink(providerName, providerName, file, type = ExtractorLinkType.M3U8) {
+                    this.referer = base
+                }
+            )
         }
-    )
-    return true
+    }
+
+    resp.tracks?.forEach { track ->
+        val file = track.file ?: return@forEach
+        if (file.isNotBlank()) {
+            subtitleCallback.invoke(SubtitleFile(track.label ?: "English", file))
+        }
+    }
+
+    return sources.isNotEmpty()
 }
+
+private val playlistHeaders = mapOf(
+    "Accept" to "application/json, text/plain, */*",
+    "X-Requested-With" to "XMLHttpRequest",
+    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.Gatu v1.0"
+)
+
+data class PlayListResponse(
+    val status: String? = null,
+    val sources: List<Source>? = null,
+    val tracks: List<Tracks>? = null
+)
 
 suspend fun getNewTvUserToken(apiBase: String, ott: String): String {
     val (savedToken, savedTs) = NetflixMirrorStorage.getUserToken(ott)
     if (!savedToken.isNullOrEmpty() && System.currentTimeMillis() - savedTs < 86_400_000) {
+        Log.d(TAG, "getNewTvUserToken: using cached token for ott=$ott")
         return savedToken
     }
-
-    val otp = fetchOtp(apiBase)
 
     val otpHeaders = mapOf(
         "accept" to "application/json, text/plain, */*",
         "cache-control" to "no-cache, no-store, must-revalidate",
         "Connection" to "Keep-Alive",
         "expires" to "0",
-        "otp" to otp,
+        "otp" to "111111",
         "pragma" to "no-cache",
         "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.Gatu v1.0"
     )
 
     val resp = try {
-        app.get("$apiBase/newtv/otp.php", headers = otpHeaders).parsedSafe<NewTvOtpResponse>()
-    } catch (_: Exception) {
+        val r = app.get("$apiBase/newtv/otp.php", headers = otpHeaders)
+        Log.d(TAG, "getNewTvUserToken: otp.php HTTP ${r.code} body=${r.text.take(200)}")
+        r.parsedSafe<NewTvOtpResponse>()
+    } catch (e: Exception) {
+        Log.e(TAG, "getNewTvUserToken: otp.php exception: ${e.message}")
         null
     } ?: return ""
 
     val newToken = resp.usertoken.orEmpty()
     if (newToken.isNotEmpty()) {
         NetflixMirrorStorage.saveUserToken(ott, newToken)
+        Log.d(TAG, "getNewTvUserToken: got token (${newToken.length} chars)")
+    } else {
+        Log.e(TAG, "getNewTvUserToken: no usertoken in response, status=${resp.status}")
     }
     return newToken
-}
-
-private suspend fun fetchOtp(apiBase: String): String {
-    return try {
-        val html = app.get("$apiBase/", headers = newTvBaseHeaders).text
-        val otpMatch = Regex("""(?m)^\s*const\s+otp\s*=\s*\[(.*?)]""").find(html)
-        val extracted = otpMatch?.groupValues?.get(1)
-        if (!extracted.isNullOrEmpty()) {
-            extracted.split(",").mapNotNull { it.trim().trim('"', '\'').toIntOrNull() }
-                .joinToString("") { it.toChar().toString() }
-        } else "111111"
-    } catch (_: Exception) {
-        "111111"
-    }
 }
 
 @Volatile
