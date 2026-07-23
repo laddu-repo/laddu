@@ -128,10 +128,10 @@ private suspend fun tryBypassDomain(domain: String): String {
     try {
         val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), timeout = 8000L, interceptor = cfKiller)
         val setCookies = resp.headers["set-cookie"] ?: ""
-        val tHashMatch = Regex("t_hash_t=([a-f0-9]+)").find(setCookies)
+        val tHashMatch = Regex("t_hash_t=([^;\\s]+)").find(setCookies)
         if (tHashMatch != null) return tHashMatch.groupValues[1]
         val body = resp.text
-        val bodyMatch = Regex("t_hash_t=([a-f0-9]+)").find(body)
+        val bodyMatch = Regex("t_hash_t=([^;\\s\"<>]+)").find(body)
         if (bodyMatch != null) return bodyMatch.groupValues[1]
     } catch (_: Exception) { }
 
@@ -254,7 +254,7 @@ suspend fun loadNewTvLinks(
         else -> "/mobile/playlist.php?id="
     }
     val resp = try {
-        app.get("$base$playlistPath$id", headers = playlistHeaders, cookies = cookies, referer = "$base/home", interceptor = cfKiller)
+        app.get("$base$playlistPath$id", headers = playlistHeaders, cookies = cookies, referer = "$base/mobile/home?app=1", interceptor = cfKiller)
             .parsedSafe<PlayListResponse>()
     } catch (_: Exception) {
         null
