@@ -8,6 +8,7 @@ import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.USER_AGENT
 import com.lagradost.nicehttp.Requests
 import com.lagradost.nicehttp.ResponseParser
@@ -45,6 +46,7 @@ val JSONParser = object : ResponseParser {
 }
 
 val app = Requests(responseParser = JSONParser).apply {
+val cfKiller = CloudflareKiller()
     defaultHeaders = mapOf("User-Agent" to USER_AGENT)
 }
 
@@ -110,7 +112,7 @@ private suspend fun tryBypassDomain(domain: String): String {
     val base = domain.trimEnd('/')
 
     try {
-        val verifyResp = app.get("https://userver.net52.cc/?jjoii=", headers = mapOf(
+        val verifyResp = app.get("https://userver.net52.cc/?jjoii=", interceptor = cfKiller, headers = mapOf(
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,*/*"
         ), timeout = 5000L)
@@ -123,7 +125,7 @@ private suspend fun tryBypassDomain(domain: String): String {
     } catch (_: Exception) { }
 
     try {
-        val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), timeout = 8000L)
+        val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), timeout = 8000L, interceptor = cfKiller)
         val setCookies = resp.headers["set-cookie"] ?: ""
         val tHashMatch = Regex("t_hash_t=([a-f0-9]+)").find(setCookies)
         if (tHashMatch != null) return tHashMatch.groupValues[1]
@@ -251,7 +253,7 @@ suspend fun loadNewTvLinks(
         else -> "/mobile/playlist.php?id="
     }
     val resp = try {
-        app.get("$base$playlistPath$id", headers = playlistHeaders, cookies = cookies, referer = "$base/home")
+        app.get("$base$playlistPath$id", headers = playlistHeaders, cookies = cookies, referer = "$base/home", interceptor = cfKiller)
             .parsedSafe<PlayListResponse>()
     } catch (_: Exception) {
         null

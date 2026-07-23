@@ -5,6 +5,7 @@ import com.laddu100.netmirror.entities.EpisodesData
 import com.laddu100.netmirror.entities.PostData
 import com.laddu100.netmirror.entities.SearchData
 import com.lagradost.cloudstream3.*
+import com.laddu100.netmirror.cfKiller
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -60,9 +61,9 @@ class PrimeVideoMirrorProvider : MainAPI() {
         )
         val document = app.get(
             "$mainUrl/mobile/home?app=1",
-            cookies = cookies,
+            cookies = cookies, interceptor = cfKiller,
             headers = headers,
-            referer = "$mainUrl/mobile/home?app=1",
+            interceptor = cfKiller, referer = "$mainUrl/mobile/home?app=1",
         ).document
         val items = document.select(".tray-container, #top10").map {
             it.toHomePageList()
@@ -98,7 +99,7 @@ class PrimeVideoMirrorProvider : MainAPI() {
             "ott" to "pv"
         )
         val url = "$mainUrl/mobile/pv/search.php?s=$query&t=${APIHolder.unixTime}"
-        val data = app.get(url, referer = "$mainUrl/home", cookies = cookies).parsed<SearchData>()
+        val data = app.get(url, interceptor = cfKiller, referer = "$mainUrl/home", cookies = cookies).parsed<SearchData>()
 
         return data.searchResult.map {
             newAnimeSearchResponse(it.t, Id(it.id).toJson()) {
@@ -122,7 +123,7 @@ class PrimeVideoMirrorProvider : MainAPI() {
         val data = app.get(
             "$mainUrl/mobile/pv/post.php?id=$id&t=${APIHolder.unixTime}",
             headers,
-            referer = "$mainUrl/home",
+            interceptor = cfKiller, referer = "$mainUrl/home",
             cookies = cookies
         ).parsed<PostData>()
 
@@ -204,7 +205,7 @@ class PrimeVideoMirrorProvider : MainAPI() {
             val data = app.get(
                 "$mainUrl/mobile/pv/episodes.php?s=$sid&series=$eid&t=${APIHolder.unixTime}&page=$pg",
                 headers,
-                referer = "$mainUrl/home",
+                interceptor = cfKiller, referer = "$mainUrl/home",
                 cookies = cookies
             ).parsed<EpisodesData>()
             data.episodes?.mapTo(episodes) {
