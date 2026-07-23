@@ -219,7 +219,7 @@ class DisneyPlusProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val id = parseJson<LoadData>(data).id
-        return loadNewTvLinks(id, "hs", name, callback, subtitleCallback)
+        return loadNewTvLinks(id, "hs", name, callback, subtitleCallback, "/mobile/hs/playlist.php?id=")
     }
 
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {

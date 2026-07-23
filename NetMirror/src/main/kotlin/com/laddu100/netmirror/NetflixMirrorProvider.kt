@@ -236,7 +236,7 @@ class NetflixMirrorProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val id = parseJson<LoadData>(data).id
-        return loadNewTvLinks(id, "nf", name, callback, subtitleCallback)
+        return loadNewTvLinks(id, "nf", name, callback, subtitleCallback, "/mobile/playlist.php?id=")
     }
 
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {

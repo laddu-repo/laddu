@@ -229,7 +229,7 @@ class PrimeVideoMirrorProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val id = parseJson<LoadData>(data).id
-        return loadNewTvLinks(id, "pv", name, callback, subtitleCallback)
+        return loadNewTvLinks(id, "pv", name, callback, subtitleCallback, "/mobile/pv/playlist.php?id=")
     }
 
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
