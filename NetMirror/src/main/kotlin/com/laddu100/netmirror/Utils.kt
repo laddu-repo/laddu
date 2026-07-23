@@ -96,7 +96,7 @@ private fun bypassHeaders(base: String): Map<String, String> = mapOf(
     "Cache-Control" to "max-age=0",
     "Connection" to "keep-alive",
     "Origin" to base,
-    "Referer" to "$base/mobile/verify2.php",
+    "Referer" to "$base/verify2",
     "sec-ch-ua" to "\"Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
     "sec-ch-ua-mobile" to "?0",
     "sec-ch-ua-platform" to "\"Windows\"",
@@ -117,7 +117,7 @@ private suspend fun tryBypassDomain(domain: String): String {
 
     try {
         val getReq = Request.Builder()
-            .url("$base/mobile/verify2.php")
+            .url("$base/verify2")
             .get()
             .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
             .build()
@@ -136,14 +136,14 @@ private suspend fun tryBypassDomain(domain: String): String {
         .add("g-recaptcha-response", UUID.randomUUID().toString())
         .build()
     val postReq = Request.Builder()
-        .url("$base/mobile/verify2.php")
+        .url("$base/verify.php")
         .post(formBody)
         .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
         .build()
 
     return try {
         client.newCall(postReq).execute().use { response ->
-            
+            Log.d(TAG, "bypass: $base/verify.php HTTP ${response.code}")
             response.headers("Set-Cookie")
                 .firstOrNull { it.startsWith("t_hash_t=") }
                 ?.substringAfter("t_hash_t=")
@@ -151,7 +151,7 @@ private suspend fun tryBypassDomain(domain: String): String {
                 .orEmpty()
         }
     } catch (e: Exception) {
-        
+        Log.d(TAG, "bypass: $base exception: ${e.message}")
         ""
     }
 }
@@ -257,8 +257,7 @@ suspend fun loadNewTvLinks(
     ott: String,
     providerName: String,
     callback: (ExtractorLink) -> Unit,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    playlistPath: String = "/mobile/playlist.php?id="
+    subtitleCallback: (SubtitleFile) -> Unit
 ): Boolean {
     val apiBase = try {
         resolveApiUrl()
@@ -271,7 +270,7 @@ suspend fun loadNewTvLinks(
 
     val headers = buildNewTvHeaders(ott, mapOf("Usertoken" to token))
     val resp = try {
-        app.get("$apiBase$playlistPath$id", headers = headers).parsedSafe<NewTvPlayerResponse>()
+        app.get("$apiBase/newtv/player.php?id=$id", headers = headers).parsedSafe<NewTvPlayerResponse>()
     } catch (_: Exception) {
         null
     } ?: return false
@@ -290,37 +289,46 @@ suspend fun loadNewTvLinks(
 suspend fun getNewTvUserToken(apiBase: String, ott: String): String {
     val (savedToken, savedTs) = NetflixMirrorStorage.getUserToken(ott)
     if (!savedToken.isNullOrEmpty() && System.currentTimeMillis() - savedTs < 86_400_000) {
-        
         return savedToken
     }
+
+    val otp = fetchOtp(apiBase)
 
     val otpHeaders = mapOf(
         "accept" to "application/json, text/plain, */*",
         "cache-control" to "no-cache, no-store, must-revalidate",
         "Connection" to "Keep-Alive",
         "expires" to "0",
-        "otp" to "111111",
+        "otp" to otp,
         "pragma" to "no-cache",
         "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.Gatu v1.0"
     )
 
     val resp = try {
-        val r = app.get("$apiBase/mobile/otp.php", headers = otpHeaders)
-        
-        r.parsedSafe<NewTvOtpResponse>()
-    } catch (e: Exception) {
-        
+        app.get("$apiBase/newtv/otp.php", headers = otpHeaders).parsedSafe<NewTvOtpResponse>()
+    } catch (_: Exception) {
         null
     } ?: return ""
 
     val newToken = resp.usertoken.orEmpty()
     if (newToken.isNotEmpty()) {
         NetflixMirrorStorage.saveUserToken(ott, newToken)
-        
-    } else {
-        
     }
     return newToken
+}
+
+private suspend fun fetchOtp(apiBase: String): String {
+    return try {
+        val html = app.get("$apiBase/", headers = newTvBaseHeaders).text
+        val otpMatch = Regex("""(?m)^\s*const\s+otp\s*=\s*\[(.*?)]""").find(html)
+        val extracted = otpMatch?.groupValues?.get(1)
+        if (!extracted.isNullOrEmpty()) {
+            extracted.split(",").mapNotNull { it.trim().trim('"', '\'').toIntOrNull() }
+                .joinToString("") { it.toChar().toString() }
+        } else "111111"
+    } catch (_: Exception) {
+        "111111"
+    }
 }
 
 @Volatile
@@ -339,7 +347,7 @@ suspend fun resolveApiUrl(): String {
     if (!savedBase.isNullOrEmpty() && now - savedTs < 86_400_000) {
         resolvedApiUrl = savedBase
         resolvedApiUrlTime = now
-        
+        Log.d(TAG, "resolveApiUrl: using cached=$savedBase")
         return resolvedApiUrl
     }
 
@@ -351,7 +359,7 @@ suspend fun resolveApiUrl(): String {
         }
         try {
             val r = app.get("$base/checknewtv.php", headers = newTvBaseHeaders)
-            
+            Log.d(TAG, "resolveApiUrl: $base/checknewtv.php HTTP ${r.code}")
             val resp = r.parsedSafe<NewTvTokenResponse>() ?: continue
             val tokenHash = resp.token_hash ?: continue
             val decoded = try {
@@ -360,15 +368,14 @@ suspend fun resolveApiUrl(): String {
                 continue
             }
             if (decoded.startsWith("http")) {
-                val httpsUrl = decoded.replace("http://", "https://")
-                resolvedApiUrl = httpsUrl
+                resolvedApiUrl = decoded
                 resolvedApiUrlTime = System.currentTimeMillis()
-                NetflixMirrorStorage.saveApiBase(httpsUrl)
-                
+                NetflixMirrorStorage.saveApiBase(decoded)
+                Log.d(TAG, "resolveApiUrl: resolved=$decoded")
                 return resolvedApiUrl
             }
         } catch (e: Exception) {
-            
+            Log.d(TAG, "resolveApiUrl: $base failed: ${e.message}")
         }
     }
     throw Exception("Failed to resolve NewTV API base URL")
