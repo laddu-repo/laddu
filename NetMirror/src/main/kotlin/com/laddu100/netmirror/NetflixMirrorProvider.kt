@@ -66,7 +66,6 @@ class NetflixMirrorProvider : MainAPI() {
             "$mainUrl/mobile/home?app=1",
             cookies = cookies, interceptor = cfKiller,
             headers = headers,
-            interceptor = cfKiller, referer = "$mainUrl/mobile/home?app=1",
         ).document
         val items = document.select(".tray-container, #top10").map {
             it.toHomePageList()
