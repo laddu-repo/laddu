@@ -46,9 +46,10 @@ val JSONParser = object : ResponseParser {
 }
 
 val app = Requests(responseParser = JSONParser).apply {
-val cfKiller = CloudflareKiller()
     defaultHeaders = mapOf("User-Agent" to USER_AGENT)
 }
+
+val cfKiller = CloudflareKiller()
 
 inline fun <reified T : Any> parseJson(text: String): T {
     return JSONParser.parse(text, T::class)
