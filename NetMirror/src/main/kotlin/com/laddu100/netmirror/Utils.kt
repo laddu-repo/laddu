@@ -111,29 +111,38 @@ private fun bypassHeaders(base: String): Map<String, String> = mapOf(
 
 private suspend fun tryBypassDomain(domain: String): String {
     val base = domain.trimEnd('/')
+    val userverUrl = "https://userver.net52.cc/?jjoii="
+    val userverHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        "Accept" to "application/json, text/plain, */*"
+    )
+
+    val hash1 = UUID.randomUUID().toString().replace("-", "")
+    val hash2 = UUID.randomUUID().toString().replace("-", "")
+    val ts = System.currentTimeMillis() / 1000
+    val addhash = "$hash1::$hash2::$ts::ni"
 
     try {
-        val verifyResp = app.get("https://userver.net52.cc/?jjoii=", interceptor = cfKiller, headers = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-            "Accept" to "text/html,application/xhtml+xml,*/*"
-        ), timeout = 5000L)
-        val verifyCookies = verifyResp.headers["set-cookie"] ?: ""
-        val tHashMatch = Regex("t_hash_t=([a-f0-9]+)").find(verifyCookies)
-        if (tHashMatch != null) return tHashMatch.groupValues[1]
-        val body = verifyResp.text
-        val bodyMatch = Regex("t_hash_t=([a-f0-9]+)").find(body)
-        if (bodyMatch != null) return bodyMatch.groupValues[1]
+        app.get("$userverUrl$addhash", headers = userverHeaders, timeout = 10000L)
     } catch (_: Exception) { }
 
-    try {
-        val resp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), timeout = 8000L, interceptor = cfKiller)
-        val setCookies = resp.headers["set-cookie"] ?: ""
-        val tHashMatch = Regex("t_hash_t=([^;\\s]+)").find(setCookies)
-        if (tHashMatch != null) return tHashMatch.groupValues[1]
-        val body = resp.text
-        val bodyMatch = Regex("t_hash_t=([^;\\s\"<>]+)").find(body)
-        if (bodyMatch != null) return bodyMatch.groupValues[1]
-    } catch (_: Exception) { }
+    for (i in 0..7) {
+        kotlinx.coroutines.delay(10000L)
+        try {
+            val resp = app.get("$userverUrl$addhash", headers = userverHeaders, timeout = 10000L)
+            val body = resp.text
+            if (body.contains("All Done")) {
+                val cookieMatch = Regex("([a-f0-9]{32}%3A%3A[a-f0-9]{32}%3A%3A\\d+%3A%3A\\w+%3A%3A\\w+)").find(body)
+                if (cookieMatch != null) return cookieMatch.groupValues[1]
+                val setCookie = resp.headers["set-cookie"] ?: ""
+                val tHashMatch = Regex("t_hash_t=([^;\\s]+)").find(setCookie)
+                if (tHashMatch != null) return tHashMatch.groupValues[1]
+                val cookieField = Regex("\"cookie\"\\s*:\\s*\"([^\"]+)\"").find(body)
+                if (cookieField != null) return cookieField.groupValues[1]
+                return addhash.replace("::", "%3A%3A") + "%3A%3Am"
+            }
+        } catch (_: Exception) { }
+    }
 
     return ""
 }
