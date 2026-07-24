@@ -113,30 +113,35 @@ private suspend fun tryBypassDomain(domain: String): String {
     val base = domain.trimEnd('/')
     val userverUrl = "https://userver.net52.cc/?jjoii="
     val userverHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 13; Pixel 5 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/144.0.7559.132 Safari/537.36 /OS.Gatu v3.0",
         "Accept" to "application/json, text/plain, */*"
     )
 
-    var addhash = ""
+    val hash1 = UUID.randomUUID().toString().replace("-", "")
+    val hash2 = UUID.randomUUID().toString().replace("-", "")
+    val ts = System.currentTimeMillis() / 1000
+    val addhash = "$hash1::$hash2::$ts::ni"
+    Log.d(TAG, "addhash: $addhash")
+
     try {
-        val verifyResp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), interceptor = cfKiller, timeout = 30000L)
-        val verifyBody = verifyResp.text
-        Log.d(TAG, "verify2.php response: ${verifyBody.take(300)}")
-        val addhashMatch = Regex("([a-f0-9]{32}::[a-f0-9]{32}::\\d+::\\w+)").find(verifyBody)
-        if (addhashMatch != null) {
-            addhash = addhashMatch.groupValues[1]
-            Log.d(TAG, "addhash: $addhash")
+        val formBody = FormBody.Builder()
+            .add("g-recaptcha-response", UUID.randomUUID().toString())
+            .add("addhash", addhash)
+            .build()
+        val client = app.baseClient.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+        val postReq = Request.Builder()
+            .url("$base/mobile/verify2.php")
+            .post(formBody)
+            .apply { bypassHeaders(base).forEach { (k, v) -> addHeader(k, v) } }
+            .build()
+        client.newCall(postReq).execute().use { response ->
+            Log.d(TAG, "verify2.php POST: ${response.code}")
         }
     } catch (e: Exception) {
-        Log.d(TAG, "verify2.php failed: ${e.message}")
-    }
-
-    if (addhash.isEmpty()) {
-        val hash1 = UUID.randomUUID().toString().replace("-", "")
-        val hash2 = UUID.randomUUID().toString().replace("-", "")
-        val ts = System.currentTimeMillis() / 1000
-        addhash = "$hash1::$hash2::$ts::ni"
-        Log.d(TAG, "addhash (fallback): $addhash")
+        Log.d(TAG, "verify2.php POST failed: ${e.message}")
     }
 
     try {
