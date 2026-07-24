@@ -121,25 +121,35 @@ private suspend fun tryBypassDomain(domain: String): String {
     val hash2 = UUID.randomUUID().toString().replace("-", "")
     val ts = System.currentTimeMillis() / 1000
     val addhash = "$hash1::$hash2::$ts::ni"
+    Log.d(TAG, "addhash: $addhash")
 
     try {
         app.get("$userverUrl$addhash", headers = userverHeaders, timeout = 10000L)
     } catch (_: Exception) { }
 
-    for (i in 0..7) {
-        kotlinx.coroutines.delay(10000L)
+    for (i in 0..5) {
+        kotlinx.coroutines.delay(11000L)
         try {
             val resp = app.get("$userverUrl$addhash", headers = userverHeaders, timeout = 10000L)
             val body = resp.text
+            Log.d(TAG, "verifyCheck: ${body.take(200)}")
             if (body.contains("All Done")) {
-                val cookieMatch = Regex("([a-f0-9]{32}%3A%3A[a-f0-9]{32}%3A%3A\\d+%3A%3A\\w+%3A%3A\\w+)").find(body)
-                if (cookieMatch != null) return cookieMatch.groupValues[1]
                 val setCookie = resp.headers["set-cookie"] ?: ""
                 val tHashMatch = Regex("t_hash_t=([^;\\s]+)").find(setCookie)
-                if (tHashMatch != null) return tHashMatch.groupValues[1]
+                if (tHashMatch != null) {
+                    Log.d(TAG, "newCookie: ${tHashMatch.groupValues[1]}")
+                    return tHashMatch.groupValues[1]
+                }
+                val cookieMatch = Regex("([a-f0-9]{32}%3A%3A[a-f0-9]{32}%3A%3A\\d+%3A%3A\\w+%3A%3A\\w+)").find(body)
+                if (cookieMatch != null) {
+                    Log.d(TAG, "newCookie: ${cookieMatch.groupValues[1]}")
+                    return cookieMatch.groupValues[1]
+                }
                 val cookieField = Regex("\"cookie\"\\s*:\\s*\"([^\"]+)\"").find(body)
-                if (cookieField != null) return cookieField.groupValues[1]
-                return addhash.replace("::", "%3A%3A") + "%3A%3Am"
+                if (cookieField != null) {
+                    Log.d(TAG, "newCookie: ${cookieField.groupValues[1]}")
+                    return cookieField.groupValues[1]
+                }
             }
         } catch (_: Exception) { }
     }
