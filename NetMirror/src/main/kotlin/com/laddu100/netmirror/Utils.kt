@@ -117,11 +117,27 @@ private suspend fun tryBypassDomain(domain: String): String {
         "Accept" to "application/json, text/plain, */*"
     )
 
-    val hash1 = UUID.randomUUID().toString().replace("-", "")
-    val hash2 = UUID.randomUUID().toString().replace("-", "")
-    val ts = System.currentTimeMillis() / 1000
-    val addhash = "$hash1::$hash2::$ts::ni"
-    Log.d(TAG, "addhash: $addhash")
+    var addhash = ""
+    try {
+        val verifyResp = app.get("$base/mobile/verify2.php", headers = bypassHeaders(base), interceptor = cfKiller, timeout = 30000L)
+        val verifyBody = verifyResp.text
+        Log.d(TAG, "verify2.php response: ${verifyBody.take(300)}")
+        val addhashMatch = Regex("([a-f0-9]{32}::[a-f0-9]{32}::\\d+::\\w+)").find(verifyBody)
+        if (addhashMatch != null) {
+            addhash = addhashMatch.groupValues[1]
+            Log.d(TAG, "addhash: $addhash")
+        }
+    } catch (e: Exception) {
+        Log.d(TAG, "verify2.php failed: ${e.message}")
+    }
+
+    if (addhash.isEmpty()) {
+        val hash1 = UUID.randomUUID().toString().replace("-", "")
+        val hash2 = UUID.randomUUID().toString().replace("-", "")
+        val ts = System.currentTimeMillis() / 1000
+        addhash = "$hash1::$hash2::$ts::ni"
+        Log.d(TAG, "addhash (fallback): $addhash")
+    }
 
     try {
         app.get("$userverUrl$addhash", headers = userverHeaders, timeout = 10000L)
