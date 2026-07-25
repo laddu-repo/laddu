@@ -116,26 +116,27 @@ class VCloudExtractor : ExtractorApi() {
     ) {
         Log.d(TAG, "VCloudExtractor: getUrl $url")
         try {
-            // Step 1: Fetch the vcloud.zip page
-            val doc = app.get(url, headers = headers).document
-            Log.d(TAG, "VCloudExtractor: got page, title=${doc.title()}")
+            val response = app.get(url, headers = headers)
+            val html = response.text
+            val doc = response.document
+            Log.d(TAG, "VCloudExtractor: got ${html.length} chars, title=${doc.title()}")
+
+            // Log the first 2000 chars of HTML so we can see the page structure
+            Log.d(TAG, "VCloudExtractor: HTML_PREVIEW: ${html.take(2000)}")
 
             // Step 2: Select "div.main h4 a" → extract href
             val downloadLink = doc.selectFirst("div.main h4 a")?.attr("href")
             Log.d(TAG, "VCloudExtractor: div.main h4 a href = $downloadLink")
 
             if (downloadLink != null && downloadLink.isNotBlank()) {
-                // Step 3: Fetch the download page
                 val fullUrl = if (downloadLink.startsWith("http")) downloadLink else "$mainUrl$downloadLink"
                 Log.d(TAG, "VCloudExtractor: fetching download page $fullUrl")
                 val doc2 = app.get(fullUrl, headers = headers).document
 
-                // Step 4: Select "script:containsData(url)" → extract script data
                 val scriptData = doc2.selectFirst("script:containsData(url)")?.data()
                 Log.d(TAG, "VCloudExtractor: script data = ${scriptData?.take(200)}")
 
                 if (scriptData != null) {
-                    // Step 5: Regex atob(atob('XXX')) → double base64 decode
                     val encoded = Regex("""atob\(atob\('([^']+)'\)\)""").find(scriptData)?.groupValues?.get(1)
                     if (encoded != null) {
                         val decoded1 = try { base64Decode(encoded) } catch (_: Exception) { null }
@@ -147,7 +148,6 @@ class VCloudExtractor : ExtractorApi() {
                         }
                     }
 
-                    // Step 6: Regex var url = 'XXX'
                     val varUrl = Regex("""var\s+url\s*=\s*'([^']*)'""").find(scriptData)?.groupValues?.get(1)
                     Log.d(TAG, "VCloudExtractor: var url = $varUrl")
                     if (varUrl != null && varUrl.startsWith("http")) {
@@ -156,7 +156,6 @@ class VCloudExtractor : ExtractorApi() {
                     }
                 }
 
-                // Step 7-9: Select "div.card-body" → "h2 a.btn" → extract href
                 val cardBody = doc2.selectFirst("div.card-body")
                 if (cardBody != null) {
                     val btns = cardBody.select("h2 a.btn")
@@ -170,20 +169,39 @@ class VCloudExtractor : ExtractorApi() {
                     }
                 }
 
-                // Also check "div.card-header" for title and "i#size" for size
                 val title = doc2.selectFirst("div.card-header")?.text()
                 val size = doc2.selectFirst("i#size")?.text()
                 Log.d(TAG, "VCloudExtractor: title=$title size=$size")
             }
 
-            // Fallback: look for any download links on the original page
-            Log.d(TAG, "VCloudExtractor: fallback - searching all links")
+            // BROADER fallback: collect ALL <a href> links that start with http
+            // and log them so we can see what's on the page
+            Log.d(TAG, "VCloudExtractor: fallback - searching ALL links")
+            var fallbackCount = 0
             for (a in doc.select("a[href]")) {
-                val href = a.attr("href")
-                if (href.contains("download") || href.contains(".mp4") || href.contains(".mkv") ||
-                    href.contains("googleusercontent") || href.contains("drive.google")) {
-                    Log.d(TAG, "VCloudExtractor: fallback link = ${href.take(80)}")
-                    emitVCloudLink(href, callback)
+                val href = a.attr("href").trim()
+                if (href.isBlank() || !href.startsWith("http")) continue
+                if (href.contains("vcloud.zip") || href.contains("cloudflare") ||
+                    href.contains("googleapi") || href.contains("googletagmanager") ||
+                    href.contains("w.org") || href.contains("gmpg")) continue
+                Log.d(TAG, "VCloudExtractor: ALL_LINK [$fallbackCount] = ${href.take(150)}")
+                // Emit ANY external link as a potential download link
+                emitVCloudLink(href, callback)
+                fallbackCount++
+            }
+            Log.d(TAG, "VCloudExtractor: fallback emitted $fallbackCount links")
+
+            // Also search for URLs in script tags and data attributes
+            for (script in doc.select("script")) {
+                val data = script.data()
+                if (data.contains("http") && !data.contains("cloudflare") && !data.contains("google")) {
+                    val urls = Regex("""(https?://[^"'\s<>]+)""").findAll(data).map { it.groupValues[1] }.toList()
+                    for (u in urls) {
+                        if (!u.contains("vcloud") && !u.contains("cloudflare") && !u.contains("google") && !u.contains("w.org")) {
+                            Log.d(TAG, "VCloudExtractor: SCRIPT_URL = ${u.take(150)}")
+                            emitVCloudLink(u, callback)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
