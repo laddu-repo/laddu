@@ -451,29 +451,39 @@ class TheMoviesFlix : MainAPI() {
             return false
         }
 
-        // Process each link in NonCancellable context so they all get a chance
+        // Process ALL links in PARALLEL using async/awaitAll.
+        // This is critical: if one link (e.g. FileBee) times out after 60s,
+        // the other links (fastdl, vcloud, gofile) are already resolved.
+        // Sequential processing was causing 720p/1080p sources to take minutes.
         var foundAny = false
-        for ((index, link) in allLinks.withIndex()) {
-            Log.d(TAG, "loadLinks: [$index/${allLinks.size}] processing: $link")
-            try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    // loadExtractor dispatches to the appropriate ExtractorApi subclass
-                    // based on the URL domain. Our custom extractors (FastDlExtractor,
-                    // VCloudExtractor, GoFileExtractor, FileBeeExtractor) handle
-                    // the specific hosts. For all other hosts, CloudStream's built-in
-                    // extractors are used.
-                    val loaded = try {
-                        loadExtractor(link, "https://nexdrive.fit/", subtitleCallback, callback)
-                    } catch (e: Exception) {
-                        Log.d(TAG, "loadLinks: [$index] loadExtractor FAILED: ${e.message}")
-                        false
+        try {
+            kotlinx.coroutines.coroutineScope {
+                val deferreds = allLinks.mapIndexed { index, link ->
+                    kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.IO) {
+                        Log.d(TAG, "loadLinks: [$index/${allLinks.size}] processing: $link")
+                        try {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                                val loaded = try {
+                                    loadExtractor(link, "https://nexdrive.fit/", subtitleCallback, callback)
+                                } catch (e: Exception) {
+                                    Log.d(TAG, "loadLinks: [$index] loadExtractor FAILED: ${e.message}")
+                                    false
+                                }
+                                Log.d(TAG, "loadLinks: [$index] loadExtractor result: $loaded")
+                                loaded
+                            }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "loadLinks: [$index] EXCEPTION: ${e.message}")
+                            false
+                        }
                     }
-                    Log.d(TAG, "loadLinks: [$index] loadExtractor result: $loaded")
-                    if (loaded) foundAny = true
                 }
-            } catch (e: Exception) {
-                Log.d(TAG, "loadLinks: [$index] EXCEPTION: ${e.message}")
+                // Wait for ALL links to complete in parallel
+                val results = deferreds.awaitAll()
+                foundAny = results.any { it }
             }
+        } catch (e: Exception) {
+            Log.d(TAG, "loadLinks: coroutineScope EXCEPTION: ${e.message}")
         }
 
         Log.d(TAG, "loadLinks: END foundAny=$foundAny")

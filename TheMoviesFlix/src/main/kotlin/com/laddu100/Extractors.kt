@@ -335,7 +335,7 @@ class FileBeeExtractor : ExtractorApi() {
 
         try {
             // Try CloudflareKiller to bypass CF on filebee.xyz
-            val html = app.get(url, headers = headers, interceptor = cfKiller, timeout = 30L).text
+            val html = app.get(url, headers = headers, interceptor = cfKiller, timeout = 10L).text
             Log.d(TAG, "FileBeeExtractor: got ${html.length} chars after CF bypass")
 
             // filebee.xyz is a SPA — the actual content is loaded by JS
