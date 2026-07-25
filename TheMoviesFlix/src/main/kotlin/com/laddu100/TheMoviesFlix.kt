@@ -4,10 +4,16 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import com.lagradost.api.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+
+private const val TAG = "TMF"
 
 class TheMoviesFlix : MainAPI() {
     override var mainUrl = "https://moviesflixhq.com"
@@ -16,15 +22,17 @@ class TheMoviesFlix : MainAPI() {
     override var lang = "en"
     override val hasDownloadSupport = true
     override val hasQuickSearch = false
-    override val supportedTypes = setOf(
-        TvType.Movie,
-        TvType.TvSeries
-    )
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val baseHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language" to "en-US,en;q=0.9"
+    )
+
+    private val internalDomains = listOf(
+        "nexdrive", "mobilejsr", "moviesflix", "wp-", "vglist", "w.org",
+        "cloudflare", "googleapi", "googletagmanager", "font-awesome", "gmpg"
     )
 
     override val mainPage = mainPageOf(
@@ -56,19 +64,17 @@ class TheMoviesFlix : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val href = this.attr("href").ifBlank { return null }
-        val titleRaw = this.attr("title").ifBlank { return null }
+        val href = attr("href").ifBlank { return null }
+        val titleRaw = attr("title").ifBlank { return null }
         val title = cleanTitle(titleRaw)
-        val img = this.selectFirst("img")?.let {
-            it.attr("data-src").ifBlank { it.attr("src") }
-        } ?: ""
+        val img = selectFirst("img")?.let { it.attr("data-src").ifBlank { it.attr("src") } } ?: ""
         val quality = getSearchQuality(titleRaw)
 
         val isSeries = titleRaw.contains("Season", true) ||
-                titleRaw.contains("Series", true) ||
-                titleRaw.contains("Web Series", true) ||
-                titleRaw.contains("TV Show", true) ||
-                Regex("""\bS\d{1,2}\b""", RegexOption.IGNORE_CASE).containsMatchIn(titleRaw)
+            titleRaw.contains("Series", true) ||
+            titleRaw.contains("Web Series", true) ||
+            titleRaw.contains("TV Show", true) ||
+            Regex("""\bS\d{1,2}\b""", RegexOption.IGNORE_CASE).containsMatchIn(titleRaw)
 
         return if (isSeries) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -85,25 +91,20 @@ class TheMoviesFlix : MainAPI() {
 
     private fun cleanTitle(raw: String): String {
         var t = raw
-        t = t.replace(Regex("^Download\\s+", RegexOption.IGNORE_CASE), "")
-        t = t.substringBefore(" 480p").substringBefore(" 720p").substringBefore(" 1080p")
-        t = t.substringBefore(" {Hindi").substringBefore(" {English")
-        t = t.substringBefore(" (Hindi").substringBefore(" (English")
-        t = t.substringBefore(" Hindi Dubbed").substringBefore(" Dual Audio")
-        t = t.substringBefore(" [480p").substringBefore(" [720p").substringBefore(" [1080p")
-        t = t.substringBefore(" Web Dl").substringBefore(" WEB-DL").substringBefore(" BluRay")
-        t = t.substringBefore(" Full Movie").substringBefore(" Complete")
+            .replace(Regex("^Download\\s+", RegexOption.IGNORE_CASE), "")
+        listOf(" 480p", " 720p", " 1080p", " {Hindi", " {English",
+            " (Hindi", " (English", " Hindi Dubbed", " Dual Audio",
+            " [480p", " [720p", " [1080p", " Web Dl", " WEB-DL",
+            " BluRay", " Full Movie", " Complete"
+        ).forEach { t = t.substringBefore(it) }
         return t.trim().trimEnd('(', '-', ':')
     }
 
-    private fun getSearchQuality(text: String): SearchQuality? {
-        return when {
-            text.contains("2160p", true) || text.contains("4K", true) || text.contains("UHD", true) -> SearchQuality.FourK
-            text.contains("1080p", true) || text.contains("FullHD", true) -> SearchQuality.HD
-            text.contains("720p", true) -> SearchQuality.SD
-            text.contains("480p", true) -> SearchQuality.SD
-            else -> null
-        }
+    private fun getSearchQuality(text: String): SearchQuality? = when {
+        text.contains("2160p", true) || text.contains("4K", true) || text.contains("UHD", true) -> SearchQuality.FourK
+        text.contains("1080p", true) || text.contains("FullHD", true) -> SearchQuality.HD
+        text.contains("720p", true) || text.contains("480p", true) -> SearchQuality.SD
+        else -> null
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -128,31 +129,32 @@ class TheMoviesFlix : MainAPI() {
         val poster = doc.selectFirst("meta[property=og:image]")?.attr("content") ?: ""
         val plot = entry.selectFirst("div.mfx-plot-box")?.text()?.trim()
         val year = extractYear(entry) ?: extractYearFromTitle(titleRaw)
-
         val genres = extractListFromInfo(entry, "Genres")
         val cast = extractListFromInfo(entry, "Cast").map { ActorData(Actor(it)) }
         val runtime = extractFieldFromInfo(entry, "Runtime")?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
 
         val imdbLink = entry.selectFirst("div.mfx-imdb a[href*=imdb]")?.attr("href") ?: ""
         val imdbId = Regex("""title/(tt\d+)""").find(imdbLink)?.groupValues?.get(1)
-        val ratingText = entry.selectFirst("div.mfx-imdb a")?.text() ?: ""
-        val rating = Regex("""([\d.]+)/10""").find(ratingText)?.groupValues?.get(1)?.toFloatOrNull()
+        val rating = Regex("""([\d.]+)/10""").find(
+            entry.selectFirst("div.mfx-imdb a")?.text() ?: ""
+        )?.groupValues?.get(1)?.toFloatOrNull()
 
         val trailerId = entry.selectFirst("div.mfx-yt-lazy")?.attr("data-yt-id")
         val trailer = trailerId?.let { "https://www.youtube.com/watch?v=$it" }
 
         val downloadGroups = extractDownloadGroups(entry)
-        val allTextToCheck = titleRaw + " " + pageTitle + " " + url + " " +
+
+        val allText = titleRaw + " " + pageTitle + " " + url + " " +
             downloadGroups.joinToString(" ") { it.label }
-        val isSeries = allTextToCheck.contains("Season", true) ||
-                allTextToCheck.contains("Series", true) ||
-                allTextToCheck.contains("Web Series", true) ||
-                allTextToCheck.contains("TV Show", true) ||
-                allTextToCheck.contains("Episode", true) ||
-                Regex("""\bS\d{1,2}\b""", RegexOption.IGNORE_CASE).containsMatchIn(allTextToCheck)
+        val isSeries = allText.contains("Season", true) ||
+            allText.contains("Series", true) ||
+            allText.contains("Web Series", true) ||
+            allText.contains("TV Show", true) ||
+            allText.contains("Episode", true) ||
+            Regex("""\bS\d{1,2}\b""", RegexOption.IGNORE_CASE).containsMatchIn(allText)
 
         if (isSeries) {
-            val episodes = mutableListOf<com.lagradost.cloudstream3.Episode>()
+            val episodes = mutableListOf<Episode>()
             val seasonGroups = mutableMapOf<Int, MutableList<DownloadGroup>>()
 
             for (group in downloadGroups) {
@@ -162,21 +164,18 @@ class TheMoviesFlix : MainAPI() {
 
             for ((seasonNum, groups) in seasonGroups) {
                 if (groups.isEmpty()) continue
-                val firstGroup = groups.first()
                 val allNexdriveUrls = groups.joinToString("|") { it.redirectUrl }
-                val episodeLinks = resolveNexdriveEpisodes(firstGroup.redirectUrl)
+                val episodeLinks = resolveNexdriveEpisodes(groups.first().redirectUrl)
 
                 if (episodeLinks.isEmpty()) {
-                    val dataStr = "$allNexdriveUrls|$seasonNum|1"
-                    episodes.add(newEpisode(dataStr) {
-                        this.name = firstGroup.label
+                    episodes.add(newEpisode("$allNexdriveUrls|$seasonNum|1") {
+                        this.name = groups.first().label
                         this.episode = 1
                         this.season = seasonNum
                     })
                 } else {
                     for ((epNum, _) in episodeLinks) {
-                        val dataStr = "$allNexdriveUrls|$seasonNum|$epNum"
-                        episodes.add(newEpisode(dataStr) {
+                        episodes.add(newEpisode("$allNexdriveUrls|$seasonNum|$epNum") {
                             this.name = "Episode $epNum"
                             this.episode = epNum
                             this.season = seasonNum
@@ -198,6 +197,7 @@ class TheMoviesFlix : MainAPI() {
             }
         } else {
             val dataStr = downloadGroups.joinToString("\n") { it.redirectUrl }
+            return newMovieLoadResponse(title, url, TvType.Movie, dataStr) {
                 this.posterUrl = poster
                 this.plot = plot
                 this.year = year
@@ -211,52 +211,39 @@ class TheMoviesFlix : MainAPI() {
         }
     }
 
-    private data class DownloadGroup(
-        val label: String,
-        val redirectUrl: String
-    )
+    private data class DownloadGroup(val label: String, val redirectUrl: String)
 
     private fun extractDownloadGroups(entry: Element): List<DownloadGroup> {
-        val groups = mutableListOf<DownloadGroup>()
-        val divs = entry.select("div.mfx-download-group")
-        for (div in divs) {
-            val label = div.selectFirst("h3")?.text()?.trim() ?: continue
-            val link = div.selectFirst("a[href]")?.attr("href") ?: continue
-            if (link.isNotBlank() && link != "#") {
-                groups.add(DownloadGroup(label, link))
-            }
+        return entry.select("div.mfx-download-group").mapNotNull { div ->
+            val label = div.selectFirst("h3")?.text()?.trim() ?: return@mapNotNull null
+            val link = div.selectFirst("a[href]")?.attr("href") ?: return@mapNotNull null
+            if (link.isNotBlank() && link != "#") DownloadGroup(label, link) else null
         }
-        return groups
     }
+
+    private fun isInternalLink(href: String): Boolean = internalDomains.any { href.contains(it) }
 
     private suspend fun resolveNexdriveEpisodes(url: String): List<Pair<Int, List<String>>> {
         return try {
             val fixedUrl = url.replace("mobilejsr.rest", "nexdrive.fit")
             val doc = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/")).document
-            val article = doc.selectFirst("article") ?: return emptyList<Pair<Int, List<String>>>()
+            val article = doc.selectFirst("article") ?: return emptyList()
 
-            val episodes: MutableList<Pair<Int, List<String>>> = ArrayList()
-
+            val episodes: MutableList<Pair<Int, List<String>>> = mutableListOf()
             for (h4 in article.select("h4")) {
                 val text = h4.text().trim()
-                if (!text.contains("Episode", ignoreCase = true)) continue
+                if (!text.contains("Episode", true)) continue
 
                 val epNum = Regex("""Episode[s]?\s*:\s*0*(\d+)""", RegexOption.IGNORE_CASE)
                     .find(text)?.groupValues?.get(1)?.toIntOrNull() ?: continue
 
-                var sibling = h4.nextElementSibling()
                 val links = mutableListOf<String>()
+                var sibling = h4.nextElementSibling()
                 var attempts = 0
                 while (sibling != null && attempts < 3) {
                     for (a in sibling.select("a[href]")) {
                         val href = a.attr("href").trim()
-                        if (href.isNotBlank() && !href.startsWith("#") && href.startsWith("http") &&
-                            !href.contains("nexdrive") && !href.contains("mobilejsr") &&
-                            !href.contains("moviesflix") && !href.contains("wp-") &&
-                            !href.contains("vglist") && !href.contains("w.org") &&
-                            !href.contains("cloudflare") && !href.contains("googleapi") &&
-                            !href.contains("googletagmanager") && !href.contains("font-awesome") &&
-                            !href.contains("gmpg")) {
+                        if (href.isNotBlank() && href.startsWith("http") && !isInternalLink(href)) {
                             links.add(href)
                         }
                     }
@@ -269,41 +256,28 @@ class TheMoviesFlix : MainAPI() {
                     episodes.add(Pair(epNum, links))
                 }
             }
-
-            episodes.toList()
+            episodes
         } catch (e: Exception) {
-            emptyList<Pair<Int, List<String>>>()
+            Log.d(TAG, "resolveNexdriveEpisodes: ${e.message}")
+            emptyList()
         }
     }
 
-                private suspend fun resolveRedirectPage(url: String): List<String> {
+    private suspend fun resolveRedirectPage(url: String): List<String> {
         val fixedUrl = url.replace("mobilejsr.rest", "nexdrive.fit")
         return try {
-            val response = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/"))
-            val html = response.text
-            val doc = response.document
-            val article = doc.selectFirst("article") ?: doc.selectFirst("div.entry-content") ?: run {
-                return emptyList()
-            }
+            val doc = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/")).document
+            val article = doc.selectFirst("article") ?: doc.selectFirst("div.entry-content") ?: return emptyList()
 
-            val allLinks = mutableSetOf<String>()
-
+            val links = mutableSetOf<String>()
             for (a in article.select("a[href]")) {
                 val href = a.attr("href").trim()
-                if (href.isBlank() || href.startsWith("#") || !href.startsWith("http")) continue
-                if (href.contains("nexdrive") || href.contains("mobilejsr") ||
-                    href.contains("moviesflix") || href.contains("wp-") ||
-                    href.contains("vglist") || href.contains("w.org") ||
-                    href.contains("cloudflare") || href.contains("googleapi") ||
-                    href.contains("googletagmanager") || href.contains("font-awesome") ||
-                    href.contains("gmpg")) continue
-                allLinks.add(href)
+                if (href.isBlank() || !href.startsWith("http") || isInternalLink(href)) continue
+                links.add(href)
             }
-            for (link in allLinks) {
-            }
-
-            allLinks.toList()
+            links.toList()
         } catch (e: Exception) {
+            Log.d(TAG, "resolveRedirectPage: ${e.message}")
             emptyList()
         }
     }
@@ -316,24 +290,18 @@ class TheMoviesFlix : MainAPI() {
 
             for (h4 in article.select("h4")) {
                 val text = h4.text().trim()
-                if (!text.contains("Episode", ignoreCase = true)) continue
+                if (!text.contains("Episode", true)) continue
                 val epNum = Regex("""Episode[s]?\s*:\s*0*(\d+)""", RegexOption.IGNORE_CASE)
                     .find(text)?.groupValues?.get(1)?.toIntOrNull() ?: continue
                 if (epNum != episodeNum) continue
 
-                var sibling = h4.nextElementSibling()
                 val links = mutableListOf<String>()
+                var sibling = h4.nextElementSibling()
                 var attempts = 0
                 while (sibling != null && attempts < 3) {
                     for (a in sibling.select("a[href]")) {
                         val href = a.attr("href").trim()
-                        if (href.isNotBlank() && !href.startsWith("#") && href.startsWith("http") &&
-                            !href.contains("nexdrive") && !href.contains("mobilejsr") &&
-                            !href.contains("moviesflix") && !href.contains("wp-") &&
-                            !href.contains("vglist") && !href.contains("w.org") &&
-                            !href.contains("cloudflare") && !href.contains("googleapi") &&
-                            !href.contains("googletagmanager") && !href.contains("font-awesome") &&
-                            !href.contains("gmpg")) {
+                        if (href.isNotBlank() && href.startsWith("http") && !isInternalLink(href)) {
                             links.add(href)
                         }
                     }
@@ -343,26 +311,21 @@ class TheMoviesFlix : MainAPI() {
                 }
                 return links
             }
+
             val allLinks = mutableListOf<String>()
             for (a in article.select("a[href]")) {
                 val href = a.attr("href").trim()
-                if (href.isNotBlank() && !href.startsWith("#") && href.startsWith("http") &&
-                    !href.contains("nexdrive") && !href.contains("mobilejsr") &&
-                    !href.contains("moviesflix") && !href.contains("wp-") &&
-                    !href.contains("vglist") && !href.contains("w.org") &&
-                    !href.contains("cloudflare") && !href.contains("googleapi") &&
-                    !href.contains("googletagmanager") && !href.contains("font-awesome") &&
-                    !href.contains("gmpg")) {
+                if (href.isNotBlank() && href.startsWith("http") && !isInternalLink(href)) {
                     allLinks.add(href)
                 }
             }
             allLinks
         } catch (e: Exception) {
+            Log.d(TAG, "resolveNexdriveEpisodeLinks: ${e.message}")
             emptyList()
         }
     }
 
-                                    //
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -379,79 +342,72 @@ class TheMoviesFlix : MainAPI() {
         val allLinks = mutableListOf<String>()
 
         if (isTvEpisode) {
-            val seasonNum = parts[parts.size - 2].toInt()
-            val episodeNum = parts[parts.size - 1].toInt()
+            val episodeNum = parts.last().toInt()
             val nexdriveUrls = parts.dropLast(2).filter { it.isNotBlank() }
             for (nexdriveUrl in nexdriveUrls) {
                 try {
-                    val episodeLinks = resolveNexdriveEpisodeLinks(nexdriveUrl, episodeNum)
-                    allLinks.addAll(episodeLinks)
+                    allLinks.addAll(resolveNexdriveEpisodeLinks(nexdriveUrl, episodeNum))
                 } catch (e: Exception) {
+                    Log.d(TAG, "loadLinks TV: ${e.message}")
                 }
             }
         } else {
             val redirectUrls = data.split("\n").map { it.trim() }.filter { it.isNotBlank() }
             for (redirectUrl in redirectUrls) {
                 try {
-                    val links = resolveRedirectPage(redirectUrl)
-                    allLinks.addAll(links)
+                    allLinks.addAll(resolveRedirectPage(redirectUrl))
                 } catch (e: Exception) {
+                    Log.d(TAG, "loadLinks: ${e.message}")
                 }
             }
         }
-        if (allLinks.isEmpty()) {
-            return false
-        }
-        // the other links (fastdl, vcloud, gofile) are already resolved.
+
+        if (allLinks.isEmpty()) return false
+
         var foundAny = false
         try {
-            kotlinx.coroutines.coroutineScope {
-                val deferreds = allLinks.mapIndexed { index, link ->
-                    async(kotlinx.coroutines.Dispatchers.IO) {
+            coroutineScope {
+                val results = allLinks.mapIndexed { _, link ->
+                    async(Dispatchers.IO) {
                         try {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                val loaded = try {
+                            withContext(kotlinx.coroutines.NonCancellable) {
+                                try {
                                     loadExtractor(link, "https://nexdrive.fit/", subtitleCallback, callback)
                                 } catch (e: Exception) {
+                                    Log.d(TAG, "extractor: ${e.message}")
                                     false
                                 }
-                                loaded
                             }
                         } catch (e: Exception) {
                             false
                         }
                     }
-                }
-                val results = deferreds.awaitAll()
+                }.awaitAll()
                 foundAny = results.any { it }
             }
         } catch (e: Exception) {
+            Log.d(TAG, "loadLinks: ${e.message}")
         }
+
         return foundAny
     }
 
-    private fun extractYear(entry: Element): Int? {
-        val yearText = entry.selectFirst("div.mfx-info-box li:contains(Released Year)")?.text()
-        return yearText?.let { Regex("""(\d{4})""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
-    }
+    private fun extractYear(entry: Element): Int? =
+        entry.selectFirst("div.mfx-info-box li:contains(Released Year)")?.text()
+            ?.let { Regex("""(\d{4})""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
 
-    private fun extractYearFromTitle(title: String): Int? {
-        return Regex("""(\d{4})""").find(title)?.groupValues?.get(1)?.toIntOrNull()
-    }
+    private fun extractYearFromTitle(title: String): Int? =
+        Regex("""(\d{4})""").find(title)?.groupValues?.get(1)?.toIntOrNull()
 
-    private fun extractSeasonNumber(text: String): Int? {
-        return Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()
+    private fun extractSeasonNumber(text: String): Int? =
+        Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("""\bS(\d+)\b""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()
-    }
 
-    private fun extractFieldFromInfo(entry: Element, fieldName: String): String? {
-        return entry.selectFirst("div.mfx-info-box li:contains($fieldName)")?.text()
-            ?.replace(Regex("$fieldName:\\s*", RegexOption.IGNORE_CASE), "")
-            ?.trim()
-    }
+    private fun extractFieldFromInfo(entry: Element, fieldName: String): String? =
+        entry.selectFirst("div.mfx-info-box li:contains($fieldName)")?.text()
+            ?.replace(Regex("$fieldName:\\s*", RegexOption.IGNORE_CASE), "")?.trim()
 
-    private fun extractListFromInfo(entry: Element, fieldName: String): List<String> {
-        val text = extractFieldFromInfo(entry, fieldName) ?: return emptyList()
-        return text.split(",").map { it.trim() }.filter { it.isNotBlank() }
-    }
+    private fun extractListFromInfo(entry: Element, fieldName: String): List<String> =
+        extractFieldFromInfo(entry, fieldName)?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }
+            ?: emptyList()
 }
