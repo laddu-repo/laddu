@@ -5,6 +5,8 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.api.Log
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
@@ -459,7 +461,7 @@ class TheMoviesFlix : MainAPI() {
         try {
             kotlinx.coroutines.coroutineScope {
                 val deferreds = allLinks.mapIndexed { index, link ->
-                    kotlinx.coroutines.async(kotlinx.coroutines.Dispatchers.IO) {
+                    async(kotlinx.coroutines.Dispatchers.IO) {
                         Log.d(TAG, "loadLinks: [$index/${allLinks.size}] processing: $link")
                         try {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
