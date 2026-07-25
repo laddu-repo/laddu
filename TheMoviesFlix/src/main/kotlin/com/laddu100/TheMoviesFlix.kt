@@ -6,6 +6,8 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.api.Log
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.nodes.Element
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -821,7 +823,7 @@ class TheMoviesFlix : MainAPI() {
                     "Origin" to "https://filebee.xyz",
                     "Referer" to "https://filebee.xyz/"
                 ),
-                requestBody = """{"fileID":"$fileId"}"""
+                requestBody = """{"fileID":"$fileId"}""".toRequestBody("application/json".toMediaType())
             ).text
             Log.d(TAG, "resolveFilePress: API response: ${apiResponse.take(200)}")
             // Look for a download URL in the API response
