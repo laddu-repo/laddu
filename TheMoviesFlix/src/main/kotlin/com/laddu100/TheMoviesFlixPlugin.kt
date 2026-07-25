@@ -9,7 +9,6 @@ class TheMoviesFlixPlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(TheMoviesFlix())
         registerExtractorAPI(FastDlExtractor())
-        registerExtractorAPI(VCloudExtractor())
         registerExtractorAPI(GoFileExtractor())
         registerExtractorAPI(FileBeeExtractor())
     }
