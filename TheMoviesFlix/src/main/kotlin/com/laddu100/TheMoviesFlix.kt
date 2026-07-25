@@ -821,7 +821,7 @@ class TheMoviesFlix : MainAPI() {
                     "Origin" to "https://filebee.xyz",
                     "Referer" to "https://filebee.xyz/"
                 ),
-                data = """{"fileID":"$fileId"}"""
+                requestBody = """{"fileID":"$fileId"}"""
             ).text
             Log.d(TAG, "resolveFilePress: API response: ${apiResponse.take(200)}")
             // Look for a download URL in the API response
