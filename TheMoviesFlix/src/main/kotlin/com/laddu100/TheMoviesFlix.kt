@@ -4,13 +4,10 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import com.lagradost.api.Log
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
-
-private const val TAG = "TMF"
 
 class TheMoviesFlix : MainAPI() {
     override var mainUrl = "https://moviesflixhq.com"
@@ -118,7 +115,6 @@ class TheMoviesFlix : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         mainUrl = FirebaseDomainHelper.getDomain("themoviesflix") ?: mainUrl
-        Log.d(TAG, "load: url=$url mainUrl=$mainUrl")
         val doc = app.get(url, headers = baseHeaders).document
         val entry = doc.selectFirst("div.entry-content") ?: return null
 
@@ -146,8 +142,6 @@ class TheMoviesFlix : MainAPI() {
         val trailer = trailerId?.let { "https://www.youtube.com/watch?v=$it" }
 
         val downloadGroups = extractDownloadGroups(entry)
-        Log.d(TAG, "load: found ${downloadGroups.size} download groups for '$title'")
-
         val allTextToCheck = titleRaw + " " + pageTitle + " " + url + " " +
             downloadGroups.joinToString(" ") { it.label }
         val isSeries = allTextToCheck.contains("Season", true) ||
@@ -204,8 +198,6 @@ class TheMoviesFlix : MainAPI() {
             }
         } else {
             val dataStr = downloadGroups.joinToString("\n") { it.redirectUrl }
-            Log.d(TAG, "load: movie dataStr='${dataStr.take(200)}'")
-            return newMovieLoadResponse(title, url, TvType.Movie, dataStr) {
                 this.posterUrl = poster
                 this.plot = plot
                 this.year = year
@@ -240,7 +232,6 @@ class TheMoviesFlix : MainAPI() {
     private suspend fun resolveNexdriveEpisodes(url: String): List<Pair<Int, List<String>>> {
         return try {
             val fixedUrl = url.replace("mobilejsr.rest", "nexdrive.fit")
-            Log.d(TAG, "resolveNexdriveEpisodes: fetching $fixedUrl")
             val doc = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/")).document
             val article = doc.selectFirst("article") ?: return emptyList<Pair<Int, List<String>>>()
 
@@ -275,32 +266,23 @@ class TheMoviesFlix : MainAPI() {
                 }
 
                 if (links.isNotEmpty()) {
-                    Log.d(TAG, "resolveNexdriveEpisodes: ep $epNum found ${links.size} links")
                     episodes.add(Pair(epNum, links))
                 }
             }
 
             episodes.toList()
         } catch (e: Exception) {
-            Log.d(TAG, "resolveNexdriveEpisodes: FAILED ${e.message}")
             emptyList<Pair<Int, List<String>>>()
         }
     }
 
-    // ============================================================
-    //  resolveRedirectPage — fetch nexdrive page, get ALL download links
-    // ============================================================
-    private suspend fun resolveRedirectPage(url: String): List<String> {
+                private suspend fun resolveRedirectPage(url: String): List<String> {
         val fixedUrl = url.replace("mobilejsr.rest", "nexdrive.fit")
-        Log.d(TAG, "resolveRedirectPage: fetching $fixedUrl")
         return try {
             val response = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/"))
             val html = response.text
-            Log.d(TAG, "resolveRedirectPage: got ${html.length} chars")
-
             val doc = response.document
             val article = doc.selectFirst("article") ?: doc.selectFirst("div.entry-content") ?: run {
-                Log.d(TAG, "resolveRedirectPage: NO article found!")
                 return emptyList()
             }
 
@@ -317,22 +299,17 @@ class TheMoviesFlix : MainAPI() {
                     href.contains("gmpg")) continue
                 allLinks.add(href)
             }
-
-            Log.d(TAG, "resolveRedirectPage: found ${allLinks.size} external links")
             for (link in allLinks) {
-                Log.d(TAG, "resolveRedirectPage: LINK → $link")
             }
 
             allLinks.toList()
         } catch (e: Exception) {
-            Log.d(TAG, "resolveRedirectPage: FAILED for $fixedUrl: ${e.message}")
             emptyList()
         }
     }
 
     private suspend fun resolveNexdriveEpisodeLinks(url: String, episodeNum: Int): List<String> {
         val fixedUrl = url.replace("mobilejsr.rest", "nexdrive.fit")
-        Log.d(TAG, "resolveNexdriveEpisodeLinks: fetching $fixedUrl for episode $episodeNum")
         return try {
             val doc = app.get(fixedUrl, headers = baseHeaders + ("Referer" to "$mainUrl/")).document
             val article = doc.selectFirst("article") ?: return emptyList()
@@ -364,11 +341,8 @@ class TheMoviesFlix : MainAPI() {
                     sibling = sibling.nextElementSibling()
                     attempts++
                 }
-                Log.d(TAG, "resolveNexdriveEpisodeLinks: ep $episodeNum found ${links.size} links")
                 return links
             }
-
-            // Fallback: return ALL download links
             val allLinks = mutableListOf<String>()
             for (a in article.select("a[href]")) {
                 val href = a.attr("href").trim()
@@ -382,31 +356,19 @@ class TheMoviesFlix : MainAPI() {
                     allLinks.add(href)
                 }
             }
-            Log.d(TAG, "resolveNexdriveEpisodeLinks: fallback found ${allLinks.size} links")
             allLinks
         } catch (e: Exception) {
-            Log.d(TAG, "resolveNexdriveEpisodeLinks: FAILED: ${e.message}")
             emptyList()
         }
     }
 
-    // ============================================================
-    //  loadLinks — main entry point
-    // ============================================================
-    //  CRITICAL: Uses NonCancellable context for each link so that
-    //  if one link times out, the others still get processed.
-    //  Each link is passed to loadExtractor() which dispatches to the
-    //  appropriate ExtractorApi subclass (FastDlExtractor, VCloudExtractor,
-    //  GoFileExtractor, FileBeeExtractor) based on URL domain.
-    //
+                                    //
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d(TAG, "========================================")
-        Log.d(TAG, "loadLinks: START data='${data.take(300)}'")
         if (data.isBlank()) return false
 
         val parts = data.split("|")
@@ -417,78 +379,54 @@ class TheMoviesFlix : MainAPI() {
         val allLinks = mutableListOf<String>()
 
         if (isTvEpisode) {
-            Log.d(TAG, "loadLinks: TV episode mode")
             val seasonNum = parts[parts.size - 2].toInt()
             val episodeNum = parts[parts.size - 1].toInt()
             val nexdriveUrls = parts.dropLast(2).filter { it.isNotBlank() }
-            Log.d(TAG, "loadLinks: season=$seasonNum episode=$episodeNum nexdriveUrls=${nexdriveUrls.size}")
-
             for (nexdriveUrl in nexdriveUrls) {
                 try {
                     val episodeLinks = resolveNexdriveEpisodeLinks(nexdriveUrl, episodeNum)
-                    Log.d(TAG, "loadLinks: got ${episodeLinks.size} links from nexdrive for ep $episodeNum")
                     allLinks.addAll(episodeLinks)
                 } catch (e: Exception) {
-                    Log.d(TAG, "loadLinks: TV nexdrive fetch FAILED for $nexdriveUrl: ${e.message}")
                 }
             }
         } else {
-            Log.d(TAG, "loadLinks: Movie mode")
             val redirectUrls = data.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-            Log.d(TAG, "loadLinks: ${redirectUrls.size} redirect URLs to process")
-
             for (redirectUrl in redirectUrls) {
                 try {
                     val links = resolveRedirectPage(redirectUrl)
                     allLinks.addAll(links)
                 } catch (e: Exception) {
-                    Log.d(TAG, "loadLinks: redirect fetch FAILED for $redirectUrl: ${e.message}")
                 }
             }
         }
-
-        Log.d(TAG, "loadLinks: total ${allLinks.size} links to resolve")
         if (allLinks.isEmpty()) {
-            Log.d(TAG, "loadLinks: no links found, returning false")
             return false
         }
-
-        // Process ALL links in PARALLEL using async/awaitAll.
-        // This is critical: if one link (e.g. FileBee) times out after 60s,
         // the other links (fastdl, vcloud, gofile) are already resolved.
-        // Sequential processing was causing 720p/1080p sources to take minutes.
         var foundAny = false
         try {
             kotlinx.coroutines.coroutineScope {
                 val deferreds = allLinks.mapIndexed { index, link ->
                     async(kotlinx.coroutines.Dispatchers.IO) {
-                        Log.d(TAG, "loadLinks: [$index/${allLinks.size}] processing: $link")
                         try {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                                 val loaded = try {
                                     loadExtractor(link, "https://nexdrive.fit/", subtitleCallback, callback)
                                 } catch (e: Exception) {
-                                    Log.d(TAG, "loadLinks: [$index] loadExtractor FAILED: ${e.message}")
                                     false
                                 }
-                                Log.d(TAG, "loadLinks: [$index] loadExtractor result: $loaded")
                                 loaded
                             }
                         } catch (e: Exception) {
-                            Log.d(TAG, "loadLinks: [$index] EXCEPTION: ${e.message}")
                             false
                         }
                     }
                 }
-                // Wait for ALL links to complete in parallel
                 val results = deferreds.awaitAll()
                 foundAny = results.any { it }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "loadLinks: coroutineScope EXCEPTION: ${e.message}")
         }
-
-        Log.d(TAG, "loadLinks: END foundAny=$foundAny")
         return foundAny
     }
 
