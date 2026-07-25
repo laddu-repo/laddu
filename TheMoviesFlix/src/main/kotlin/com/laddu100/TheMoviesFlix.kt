@@ -530,7 +530,21 @@ class TheMoviesFlix : MainAPI() {
                         }
                     )
                     true
-                } else false
+                } else {
+                    // Emit original URL as fallback so user can open externally
+                    callback.invoke(
+                        newExtractorLink(
+                            source = "TheMoviesFlix",
+                            name = "V-Cloud [Open Externally]",
+                            url = link,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.quality = quality
+                            this.referer = "https://nexdrive.fit/"
+                        }
+                    )
+                    true
+                }
             }
             link.contains("filebee") || link.contains("filepress") -> {
                 Log.d(TAG, "processSingleLink: → filepress resolver")
@@ -548,64 +562,72 @@ class TheMoviesFlix : MainAPI() {
                         }
                     )
                     true
-                } else false
+                } else {
+                    // Emit original URL as fallback
+                    callback.invoke(
+                        newExtractorLink(
+                            source = "TheMoviesFlix",
+                            name = "FilePress [Open Externally]",
+                            url = link,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.quality = quality
+                            this.referer = "https://nexdrive.fit/"
+                        }
+                    )
+                    true
+                }
             }
             link.contains("megaup") -> {
                 Log.d(TAG, "processSingleLink: → megaup resolver")
                 val directUrl = resolveMegaUp(link)
                 Log.d(TAG, "processSingleLink: megaup result: ${directUrl?.take(80) ?: "null"}")
-                if (directUrl != null) {
-                    callback.invoke(
-                        newExtractorLink(
-                            source = "TheMoviesFlix",
-                            name = "MegaUp",
-                            url = directUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = quality
-                            this.referer = "https://megaup.net/"
-                        }
-                    )
-                    true
-                } else false
+                callback.invoke(
+                    newExtractorLink(
+                        source = "TheMoviesFlix",
+                        name = "MegaUp",
+                        url = directUrl ?: link,
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = quality
+                        this.referer = "https://megaup.net/"
+                    }
+                )
+                true
             }
             link.contains("vikingfile") -> {
                 Log.d(TAG, "processSingleLink: → vikingfile resolver")
                 val directUrl = resolveVikingFile(link)
                 Log.d(TAG, "processSingleLink: vikingfile result: ${directUrl?.take(80) ?: "null"}")
-                if (directUrl != null) {
-                    callback.invoke(
-                        newExtractorLink(
-                            source = "TheMoviesFlix",
-                            name = "VikingFile",
-                            url = directUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = quality
-                            this.referer = "https://vikingfile.com/"
-                        }
-                    )
-                    true
-                } else false
+                callback.invoke(
+                    newExtractorLink(
+                        source = "TheMoviesFlix",
+                        name = if (directUrl != null) "VikingFile" else "VikingFile [Open Externally]",
+                        url = directUrl ?: link,
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = quality
+                        this.referer = "https://vikingfile.com/"
+                    }
+                )
+                true
             }
             link.contains("gofile") -> {
                 Log.d(TAG, "processSingleLink: → gofile resolver")
                 val directUrl = resolveGoFile(link)
                 Log.d(TAG, "processSingleLink: gofile result: ${directUrl?.take(80) ?: "null"}")
-                if (directUrl != null) {
-                    callback.invoke(
-                        newExtractorLink(
-                            source = "TheMoviesFlix",
-                            name = "GoFile",
-                            url = directUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = quality
-                            this.referer = "https://gofile.io/"
-                        }
-                    )
-                    true
-                } else false
+                callback.invoke(
+                    newExtractorLink(
+                        source = "TheMoviesFlix",
+                        name = if (directUrl != null) "GoFile" else "GoFile [Open Externally]",
+                        url = directUrl ?: link,
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = quality
+                        this.referer = "https://gofile.io/"
+                    }
+                )
+                true
             }
             link.contains("1fichier") -> {
                 Log.d(TAG, "processSingleLink: → 1fichier resolver")
@@ -708,22 +730,59 @@ class TheMoviesFlix : MainAPI() {
     //
     private suspend fun resolveVCloud(url: String): String? {
         Log.d(TAG, "resolveVCloud: fetching $url")
+        val extractScript = """
+            (function() {
+                try {
+                    if (document.title.includes('Just a moment') || document.title.includes('Attention')) {
+                        return 'CF:' + document.title;
+                    }
+                    var links = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < links.length; i++) {
+                        var h = links[i].href;
+                        if (h && (h.includes('.mp4') || h.includes('.mkv') || h.includes('.webm') ||
+                            h.includes('googleusercontent') || h.includes('drive.google') ||
+                            h.includes('download') || h.includes('/dl/') || h.includes('vcloud.zip/dl'))) {
+                            return 'URL:' + h;
+                        }
+                    }
+                    var vids = document.querySelectorAll('video[src], source[src]');
+                    for (var i = 0; i < vids.length; i++) {
+                        return 'URL:' + vids[i].src;
+                    }
+                    return 'NOTFOUND:' + window.location.href + ':' + document.title;
+                } catch(e) { return 'ERR:' + e.message; }
+            })();
+        """.trimIndent()
+
         return try {
+            var scriptResult: String? = null
             val (request, _) = WebViewResolver(
-                interceptUrl = Regex("""\.(mp4|mkv|webm|m3u8|download)"""),
+                interceptUrl = Regex("""."""),
                 userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
                 useOkhttp = false,
                 additionalUrls = listOf(Regex(""".""")),
-                script = null,
-                scriptCallback = null,
-                timeout = 15_000L  // 15s, not 30s — don't eat the entire loadLinks budget
+                script = extractScript,
+                scriptCallback = { result ->
+                    scriptResult = result
+                    Log.d(TAG, "resolveVCloud: script result: ${result?.take(200)}")
+                },
+                timeout = 20_000L
             ).resolveUsingWebView(url) { req ->
                 val reqUrl = req.url.toString()
                 reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
                 reqUrl.contains(".webm") || reqUrl.contains(".m3u8") ||
-                reqUrl.contains("googleusercontent") || reqUrl.contains("drive.google")
+                reqUrl.contains("googleusercontent") || reqUrl.contains("drive.google") ||
+                reqUrl.contains("/dl/") || reqUrl.contains("download")
             }
 
+            // Check script result first
+            if (scriptResult != null && scriptResult!!.startsWith("URL:")) {
+                val extracted = scriptResult!!.substring(4)
+                Log.d(TAG, "resolveVCloud: script extracted: $extracted")
+                return extracted
+            }
+
+            // Check intercepted request
             if (request != null) {
                 val finalUrl = request.url.toString()
                 Log.d(TAG, "resolveVCloud: WebView found: $finalUrl")
@@ -733,7 +792,7 @@ class TheMoviesFlix : MainAPI() {
                     return finalUrl
                 }
             }
-            Log.d(TAG, "resolveVCloud: no video URL found via WebView")
+            Log.d(TAG, "resolveVCloud: no video URL found. Script result: $scriptResult")
             null
         } catch (e: Exception) {
             Log.d(TAG, "resolveVCloud: FAILED: ${e.message}")
@@ -749,44 +808,89 @@ class TheMoviesFlix : MainAPI() {
     //
     private suspend fun resolveFilePress(url: String): String? {
         Log.d(TAG, "resolveFilePress: fetching $url")
-        return try {
-            // Try app.get first (in case CF is not always active)
-            val html = app.get(url, headers = baseHeaders + ("Referer" to "$mainUrl/")).text
-            Log.d(TAG, "resolveFilePress: got ${html.length} chars")
+        val fileId = url.substringAfterLast("/")
+        Log.d(TAG, "resolveFilePress: fileId=$fileId")
 
-            if (html.contains("Just a moment") || html.contains("challenge")) {
-                Log.d(TAG, "resolveFilePress: Cloudflare challenge detected, trying WebView")
-                // Use WebView to bypass Cloudflare
-                val (request, _) = WebViewResolver(
-                    interceptUrl = Regex("""\.(mp4|mkv|webm|m3u8|download)"""),
-                    userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-                    useOkhttp = false,
-                    additionalUrls = listOf(Regex(""".""")),
-                    script = null,
-                    scriptCallback = null,
-                    timeout = 15_000L
-                ).resolveUsingWebView(url) { req ->
-                    val reqUrl = req.url.toString()
-                    reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
-                    reqUrl.contains("googleusercontent") || reqUrl.contains("drive.google")
-                }
+        // Try the filebee API directly (api.filebee.xyz/file/downlaod/)
+        try {
+            val apiResponse = app.post(
+                "https://api.filebee.xyz/file/downlaod/",
+                headers = mapOf(
+                    "Accept" to "application/json",
+                    "Content-Type" to "application/json",
+                    "Origin" to "https://filebee.xyz",
+                    "Referer" to "https://filebee.xyz/"
+                ),
+                data = """{"fileID":"$fileId"}"""
+            ).text
+            Log.d(TAG, "resolveFilePress: API response: ${apiResponse.take(200)}")
+            // Look for a download URL in the API response
+            val apiUrl = Regex(""""(https?://[^"]*(?:drive\.google|googleapis|googleusercontent|filebee)[^"]*)"""").find(apiResponse)?.groupValues?.get(1)
+            if (apiUrl != null) {
+                Log.d(TAG, "resolveFilePress: API found URL: ${apiUrl.take(80)}")
+                return apiUrl
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "resolveFilePress: API failed: ${e.message}")
+        }
 
-                if (request != null) {
-                    val finalUrl = request.url.toString()
-                    Log.d(TAG, "resolveFilePress: WebView found: $finalUrl")
-                    if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") ||
-                        finalUrl.contains("googleusercontent") || finalUrl.contains("drive.google")) {
-                        return finalUrl
+        // Fallback: Use WebViewResolver with DOM extraction script
+        val extractScript = """
+            (function() {
+                try {
+                    if (document.title.includes('Just a moment') || document.title.includes('Attention')) {
+                        return 'CF:' + document.title;
                     }
-                }
+                    var links = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < links.length; i++) {
+                        var h = links[i].href;
+                        if (h && (h.includes('.mp4') || h.includes('.mkv') || h.includes('.webm') ||
+                            h.includes('googleusercontent') || h.includes('drive.google') ||
+                            h.includes('download') || h.includes('filebee'))) {
+                            return 'URL:' + h;
+                        }
+                    }
+                    return 'NOTFOUND:' + window.location.href + ':' + document.title;
+                } catch(e) { return 'ERR:' + e.message; }
+            })();
+        """.trimIndent()
+
+        return try {
+            var scriptResult: String? = null
+            val (request, _) = WebViewResolver(
+                interceptUrl = Regex("""."""),
+                userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                useOkhttp = false,
+                additionalUrls = listOf(Regex(""".""")),
+                script = extractScript,
+                scriptCallback = { result ->
+                    scriptResult = result
+                    Log.d(TAG, "resolveFilePress: script result: ${result?.take(200)}")
+                },
+                timeout = 20_000L
+            ).resolveUsingWebView(url) { req ->
+                val reqUrl = req.url.toString()
+                reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
+                reqUrl.contains("googleusercontent") || reqUrl.contains("drive.google") ||
+                reqUrl.contains("api.filebee") || reqUrl.contains("download")
             }
 
-            // Try regex extraction from HTML
-            val directLink = Regex("""(https?://[^"'\s<>]+\.mkv[^"'\s<>]*)""").find(html)?.groupValues?.get(1)
-                ?: Regex("""(https?://[^"'\s<>]+\.mp4[^"'\s<>]*)""").find(html)?.groupValues?.get(1)
-                ?: Regex("""href="(https?://[^"]*(?:drive\.google|googleapis|googleusercontent)[^"]*)"""").find(html)?.groupValues?.get(1)
-            Log.d(TAG, "resolveFilePress: result: ${directLink?.take(80) ?: "null"}")
-            directLink
+            if (scriptResult != null && scriptResult!!.startsWith("URL:")) {
+                val extracted = scriptResult!!.substring(4)
+                Log.d(TAG, "resolveFilePress: script extracted: $extracted")
+                return extracted
+            }
+
+            if (request != null) {
+                val finalUrl = request.url.toString()
+                Log.d(TAG, "resolveFilePress: WebView found: $finalUrl")
+                if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") ||
+                    finalUrl.contains("googleusercontent") || finalUrl.contains("drive.google")) {
+                    return finalUrl
+                }
+            }
+            Log.d(TAG, "resolveFilePress: no URL found. Script: $scriptResult")
+            null
         } catch (e: Exception) {
             Log.d(TAG, "resolveFilePress: FAILED: ${e.message}")
             null
@@ -806,30 +910,69 @@ class TheMoviesFlix : MainAPI() {
     private suspend fun resolveMegaUp(url: String): String? {
         Log.d(TAG, "resolveMegaUp: fetching $url")
         return try {
-            // Use WebViewResolver — megaup has a JS countdown then redirects
-            val (request, _) = WebViewResolver(
-                interceptUrl = Regex("""\.(mp4|mkv|webm|m3u8|download)"""),
-                userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-                useOkhttp = false,
-                additionalUrls = listOf(Regex(""".""")),
-                script = null,
-                scriptCallback = null,
-                timeout = 15_000L
-            ).resolveUsingWebView(url) { req ->
-                val reqUrl = req.url.toString()
-                reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
-                reqUrl.contains(".webm") || reqUrl.contains("download.megaup")
-            }
+            // megaup.net has a JS countdown that reveals a download.megaup.net URL.
+            // We can extract this URL directly from the HTML — no need to wait for countdown.
+            val html = app.get(url, headers = baseHeaders + ("Referer" to "$mainUrl/")).text
+            Log.d(TAG, "resolveMegaUp: got ${html.length} chars")
 
-            if (request != null) {
-                val finalUrl = request.url.toString()
-                Log.d(TAG, "resolveMegaUp: WebView found: $finalUrl")
-                if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") || finalUrl.contains(".webm")) {
-                    return finalUrl
+            // Extract the download.megaup.net URL from the HTML
+            val downloadUrl = Regex("""(https://download\.megaup\.net/[^"']+)""").find(html)?.groupValues?.get(1)
+            if (downloadUrl != null) {
+                Log.d(TAG, "resolveMegaUp: found download URL: ${downloadUrl.take(80)}")
+                // download.megaup.net is Cloudflare-protected — use WebView to resolve
+                val extractScript = """
+                    (function() {
+                        try {
+                            if (document.title.includes('Just a moment') || document.title.includes('Attention')) {
+                                return 'CF:' + document.title;
+                            }
+                            var links = document.querySelectorAll('a[href]');
+                            for (var i = 0; i < links.length; i++) {
+                                var h = links[i].href;
+                                if (h && (h.includes('.mp4') || h.includes('.mkv') || h.includes('.webm') ||
+                                    h.includes('googleusercontent') || h.includes('megaup') || h.includes('download'))) {
+                                    return 'URL:' + h;
+                                }
+                            }
+                            return 'NOTFOUND:' + window.location.href + ':' + document.title;
+                        } catch(e) { return 'ERR:' + e.message; }
+                    })();
+                """.trimIndent()
+
+                var scriptResult: String? = null
+                val (request, _) = WebViewResolver(
+                    interceptUrl = Regex("""."""),
+                    userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                    useOkhttp = false,
+                    additionalUrls = listOf(Regex(""".""")),
+                    script = extractScript,
+                    scriptCallback = { result ->
+                        scriptResult = result
+                        Log.d(TAG, "resolveMegaUp: script result: ${result?.take(200)}")
+                    },
+                    timeout = 20_000L
+                ).resolveUsingWebView(downloadUrl) { req ->
+                    val reqUrl = req.url.toString()
+                    reqUrl.contains(".mp4") || reqUrl.contains(".mkv") || reqUrl.contains(".webm") ||
+                    reqUrl.contains("googleusercontent") || reqUrl.contains("download")
+                }
+
+                if (scriptResult != null && scriptResult!!.startsWith("URL:")) {
+                    val extracted = scriptResult!!.substring(4)
+                    Log.d(TAG, "resolveMegaUp: script extracted: $extracted")
+                    return extracted
+                }
+                if (request != null) {
+                    val finalUrl = request.url.toString()
+                    if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") || finalUrl.contains(".webm")) {
+                        return finalUrl
+                    }
                 }
             }
-            Log.d(TAG, "resolveMegaUp: no video URL found")
-            null
+
+            // Fallback: return the megaup.net URL itself (user can open externally)
+            Log.d(TAG, "resolveMegaUp: returning original URL as fallback")
+            url
         } catch (e: Exception) {
             Log.d(TAG, "resolveMegaUp: FAILED: ${e.message}")
             null
@@ -848,22 +991,58 @@ class TheMoviesFlix : MainAPI() {
     //
     private suspend fun resolveVikingFile(url: String): String? {
         Log.d(TAG, "resolveVikingFile: fetching $url")
+        val extractScript = """
+            (function() {
+                try {
+                    if (document.title.includes('Just a moment') || document.title.includes('Attention')) {
+                        return 'CF:' + document.title;
+                    }
+                    // Check for the download-link element
+                    var dl = document.getElementById('download-link');
+                    if (dl && dl.href && !dl.classList.contains('hidden')) {
+                        return 'URL:' + dl.href;
+                    }
+                    // Check all links
+                    var links = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < links.length; i++) {
+                        var h = links[i].href;
+                        if (h && (h.includes('.mp4') || h.includes('.mkv') || h.includes('.webm') ||
+                            h.includes('googleusercontent') || h.includes('drive.google') ||
+                            h.includes('vikingfile.com/dl') || h.includes('vikingfile.com/download') ||
+                            h.includes('fast-download'))) {
+                            return 'URL:' + h;
+                        }
+                    }
+                    return 'NOTFOUND:' + window.location.href + ':' + document.title + ':dl=' + (dl ? dl.href + ':hidden=' + dl.classList.contains('hidden') : 'no-dl');
+                } catch(e) { return 'ERR:' + e.message; }
+            })();
+        """.trimIndent()
+
         return try {
+            var scriptResult: String? = null
             val (request, _) = WebViewResolver(
-                interceptUrl = Regex("""\.(mp4|mkv|webm|m3u8|download)"""),
+                interceptUrl = Regex("""."""),
                 userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
                 useOkhttp = false,
                 additionalUrls = listOf(Regex(""".""")),
-                script = null,
-                scriptCallback = null,
-                timeout = 15_000L
+                script = extractScript,
+                scriptCallback = { result ->
+                    scriptResult = result
+                    Log.d(TAG, "resolveVikingFile: script result: ${result?.take(300)}")
+                },
+                timeout = 25_000L  // longer for Turnstile captcha
             ).resolveUsingWebView(url) { req ->
                 val reqUrl = req.url.toString()
                 reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
                 reqUrl.contains(".webm") || reqUrl.contains("download") ||
-                reqUrl.contains("vikingfile.com/dl") || reqUrl.contains("vikingfile.com/download")
+                reqUrl.contains("googleusercontent") || reqUrl.contains("drive.google")
             }
 
+            if (scriptResult != null && scriptResult!!.startsWith("URL:")) {
+                val extracted = scriptResult!!.substring(4)
+                Log.d(TAG, "resolveVikingFile: script extracted: $extracted")
+                return extracted
+            }
             if (request != null) {
                 val finalUrl = request.url.toString()
                 Log.d(TAG, "resolveVikingFile: WebView found: $finalUrl")
@@ -871,7 +1050,7 @@ class TheMoviesFlix : MainAPI() {
                     return finalUrl
                 }
             }
-            Log.d(TAG, "resolveVikingFile: no video URL found")
+            Log.d(TAG, "resolveVikingFile: no URL found. Script: $scriptResult")
             null
         } catch (e: Exception) {
             Log.d(TAG, "resolveVikingFile: FAILED: ${e.message}")
@@ -889,31 +1068,85 @@ class TheMoviesFlix : MainAPI() {
     //
     private suspend fun resolveGoFile(url: String): String? {
         Log.d(TAG, "resolveGoFile: fetching $url")
+        // gofile.io uses a JS API. Extract the content code from the URL.
+        val contentCode = url.substringAfterLast("/").substringBefore("?")
+        Log.d(TAG, "resolveGoFile: contentCode=$contentCode")
+
+        // Try the gofile API directly
+        try {
+            // Create a guest account to get a token
+            val accountResp = app.post("https://api.gofile.io/accounts").text
+            Log.d(TAG, "resolveGoFile: account response: ${accountResp.take(200)}")
+            val token = Regex(""""token":"([^"]+)"""").find(accountResp)?.groupValues?.get(1)
+            if (token != null) {
+                Log.d(TAG, "resolveGoFile: got guest token: ${token.take(30)}")
+                // Fetch content with token
+                val contentResp = app.get(
+                    "https://api.gofile.io/contents/$contentCode?token=$token",
+                    headers = mapOf("Accept" to "application/json")
+                ).text
+                Log.d(TAG, "resolveGoFile: content response: ${contentResp.take(300)}")
+                // Look for download URL in the response
+                val dlUrl = Regex(""""link":"([^"]+)"""").find(contentResp)?.groupValues?.get(1)
+                if (dlUrl != null) {
+                    Log.d(TAG, "resolveGoFile: found download URL: ${dlUrl.take(80)}")
+                    return dlUrl.replace("\\/", "/")
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "resolveGoFile: API failed: ${e.message}")
+        }
+
+        // Fallback: WebView with script extraction
+        val extractScript = """
+            (function() {
+                try {
+                    var links = document.querySelectorAll('a[href]');
+                    for (var i = 0; i < links.length; i++) {
+                        var h = links[i].href;
+                        if (h && (h.includes('.mp4') || h.includes('.mkv') || h.includes('.webm') ||
+                            h.includes('store.gofile') || h.includes('s.gofile') || h.includes('download'))) {
+                            return 'URL:' + h;
+                        }
+                    }
+                    return 'NOTFOUND:' + window.location.href + ':' + document.title;
+                } catch(e) { return 'ERR:' + e.message; }
+            })();
+        """.trimIndent()
+
         return try {
+            var scriptResult: String? = null
             val (request, _) = WebViewResolver(
-                interceptUrl = Regex("""\.(mp4|mkv|webm|m3u8|download)"""),
+                interceptUrl = Regex("""."""),
                 userAgent = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
                 useOkhttp = false,
                 additionalUrls = listOf(Regex(""".""")),
-                script = null,
-                scriptCallback = null,
-                timeout = 15_000L
+                script = extractScript,
+                scriptCallback = { result ->
+                    scriptResult = result
+                    Log.d(TAG, "resolveGoFile: script result: ${result?.take(200)}")
+                },
+                timeout = 20_000L
             ).resolveUsingWebView(url) { req ->
                 val reqUrl = req.url.toString()
                 reqUrl.contains(".mp4") || reqUrl.contains(".mkv") ||
-                reqUrl.contains(".webm") || reqUrl.contains("download") ||
-                reqUrl.contains("store.gofile.io") || reqUrl.contains("s.gofile.io")
+                reqUrl.contains("store.gofile") || reqUrl.contains("s.gofile") ||
+                reqUrl.contains("download")
             }
 
+            if (scriptResult != null && scriptResult!!.startsWith("URL:")) {
+                val extracted = scriptResult!!.substring(4)
+                Log.d(TAG, "resolveGoFile: script extracted: $extracted")
+                return extracted
+            }
             if (request != null) {
                 val finalUrl = request.url.toString()
-                Log.d(TAG, "resolveGoFile: WebView found: $finalUrl")
-                if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") || finalUrl.contains(".webm") ||
-                    finalUrl.contains("store.gofile.io") || finalUrl.contains("s.gofile.io")) {
+                if (finalUrl.contains(".mp4") || finalUrl.contains(".mkv") ||
+                    finalUrl.contains("store.gofile") || finalUrl.contains("s.gofile")) {
                     return finalUrl
                 }
             }
-            Log.d(TAG, "resolveGoFile: no video URL found")
+            Log.d(TAG, "resolveGoFile: no URL found. Script: $scriptResult")
             null
         } catch (e: Exception) {
             Log.d(TAG, "resolveGoFile: FAILED: ${e.message}")
