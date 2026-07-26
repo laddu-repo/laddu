@@ -128,18 +128,36 @@ class Toonstream : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val doc = app.get(data, headers = baseHeaders).document
-        val iframes = doc.select("#aa-options iframe")
-        val links = mutableListOf<String>()
+        val embedUrls = mutableListOf<String>()
 
-        for (iframe in iframes) {
+        for (iframe in doc.select("#aa-options iframe")) {
             val src = iframe.attr("data-src").ifBlank { iframe.attr("src") }
-            if (src.isNotBlank()) links.add(src)
+            if (src.isBlank()) continue
+            val fullUrl = if (src.startsWith("http")) src else "$mainUrl$src"
+            embedUrls.add(fullUrl)
         }
 
-        val movieItems = doc.select("#movies-a > ul > li")
-        for (li in movieItems) {
-            val dataUrl = li.attr("data-url")
-            if (dataUrl.isNotBlank()) links.add(dataUrl)
+        for (li in doc.select("#movies-a > ul > li, .episodes a.lnk-blk, #options-0 a")) {
+            val href = li.attr("data-url").ifBlank { li.attr("href") }
+            if (href.isNotBlank()) {
+                val fullUrl = if (href.startsWith("http")) href else "$mainUrl$href"
+                embedUrls.add(fullUrl)
+            }
+        }
+
+        if (embedUrls.isEmpty()) return false
+
+        val links = mutableSetOf<String>()
+        for (embedUrl in embedUrls) {
+            try {
+                val embedDoc = app.get(embedUrl, headers = baseHeaders).document
+                for (iframe in embedDoc.select("iframe[src]")) {
+                    val src = iframe.attr("src")
+                    if (src.startsWith("http") && !src.contains("youtube.com")) {
+                        links.add(src)
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         if (links.isEmpty()) return false
