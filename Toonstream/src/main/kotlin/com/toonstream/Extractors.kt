@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.base64Decode
 import com.lagradost.api.Log
@@ -74,7 +75,7 @@ class Streamruby : ExtractorApi() {
     }
 }
 
-class AWSStream : ExtractorApi() {
+open class AWSStream : ExtractorApi() {
     override val name = "AWSStream"
     override val mainUrl = "https://z.awstream.net"
     override val requiresReferer = false
@@ -124,7 +125,7 @@ class Zephyrflick : AWSStream() {
     override val requiresReferer = false
 }
 
-class GDMirrorbot : ExtractorApi() {
+open class GDMirrorbot : ExtractorApi() {
     override val name = "GDMirrorbot"
     override val mainUrl = "https://gdmirrorbot.nl"
     override val requiresReferer = false
