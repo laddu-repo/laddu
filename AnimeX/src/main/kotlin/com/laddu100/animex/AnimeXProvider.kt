@@ -106,8 +106,10 @@ class AnimeXProvider : MainAPI() {
             return null
         }
 
-        // 1. Fetch AniList metadata (including streamingEpisode for real episode titles)
-        val metaQuery = """{ Media(id: $anilistId) { id title { english romaji } coverImage { large extraLarge } bannerImage description genres episodes format seasonYear averageScore streamingEpisode { title } } }"""
+        // 1. Fetch AniList metadata (including streamingEpisodes for real episode titles)
+        //    NOTE: the field is "streamingEpisodes" (PLURAL). The singular form causes a
+        //    GraphQL 400 error which makes the ENTIRE query return data:null.
+        val metaQuery = """{ Media(id: $anilistId) { id title { english romaji } coverImage { large extraLarge } bannerImage description genres episodes format seasonYear averageScore streamingEpisodes { title } } }"""
 
         val meta: AniListMedia? = try {
             val resp = app.post(anilistUrl, json = mapOf("query" to metaQuery)).text
@@ -117,10 +119,16 @@ class AnimeXProvider : MainAPI() {
             null
         }
 
-        val title = meta?.title?.english ?: meta?.title?.romaji ?: run {
+        // 2. Determine the title — prefer AniList, fall back to the URL slug so load()
+        //    never returns null just because AniList is down/rate-limited.
+        val title = meta?.title?.english
+            ?: meta?.title?.romaji
+            ?: slugToTitle(path)
+        if (title.isBlank()) {
             Log.e("AnimeX", "load: no title for anilistId=$anilistId")
             return null
         }
+
         val poster = meta?.coverImage?.extraLarge ?: meta?.coverImage?.large ?: ""
         val banner = meta?.bannerImage ?: ""
         val plot = meta?.description?.replace(Regex("<[^>]+>"), "")?.replace("\\n", "\n")
@@ -128,7 +136,7 @@ class AnimeXProvider : MainAPI() {
         val year = meta?.seasonYear
         val scoreVal = meta?.averageScore?.div(10.0)?.toFloat()
 
-        // 2. Fetch ALL episodes from FlixCloud API (paginated)
+        // 3. Fetch ALL episodes from FlixCloud API (paginated)
         val flixEpisodes = fetchAllFlixEpisodes(anilistId)
         Log.d("AnimeX", "load: $title anilistId=$anilistId flixCount=${flixEpisodes.size}")
 
@@ -137,13 +145,25 @@ class AnimeXProvider : MainAPI() {
             return null
         }
 
-        // 3. Build episode-title map from AniList streamingEpisode (1-indexed)
+        // 4. Build episode-title map from AniList streamingEpisodes.
+        //    Titles follow the format "Episode {N} - {Title}" — parse out the episode
+        //    number so we can map to the correct FlixCloud episode (not just array index).
         val titleMap = mutableMapOf<Int, String>()
-        meta?.streamingEpisode?.forEachIndexed { idx, ep ->
-            ep.title?.let { titleMap[idx + 1] = it }
+        meta?.streamingEpisodes?.forEach { ep ->
+            ep.title?.let { rawTitle ->
+                val match = Regex("""Episode\s+(\d+)\s*[-–—]\s*(.+)""", RegexOption.IGNORE_CASE)
+                    .find(rawTitle)
+                if (match != null) {
+                    val epNum = match.groupValues[1].toIntOrNull()
+                    val epName = match.groupValues[2].trim()
+                    if (epNum != null && epName.isNotBlank()) {
+                        titleMap[epNum] = epName
+                    }
+                }
+            }
         }
 
-        // 4. Determine movie vs series
+        // 5. Determine movie vs series
         val isMovie = meta?.formatStr == "MOVIE" || flixEpisodes.size <= 1
 
         if (isMovie) {
@@ -159,7 +179,7 @@ class AnimeXProvider : MainAPI() {
             }
         }
 
-        // 5. Build Sub/Dub episode lists
+        // 6. Build Sub/Dub episode lists
         //    - audio="native"  -> Subbed only
         //    - audio="dual"     -> both Subbed AND Dubbed (same dual-audio HLS, ExoPlayer picks track)
         val subEpisodes = mutableListOf<Episode>()
@@ -186,7 +206,7 @@ class AnimeXProvider : MainAPI() {
             }
         }
 
-        Log.d("AnimeX", "load: ${subEpisodes.size} sub eps, ${dubEpisodes.size} dub eps")
+        Log.d("AnimeX", "load: ${subEpisodes.size} sub eps, ${dubEpisodes.size} dub eps, titleMap=${titleMap.size} titles")
 
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
@@ -268,6 +288,14 @@ class AnimeXProvider : MainAPI() {
             .replace(Regex("-+"), "-")
             .trimStart('-').trimEnd('-') + "-$id"
     }
+
+    /** Derive a human-readable title from a URL slug like "one-piece-21" → "One Piece". */
+    private fun slugToTitle(slug: String): String {
+        val withoutId = slug.substringBeforeLast("-")
+        return withoutId.split("-")
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+    }
 }
 
 // ---------------- AniList data classes ----------------
@@ -304,7 +332,7 @@ data class AniListMedia(
     @JsonProperty("format") val formatStr: String? = null,
     @JsonProperty("seasonYear") val seasonYear: Int? = null,
     @JsonProperty("averageScore") val averageScore: Int? = null,
-    @JsonProperty("streamingEpisode") val streamingEpisode: List<AniListStreamingEpisode>? = null
+    @JsonProperty("streamingEpisodes") val streamingEpisodes: List<AniListStreamingEpisode>? = null
 )
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AniListTitle(
