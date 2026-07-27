@@ -26,40 +26,38 @@ class FlixCloudExtractor : ExtractorApi() {
         try {
             val embedHtml = app.get(url, referer = referer).text
 
-            // Extract ASS subtitles from the embed HTML (stronghole.site CDN).
-            // Format: url:"https://...stronghole.../file.ass" ... language:"English (...)"
-            Regex("""url:"(https://[^"]*stronghole[^"]*\.ass)"[\s\S]{0,120}?language:"([^"]*)"""")
+            // Subtitles are hosted on slopnet.site (was stronghole.site in older versions)
+            Regex("""url:"(https://[^"]*slopnet[^"]*\.ass)"[\s\S]{0,120}?language:"([^"]*)"""")
                 .findAll(embedHtml).forEach { match ->
                     subtitleCallback.invoke(SubtitleFile(match.groupValues[2], match.groupValues[1]))
                 }
 
-            // The playable m3u8 URL is generated at runtime by in-page WASM + hls.js.
-            // We cannot replicate the WASM decryption in Kotlin, so we let the WebView run
-            // the page JS and intercept the final master.m3u8 request to fetch.flixcloud.cc.
+            // The playable m3u8 is generated at runtime by WASM + hls.js.
+            // WebViewResolver runs the page JS and intercepts the master.m3u8 request.
             val (request, _) = WebViewResolver(
-                interceptUrl = Regex("""fetch\.flixcloud\.cc.*\.m3u8"""),
+                interceptUrl = Regex("""fetch\.flixcloud\.cc.*master\.m3u8"""),
                 userAgent = chromeUA,
                 useOkhttp = false,
-                additionalUrls = listOf(Regex("""\.(m3u8|mp4)""")),
+                additionalUrls = emptyList(),
                 script = null,
                 scriptCallback = null,
-                timeout = 30_000L
+                timeout = 45_000L
             ).resolveUsingWebView(url) { req ->
                 req.url.toString().contains("fetch.flixcloud.cc") &&
-                    req.url.toString().contains(".m3u8")
+                    req.url.toString().contains("master.m3u8")
             }
 
             if (request != null) {
                 val m3u8Url = request.url.toString()
-                Log.d("AnimeX", "FlixCloud: intercepted m3u8=$m3u8Url")
+                Log.d("AnimeX", "FlixCloud: intercepted m3u8")
 
                 val cookies = try {
                     android.webkit.CookieManager.getInstance().getCookie("https://flixcloud.cc")
                 } catch (_: Exception) { null }
+                val fetchCookies = try {
+                    android.webkit.CookieManager.getInstance().getCookie("https://fetch.flixcloud.cc")
+                } catch (_: Exception) { null }
 
-                // Full browser headers — the flixcloud CDN rejects requests that lack a
-                // browser User-Agent (returns a 403/error page instead of the m3u8, which
-                // surfaces in ExoPlayer as "Input does not start with the #EXTM3U header").
                 val headers = mutableMapOf(
                     "Referer" to "https://flixcloud.cc/",
                     "User-Agent" to chromeUA,
@@ -70,7 +68,8 @@ class FlixCloudExtractor : ExtractorApi() {
                     "Sec-Fetch-Mode" to "cors",
                     "Sec-Fetch-Site" to "same-site"
                 )
-                if (!cookies.isNullOrBlank()) headers["Cookie"] = cookies
+                val allCookies = listOfNotNull(cookies, fetchCookies).joinToString("; ")
+                if (allCookies.isNotBlank()) headers["Cookie"] = allCookies
 
                 callback.invoke(
                     ExtractorLink(
@@ -84,7 +83,7 @@ class FlixCloudExtractor : ExtractorApi() {
                     )
                 )
             } else {
-                Log.e("AnimeX", "FlixCloud: WebViewResolver returned no m3u8 for $url")
+                Log.e("AnimeX", "FlixCloud: no m3u8 intercepted for $url")
             }
         } catch (e: Exception) {
             Log.e("AnimeX", "FlixCloud: ${e.message}")
