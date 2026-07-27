@@ -180,7 +180,7 @@ class AnimeXProvider : MainAPI() {
             .replace(Regex("[^a-z0-9\\s-]"), "")
             .replace(Regex("\\s+"), "-")
             .replace(Regex("-+"), "-")
-            .trimStart("-").trimEnd("-") + "-$id"
+            .trimStart('-').trimEnd('-') + "-$id"
     }
 }
 
