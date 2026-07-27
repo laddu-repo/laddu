@@ -188,7 +188,7 @@ class AnimeXProvider : MainAPI() {
 
         Log.d("AnimeX", "load: ${subEpisodes.size} sub eps, ${dubEpisodes.size} dub eps")
 
-        return newTvSeriesLoadResponse(title, url, TvType.Anime, subEpisodes) {
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
             this.backgroundPosterUrl = banner
             this.plot = plot
