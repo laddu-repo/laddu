@@ -84,11 +84,11 @@ class AnimeXProvider : MainAPI() {
             val id = media.id ?: return@mapNotNull null
             val poster = media.coverImage?.extraLarge ?: media.coverImage?.large ?: ""
             val path = buildPath(title, id)
-            val tvType = if (media.format == "MOVIE") TvType.AnimeMovie else TvType.Anime
+            val tvType = if (media.formatStr == "MOVIE") TvType.AnimeMovie else TvType.Anime
             newAnimeSearchResponse(title, "$mainUrl/anime/$path", tvType) {
                 this.posterUrl = poster
                 this.year = media.seasonYear
-                addDubStatus(dubExist = true, subExist = true)
+                addDubStatus(true, true)
             }
         }
     }
@@ -99,7 +99,8 @@ class AnimeXProvider : MainAPI() {
 
         val graphql = """{ Media(id: $anilistId) { id title { english romaji } coverImage { large extraLarge } bannerImage description genres episodes format seasonYear averageScore } }"""
         val meta = try {
-            parseJson<AniListMediaResponse>(app.post(anilistUrl, json = mapOf("query" to graphql)).text).data?.media
+            val metaResp = parseJson<AniListMediaResponse>(app.post(anilistUrl, json = mapOf("query" to graphql)).text)
+        val meta = metaResp.data?.media
         } catch (e: Exception) {
             null
         }
@@ -109,7 +110,7 @@ class AnimeXProvider : MainAPI() {
         val banner = meta?.bannerImage ?: ""
         val plot = meta?.description?.replace(Regex("<[^>]+>"), "")?.replace("\\n", "\n")
         val genres = meta?.genres ?: emptyList()
-        val score = meta?.averageScore?.div(10)?.toFloat()
+        val score = meta?.averageScore?.div(10.0)
 
         val html = try {
             app.get(url).text
@@ -122,7 +123,7 @@ class AnimeXProvider : MainAPI() {
             ?: meta?.episodes
             ?: 1
 
-        val isMovie = meta?.format == "MOVIE" || episodeCount <= 1
+        val isMovie = meta?.formatStr == "MOVIE" || episodeCount <= 1
 
         if (isMovie) {
             val watchUrl = "$mainUrl/watch/$path-episode-1"
@@ -132,7 +133,7 @@ class AnimeXProvider : MainAPI() {
                 this.plot = plot
                 this.tags = genres
                 this.year = meta?.seasonYear
-                this.score = score?.let { Score.from10(it) }
+                this.score = score?.let { Score.from10(it.toFloat()) }
             }
         }
 
@@ -149,7 +150,7 @@ class AnimeXProvider : MainAPI() {
             this.plot = plot
             this.tags = genres
             this.year = meta?.seasonYear
-            this.score = score?.let { Score.from10(it) }
+            this.score = score?.let { Score.from10(it.toFloat()) }
         }
     }
 
@@ -211,7 +212,7 @@ data class AniListMedia(
     @JsonProperty("description") val description: String? = null,
     @JsonProperty("genres") val genres: List<String>? = null,
     @JsonProperty("episodes") val episodes: Int? = null,
-    @JsonProperty("format") val format: String? = null,
+    @JsonProperty("format") val formatStr: String? = null,
     @JsonProperty("seasonYear") val seasonYear: Int? = null,
     @JsonProperty("averageScore") val averageScore: Int? = null
 )
