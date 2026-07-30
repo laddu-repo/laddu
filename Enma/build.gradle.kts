@@ -1,8 +1,8 @@
-version = 6
+version = 9
 
 cloudstream {
     description = "Enma - Watch Anime Sub & Dub in HD"
-    authors = listOf("KSHITIJ8473")
+    authors = listOf("raghav")
     status = 1
     tvTypes = listOf("Anime", "AnimeMovie", "OVA")
     language = "en"
