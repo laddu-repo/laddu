@@ -6,7 +6,11 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.lagradost.api.Log
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,15 +25,10 @@ import kotlin.coroutines.resume
  * The WASM binary (4KB, AssemblyScript) is served from https://www.enma.lol/ada.wasm
  * and the function name is derived from https://www.enma.lol/ada.manifest.
  *
- * This singleton loads a minimal HTML page in a WebView that instantiates the WASM
- * and exposes a decrypt() function. Kotlin calls it via evaluateJavascript +
- * JavascriptInterface callback for async to sync bridging.
- *
- * FIX (v9): Replaced broken polling (evaluateJavascript returned quoted strings
- * so the YES comparison always failed) with a CompletableDeferred that is
- * completed by the onReady() JavascriptInterface callback. Also handles
- * coroutine cancellation gracefully — the WebView keeps running in the
- * background and onReady() sets initialized=true for the next caller.
+ * FIX (v10): The WebView initialization now runs in a SupervisorJob (global scope)
+ * that survives coroutine cancellation. CloudStream cancels getMainPage coroutines
+ * after ~1 second, which was killing the WebView init in v8/v9. Now the init runs
+ * independently and fetchAndDecrypt just awaits the readySignal deferred.
  */
 object EnmaDecryptor {
     private const val TAG = "EnmaDecryptor"
@@ -44,7 +43,8 @@ object EnmaDecryptor {
     @Volatile
     private var appContext: Context? = null
 
-    private val initMutex = Mutex()
+    // SupervisorJob that survives cancellation of individual API call coroutines
+    private val initScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     // Signal completed when WASM onReady() fires.
     @Volatile
@@ -86,32 +86,30 @@ object EnmaDecryptor {
 
     private val bridge = DecryptBridge()
 
-    @SuppressLint("SetJavaScriptEnabled")
-    suspend fun init(context: Context) {
-        if (initialized) return
-        initMutex.withLock {
-            if (initialized) return
+    /**
+     * Start WASM initialization in a global scope (SupervisorJob).
+     * This is NOT tied to the calling coroutine — even if the caller is cancelled,
+     * the WebView keeps loading and onReady() will fire.
+     * Safe to call multiple times — only the first call creates the WebView.
+     */
+    fun startInit() {
+        if (initialized || readySignal != null) return
+        val ctx = appContext ?: run {
+            Log.e(TAG, "No context for WASM init")
+            return
+        }
 
-            // If a WebView already exists from a previous (possibly cancelled) attempt,
-            // just wait for its onReady instead of creating a new one.
-            if (webView != null && readySignal?.isCompleted == false) {
-                Log.d(TAG, "Waiting for existing WebView to become ready...")
-                waitForReady()
-                return
-            }
+        val signal = CompletableDeferred<Unit>()
+        readySignal = signal
 
-            // Create a fresh ready signal for this WebView instance
-            val signal = CompletableDeferred<Unit>()
-            readySignal = signal
-
-            withContext(Dispatchers.Main) {
-                Log.d(TAG, "Initializing WebView + WASM...")
-
-                // Destroy any old orphaned WebView
+        // Launch in SupervisorJob scope — survives caller cancellation
+        initScope.launch {
+            try {
+                Log.d(TAG, "Starting WASM WebView init (global scope)...")
                 try { webView?.destroy() } catch (_: Exception) {}
                 webView = null
 
-                val wv = WebView(context)
+                val wv = WebView(ctx)
                 wv.settings.javaScriptEnabled = true
                 wv.settings.domStorageEnabled = true
                 wv.settings.allowFileAccess = false
@@ -164,23 +162,32 @@ object EnmaDecryptor {
 
                 wv.loadDataWithBaseURL(BASE_URL, html, "text/html", "UTF-8", null)
                 webView = wv
+                Log.d(TAG, "WebView created, waiting for onReady...")
+            } catch (e: Exception) {
+                Log.e(TAG, "WASM init failed: ${e.message}")
+                readySignal?.completeExceptionally(e)
             }
-
-            // Wait for onReady callback (outside Main dispatcher so we don't block UI thread).
-            waitForReady()
         }
     }
 
-    private suspend fun waitForReady() {
-        val signal = readySignal ?: return
+    /**
+     * Wait for the WASM to be ready. Times out after 20 seconds.
+     * Does NOT throw on timeout — just returns (initialized will still be false).
+     */
+    private suspend fun awaitReady() {
+        if (initialized) return
+        val signal = readySignal ?: run {
+            startInit()
+            return awaitReady()
+        }
         try {
             withTimeoutOrNull(20_000L) {
                 signal.await()
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
-            // If cancelled, the WebView keeps running in the background.
-            // onReady() will still fire and set initialized=true for the next caller.
-            Log.d(TAG, "waitForReady cancelled — WebView continues in background")
+            // The WebView keeps running in the background (SupervisorJob).
+            // onReady() will still fire and set initialized=true.
+            Log.d(TAG, "awaitReady cancelled — WebView continues in background")
             throw e
         }
         if (initialized) {
@@ -192,9 +199,15 @@ object EnmaDecryptor {
 
     /**
      * Decrypt an encrypted base64 API response to JSON string.
-     * Auto-initializes the WASM if needed. Returns "" on failure.
+     * Returns "" on failure.
      */
     suspend fun decrypt(encrypted: String): String {
+        if (!initialized) {
+            startInit()
+            awaitReady()
+        }
+        if (!initialized) return ""
+
         val safeEnc = encrypted.trim()
 
         return withContext(Dispatchers.Main) {
@@ -220,26 +233,9 @@ object EnmaDecryptor {
         url: String,
         headers: Map<String, String>
     ): String? {
-        // Auto-initialize the WASM decryptor on first use.
-        // Even if init() is cancelled, onReady() may fire in the background
-        // and set initialized=true. Check again after init() returns.
+        // Start init if not already started (non-blocking — just kicks off the WebView)
         if (!initialized) {
-            val ctx = appContext ?: run {
-                Log.e(TAG, "No context available for WASM init")
-                return null
-            }
-            try {
-                init(ctx)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // Init was cancelled. Check if onReady fired in the meantime.
-                if (!initialized) {
-                    Log.d(TAG, "init cancelled, WASM not ready yet — returning null")
-                    return null
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "init failed: ${e.message}")
-                if (!initialized) return null
-            }
+            startInit()
         }
 
         return try {
@@ -250,6 +246,16 @@ object EnmaDecryptor {
             if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
                 return trimmed
             }
+
+            // Wait for WASM to be ready before decrypting
+            if (!initialized) {
+                awaitReady()
+            }
+            if (!initialized) {
+                Log.e(TAG, "WASM not ready — cannot decrypt $url")
+                return null
+            }
+
             val decrypted = decrypt(trimmed)
             if (decrypted.isBlank() || decrypted.startsWith("DECRYPT_ERROR:")) {
                 Log.e(TAG, "decrypt failed for $url: $decrypted")

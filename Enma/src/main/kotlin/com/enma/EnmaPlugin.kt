@@ -7,8 +7,11 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class EnmaPlugin : Plugin() {
     override fun load(context: Context) {
-        // Store context for the WASM decryptor (initialized lazily on first API call)
+        // Store context and kick off WASM initialization immediately.
+        // The init runs in a SupervisorJob (survives coroutine cancellation).
+        // By the time getMainPage is called, the WASM may already be ready.
         EnmaDecryptor.setContext(context)
+        EnmaDecryptor.startInit()
         registerMainAPI(EnmaProvider())
     }
 }
