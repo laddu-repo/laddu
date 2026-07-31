@@ -362,14 +362,14 @@ class EnmaProvider : MainAPI() {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
             Log.d("Enma", "4Animo: resolving $iframeUrl via WebViewResolver")
             val resolver = WebViewResolver(
-                interceptUrl = Regex("""\.m3u8"""),
-                additionalUrls = listOf(Regex("""\.mp4""")),
+                interceptUrl = Regex("""cdn\.4animo\.xyz/p\?t="""),
+                additionalUrls = listOf(Regex("""\.m3u8"""), Regex("""\.mp4""")),
                 script = """try{var b=document.querySelector('button,[class*=play],.vjs-big-play-button,.jw-icon-display');if(b){b.click()}}catch(e){}""",
                 useOkhttp = false,
                 timeout = 25_000L
             )
             val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
-            if (resolved.contains(".m3u8", true)) {
+            if (resolved.contains("/p?t=", true) || resolved.contains(".m3u8", true)) {
                 Log.d("Enma", "4Animo: intercepted m3u8=$resolved")
                 // Pass directly as ExtractorLink — don't use M3u8Helper which may reject it
                 callback.invoke(
@@ -410,7 +410,7 @@ class EnmaProvider : MainAPI() {
         try {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
             val resolver = WebViewResolver(
-                interceptUrl = Regex("""\.m3u8"""),
+                interceptUrl = Regex("""cdn\.4animo\.xyz/p\?t="""),
                 additionalUrls = listOf(Regex("""\.mp4""")),
                 script = """try{var b=document.querySelector('button,[class*=play],.vjs-big-play-button');if(b){b.click()}}catch(e){}""",
                 useOkhttp = false,
@@ -450,7 +450,7 @@ class EnmaProvider : MainAPI() {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
             Log.d("Enma", "TryEmbed: resolving $iframeUrl via WebViewResolver")
             val resolver = WebViewResolver(
-                interceptUrl = Regex("""\.m3u8"""),
+                interceptUrl = Regex("""cdn\.4animo\.xyz/p\?t="""),
                 additionalUrls = listOf(Regex("""\.mp4""")),
                 script = """try{var b=document.querySelector('button,.vjs-big-play-button,[class*=play]');if(b){b.click()}}catch(e){}""",
                 useOkhttp = false,
@@ -459,19 +459,29 @@ class EnmaProvider : MainAPI() {
             val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
             if (resolved.contains(".m3u8", true)) {
                 Log.d("Enma", "TryEmbed: intercepted m3u8=$resolved")
-                // Pass directly as ExtractorLink — M3u8Helper rejects tryembed m3u8s
-                // because they return non-standard content when fetched without cookies.
-                // ExoPlayer can play them directly with the right Referer header.
+                // The tryembed m3u8 URL returns a redirect ("Found. Redirecting to ...")
+                // to a proxy URL. Follow the redirect to get the actual m3u8.
+                val finalUrl = try {
+                    val resp = app.get(resolved, referer = "$host/", headers = mapOf(
+                        "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
+                    ), allowRedirects = true)
+                    resp.url
+                } catch (e: Exception) {
+                    Log.d("Enma", "TryEmbed: redirect follow failed, using original: ${e.message}")
+                    resolved
+                }
+                Log.d("Enma", "TryEmbed: final URL after redirect=$finalUrl")
+                val finalHost = Regex("""(https?://[^/]+)""").find(finalUrl)?.groupValues?.get(1) ?: host
                 callback.invoke(
                     newExtractorLink(
                         source = "Enma",
                         name = "Enma $serverName $displayType",
-                        url = resolved,
+                        url = finalUrl,
                         type = ExtractorLinkType.M3U8
                     ) {
-                        this.referer = "$host/"
+                        this.referer = "$finalHost/"
                         this.headers = mapOf(
-                            "Referer" to "$host/",
+                            "Referer" to "$finalHost/",
                             "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
                         )
                     }
