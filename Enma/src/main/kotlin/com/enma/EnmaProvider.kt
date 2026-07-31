@@ -481,8 +481,9 @@ class EnmaProvider : MainAPI() {
     ): Boolean {
         try {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
+            Log.d("Enma", "Vidnest: resolving $iframeUrl via WebViewResolver")
             val resolver = WebViewResolver(
-                interceptUrl = Regex("""cdn\.4animo\.xyz/p\?t="""),
+                interceptUrl = Regex("""\.m3u8"""),
                 additionalUrls = listOf(Regex("""\.mp4""")),
                 script = """try{var b=document.querySelector('button,[class*=play],.vjs-big-play-button');if(b){b.click()}}catch(e){}""",
                 useOkhttp = false,
@@ -490,6 +491,7 @@ class EnmaProvider : MainAPI() {
             )
             val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
             if (resolved.contains(".m3u8", true)) {
+                Log.d("Enma", "Vidnest: intercepted m3u8=$resolved")
                 val proxyHost = Regex("""(https?://[^/]+)""").find(resolved)?.groupValues?.get(1) ?: host
                 M3u8Helper.generateM3u8(
                     "Enma $serverName $displayType", resolved, proxyHost
