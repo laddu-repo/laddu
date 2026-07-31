@@ -40,6 +40,10 @@ object EnmaDecryptor {
     @Volatile private var initStarted = false
 
     private val initScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    fun setContext(context: Context) {
+        appContext = context
+    }
     @Volatile private var readySignal: CompletableDeferred<Unit>? = null
 
     private class DecryptBridge {
