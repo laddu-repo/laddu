@@ -347,9 +347,21 @@ class EnmaProvider : MainAPI() {
 
     /**
      * Resolve a cdn.4animo.xyz embed (HD-4, HD-5).
-     * v15 FIX: The old getSourcesUrl regex no longer matches (page structure changed +
-     * Cloudflare challenge). Now uses WebViewResolver to intercept the m3u8 after
-     * the page's JS player solves the CF challenge and loads the stream.
+     * v17 FIX: Replaced WebViewResolver with direct OkHttp approach.
+     *
+     * From HAR analysis, the 4animo flow is:
+     * 1. GET /embed/hd-{1|2}/ani/{anilistId}/{ep}/{type}?k=1&autoPlay=1
+     *    → returns HTML with "var sourcesUrl = '/stream/getSources?t={token}'"
+     *    → the token is session-specific (changes per request)
+     * 2. GET /stream/getSources?t={token}
+     *    → returns JSON: {"sources":[{"file":"/p?t={m3u8_token}","type":"hls"}],...}
+     * 3. GET /p?t={m3u8_token}
+     *    → returns the actual m3u8 playlist (Content-Type: application/vnd.apple.mpegurl)
+     *
+     * The tokens are single-use and tied to the session. WebViewResolver failed because
+     * JW Player doesn't auto-play in headless WebView (needs user interaction/click).
+     * This direct approach fetches all 3 URLs in sequence with the same OkHttp client
+     * (which maintains cookies automatically).
      */
     private suspend fun resolve4Animo(
         iframeUrl: String,
@@ -360,36 +372,96 @@ class EnmaProvider : MainAPI() {
     ): Boolean {
         try {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
-            Log.d("Enma", "4Animo: resolving $iframeUrl via WebViewResolver")
-            val resolver = WebViewResolver(
-                interceptUrl = Regex("""cdn\.4animo\.xyz/p\?t="""),
-                additionalUrls = listOf(Regex("""\.m3u8"""), Regex("""\.mp4""")),
-                script = """try{var b=document.querySelector('button,[class*=play],.vjs-big-play-button,.jw-icon-display');if(b){b.click()}}catch(e){}""",
-                useOkhttp = false,
-                timeout = 25_000L
+            Log.d("Enma", "4Animo: direct resolve $iframeUrl")
+
+            val pageHeaders = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer" to "$mainUrl/"
             )
-            val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
-            if (resolved.contains("/p?t=", true) || resolved.contains(".m3u8", true)) {
-                Log.d("Enma", "4Animo: intercepted m3u8=$resolved")
-                // Pass directly as ExtractorLink — don't use M3u8Helper which may reject it
-                callback.invoke(
-                    newExtractorLink(
-                        source = "Enma",
-                        name = "Enma $serverName $displayType",
-                        url = resolved,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        this.referer = "$host/"
-                        this.headers = mapOf(
-                            "Referer" to "$host/",
-                            "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
-                        )
-                    }
-                )
-                return true
+
+            // Step 1: Fetch embed page to get sourcesUrl token
+            val embedResp = app.get(iframeUrl, headers = pageHeaders)
+            val embedHtml = embedResp.text
+            Log.d("Enma", "4Animo: embed page fetched, len=${embedHtml.length}")
+
+            val sourcesUrlMatch = Regex("""var\s+sourcesUrl\s*=\s*['"]([^'"]+)['"]""").find(embedHtml)
+            val sourcesPath = sourcesUrlMatch?.groupValues?.get(1)
+            if (sourcesPath.isNullOrBlank()) {
+                Log.d("Enma", "4Animo: sourcesUrl not found in embed page")
+                return false
             }
-            Log.d("Enma", "4Animo: no m3u8 intercepted for $serverName")
-            return false
+            Log.d("Enma", "4Animo: sourcesUrl=$sourcesPath")
+
+            // Step 2: Fetch getSources to get m3u8 path
+            val sourcesApiUrl = if (sourcesPath.startsWith("http")) sourcesPath else "$host$sourcesPath"
+            val ajaxHeaders = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
+                "Accept" to "*/*",
+                "Referer" to iframeUrl
+            )
+            val sourcesResp = app.get(sourcesApiUrl, headers = ajaxHeaders, referer = iframeUrl)
+            val sourcesText = sourcesResp.text
+            Log.d("Enma", "4Animo: getSources response len=${sourcesText.length}")
+
+            val root = try { JsonParser.parseString(sourcesText).asJsonObject } catch (e: Exception) {
+                Log.d("Enma", "4Animo: getSources parse failed: ${e.message}")
+                return false
+            }
+
+            // Extract m3u8 path from sources array
+            val m3u8Path = try {
+                val sourcesEl = root.get("sources")
+                if (sourcesEl?.isJsonArray == true && sourcesEl.asJsonArray.size() > 0) {
+                    sourcesEl.asJsonArray[0].asJsonObject.get("file")?.asString
+                } else if (sourcesEl?.isJsonObject == true) {
+                    sourcesEl.asJsonObject.get("file")?.asString
+                } else null
+            } catch (_: Exception) { null }
+
+            if (m3u8Path.isNullOrBlank()) {
+                Log.d("Enma", "4Animo: no m3u8 path in getSources response")
+                return false
+            }
+            Log.d("Enma", "4Animo: m3u8Path=$m3u8Path")
+
+            // Step 3: Build full m3u8 URL and pass to ExoPlayer
+            val fullM3u8 = if (m3u8Path.startsWith("http")) m3u8Path else "$host$m3u8Path"
+            Log.d("Enma", "4Animo: full m3u8 URL=$fullM3u8")
+
+            val m3u8Headers = mapOf(
+                "Referer" to iframeUrl,
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
+            )
+            callback.invoke(
+                newExtractorLink(
+                    source = "Enma",
+                    name = "Enma $serverName $displayType",
+                    url = fullM3u8,
+                    type = ExtractorLinkType.M3U8
+                ) {
+                    this.referer = iframeUrl
+                    this.headers = m3u8Headers
+                }
+            )
+
+            // Subtitles
+            try {
+                val tracks = root.getAsJsonArray("tracks")
+                if (tracks != null) {
+                    for (element in tracks) {
+                        val track = element.asJsonObject
+                        val kind = track.get("kind")?.asString ?: continue
+                        if (kind != "captions" && kind != "subtitles") continue
+                        val file = track.get("file")?.asString ?: continue
+                        val label = track.get("label")?.asString ?: "English"
+                        val fullSub = if (file.startsWith("http")) file else "$host$file"
+                        subtitleCallback.invoke(newSubtitleFile(label, fullSub))
+                    }
+                }
+            } catch (e: Exception) { Log.d("Enma", "4Animo: subtitle extraction failed: ${e.message}") }
+
+            return true
         } catch (e: Exception) {
             Log.d("Enma", "4Animo resolution failed - ${e.message}")
             return false
