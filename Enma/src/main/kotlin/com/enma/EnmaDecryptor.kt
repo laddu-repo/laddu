@@ -7,6 +7,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.lagradost.api.Log
+import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ import kotlin.coroutines.resume
 object EnmaDecryptor {
     private const val TAG = "EnmaDecryptor"
     private const val PAGE_URL = "https://www.enma.lol/home"
+    private val mapper = ObjectMapper()
 
     @Volatile private var webView: WebView? = null
     @Volatile private var initialized = false
@@ -197,10 +199,10 @@ object EnmaDecryptor {
                 return@withContext ""
             }
 
-            // result is a JSON-encoded string like "\"{\\\"success\\\":...}\""
+            // result is a JSON-encoded string — use Jackson to parse
             // Parse it twice: outer JSON string → inner string
             val decoded = try {
-                parseDoubleEncoded(result)
+                mapper.readValue(result, String::class.java)
             } catch (e: Exception) {
                 Log.e(TAG, "decrypt: parse failed for result=${result.take(100)}")
                 return@withContext ""
@@ -229,26 +231,6 @@ object EnmaDecryptor {
     }
 
     /** Parse a double-JSON-encoded string (result of evaluateJavascript on a string value) */
-    private fun parseDoubleEncoded(s: String): String {
-        // evaluateJavascript returns the JS value as JSON.
-        // If the JS value is a string, it's wrapped in quotes and escaped.
-        // So we need to JSON-decode it once.
-        var str = s
-        if (str.startsWith("\"") && str.endsWith("\"")) {
-            str = str.substring(1, str.length - 1)
-            // Unescape JSON string escapes
-            str = str.replace("\\\"", "\"").replace("\\\\", "\\").replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
-            // Handle \uXXXX
-            val unicodeRegex = Regex("\\\\u([0-9a-fA-F]{4})")
-            str = unicodeRegex.replace(str) { match ->
-                match.groupValues[1].toInt(16).toChar().toString()
-            }
-        }
-        return str
-    }
-
-    suspend fun fetchAndDecrypt(url: String, headers: Map<String, String>): String? {
-        Log.d(TAG, "fetchAndDecrypt: $url init=$initialized")
         if (!initialized) startInit()
         return try {
             val encrypted = com.lagradost.cloudstream3.app.get(url, headers = headers, timeout = 15_000L).text
