@@ -162,11 +162,6 @@ class EnmaProvider : MainAPI() {
         val type: String
     )
 
-    /**
-     * Fetch an API URL and decrypt the WASM-encrypted response.
-     * The site encrypts ALL API responses with a WASM-based AES decryption.
-     * See EnmaDecryptor for details.
-     */
     private suspend fun fetchApi(url: String): String? {
         return EnmaDecryptor.fetchAndDecrypt(url, headers)
     }
@@ -180,7 +175,6 @@ class EnmaProvider : MainAPI() {
             return newHomePageResponse(request.name, emptyList())
         }
         if (response.isNullOrBlank()) {
-            Log.d("Enma", "getMainPage: empty response for $url")
             return newHomePageResponse(request.name, emptyList())
         }
         val parsed = try { parseJson<EnmaSearchResponse>(response) } catch (e: Exception) {
@@ -196,12 +190,9 @@ class EnmaProvider : MainAPI() {
         val response = try {
             fetchApi("$apiUrl/search?keyword=$encoded&page=1")
         } catch (e: Exception) {
-            Log.d("Enma", "search failed - ${e.message}")
             return emptyList()
-        }
-        if (response.isNullOrBlank()) return emptyList()
+        } ?: return emptyList()
         val parsed = try { parseJson<EnmaSearchResponse>(response) } catch (e: Exception) {
-            Log.d("Enma", "search parse failed - ${e.message}")
             return emptyList()
         }
         return parsed.results?.data?.mapNotNull { it.toSearchResult() } ?: emptyList()
@@ -219,19 +210,8 @@ class EnmaProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val animeId = url.substringAfterLast("/").takeIf { it.isNotBlank() } ?: url
 
-        // Fetch anime info
-        val infoText = try {
-            fetchApi("$apiUrl/info?id=$animeId")
-        } catch (e: Exception) {
-            return null
-        } ?: return null
-        val info = try {
-            parseJson<EnmaInfoResponse>(infoText).results?.data
-        } catch (e: Exception) {
-            return null
-        } ?: run {
-            return null
-        }
+        val infoText = try { fetchApi("$apiUrl/info?id=$animeId") } catch (e: Exception) { return null } ?: return null
+        val info = try { parseJson<EnmaInfoResponse>(infoText).results?.data } catch (e: Exception) { return null } ?: return null
         val title = info.title ?: return null
 
         val poster = info.poster
@@ -249,17 +229,8 @@ class EnmaProvider : MainAPI() {
             else -> TvType.Anime
         }
 
-        // Fetch episodes
-        val epsText = try {
-            fetchApi("$apiUrl/episodes/$animeId")
-        } catch (e: Exception) {
-            return null
-        } ?: return null
-        val epsData = try {
-            parseJson<EnmaEpisodesResponse>(epsText).results?.episodes
-        } catch (e: Exception) {
-            return null
-        } ?: emptyList()
+        val epsText = try { fetchApi("$apiUrl/episodes/$animeId") } catch (e: Exception) { return null } ?: return null
+        val epsData = try { parseJson<EnmaEpisodesResponse>(epsText).results?.episodes } catch (e: Exception) { return null } ?: emptyList()
 
         var hasDub = false
         var hasSub = true
@@ -270,9 +241,7 @@ class EnmaProvider : MainAPI() {
                 hasDub = servers.any { it.type == "dub" }
                 hasSub = servers.any { it.type == "sub" }
             }
-        } catch (e: Exception) {
-            Log.d("Enma", "Failed to check dub availability - ${e.message}")
-        }
+        } catch (e: Exception) { }
 
         val subEpisodes = mutableListOf<Episode>()
         val dubEpisodes = mutableListOf<Episode>()
@@ -298,8 +267,6 @@ class EnmaProvider : MainAPI() {
             }
         }
 
-        Log.d("Enma", "${subEpisodes.size} sub episodes, ${dubEpisodes.size} dub episodes")
-
         val finalType = if (tvType == TvType.AnimeMovie && dubEpisodes.isNotEmpty()) TvType.Anime else tvType
         return newAnimeLoadResponse(title, url, finalType) {
             this.posterUrl = poster
@@ -317,25 +284,18 @@ class EnmaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val loadData = try {
-            parseJson<EpisodeLoadData>(data)
-        } catch (e: Exception) {
-            return false
-        }
+        val loadData = try { parseJson<EpisodeLoadData>(data) } catch (e: Exception) { return false }
 
         val animeId = loadData.animeId
         val episodeId = loadData.episodeId
         val type = loadData.type
         val epNum = loadData.episodeNum
 
-        // Fetch available servers
         val servers = try {
             val serversText = fetchApi("$apiUrl/servers/$animeId?ep=$epNum")
             if (serversText.isNullOrBlank()) emptyList()
             else parseJson<EnmaServersResponse>(serversText).results ?: emptyList()
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } catch (e: Exception) { emptyList() }
 
         val typeServers = servers.filter { it.type == type }
         if (typeServers.isEmpty()) return false
@@ -350,9 +310,11 @@ class EnmaProvider : MainAPI() {
             try {
                 val encodedId = URLEncoder.encode(episodeId, "UTF-8")
                 val streamUrl = "$apiUrl/stream?id=$encodedId&server=$serverName&type=$type"
+                Log.d("Enma", "Fetching stream: $streamUrl")
                 val streamText = fetchApi(streamUrl) ?: continue
                 val streamData = parseJson<EnmaStreamResponse>(streamText)
                 val iframe = streamData.results?.streamingLink?.iframe ?: continue
+                Log.d("Enma", "$serverName iframe: $iframe")
 
                 if (!seenUrls.add(iframe)) continue
 
@@ -369,14 +331,11 @@ class EnmaProvider : MainAPI() {
                     domain.contains("tryembed", ignoreCase = true) ->
                         resolveTryEmbed(iframe, serverName, displayType, subtitleCallback, callback)
                     else -> {
-                        try {
-                            loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
-                        } catch (e: Exception) {
-                            false
-                        }
+                        try { loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback) } catch (e: Exception) { false }
                     }
                 }
                 if (resolved) found = true
+                Log.d("Enma", "$serverName resolved=$resolved")
             } catch (e: Exception) {
                 Log.d("Enma", "Failed to resolve $serverName - ${e.message}")
             }
@@ -386,6 +345,12 @@ class EnmaProvider : MainAPI() {
         return found
     }
 
+    /**
+     * Resolve a cdn.4animo.xyz embed (HD-4, HD-5).
+     * v15 FIX: The old getSourcesUrl regex no longer matches (page structure changed +
+     * Cloudflare challenge). Now uses WebViewResolver to intercept the m3u8 after
+     * the page's JS player solves the CF challenge and loads the stream.
+     */
     private suspend fun resolve4Animo(
         iframeUrl: String,
         serverName: String,
@@ -395,80 +360,46 @@ class EnmaProvider : MainAPI() {
     ): Boolean {
         try {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
-            val pageHeaders = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
-                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Referer" to "$mainUrl/"
+            Log.d("Enma", "4Animo: resolving $iframeUrl via WebViewResolver")
+            val resolver = WebViewResolver(
+                interceptUrl = Regex("""\.m3u8"""),
+                additionalUrls = listOf(Regex("""\.mp4""")),
+                script = """try{var b=document.querySelector('button,[class*=play],.vjs-big-play-button,.jw-icon-display');if(b){b.click()}}catch(e){}""",
+                useOkhttp = false,
+                timeout = 25_000L
             )
-            val doc = app.get(iframeUrl, headers = pageHeaders).document
-            val getSourcesUrl = Regex("""getSourcesUrl\s*:\s*["']([^"']+)["']""").find(doc.html())?.groupValues?.get(1)
-                ?: return false
-            val sourcesApiUrl = if (getSourcesUrl.startsWith("http")) getSourcesUrl else "$host$getSourcesUrl"
-
-            val ajaxHeaders = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
-                "Accept" to "application/json, text/plain, */*",
-                "Referer" to iframeUrl
-            )
-            val sourcesText = app.get(sourcesApiUrl, headers = ajaxHeaders).text
-            val root = JsonParser.parseString(sourcesText).asJsonObject
-
-            val m3u8 = try {
-                val sourcesEl = root.get("sources")
-                if (sourcesEl?.isJsonArray == true && sourcesEl.asJsonArray.size() > 0) {
-                    sourcesEl.asJsonArray[0].asJsonObject.get("file")?.asString
-                } else if (sourcesEl?.isJsonObject == true) {
-                    sourcesEl.asJsonObject.get("file")?.asString
-                } else null
-            } catch (_: Exception) { null } ?: return false
-
-            val fullM3u8 = if (m3u8.startsWith("http")) m3u8 else "$host$m3u8"
-
-            val m3u8Headers = mapOf(
-                "Referer" to "$host/",
-                "Origin" to host,
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
-            )
-            val generated = M3u8Helper.generateM3u8(
-                "Enma $serverName $displayType", fullM3u8, host, headers = m3u8Headers
-            )
-            if (generated.isNotEmpty()) {
-                generated.forEach(callback)
-            } else {
+            val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
+            if (resolved.contains(".m3u8", true)) {
+                Log.d("Enma", "4Animo: intercepted m3u8=$resolved")
+                // Pass directly as ExtractorLink — don't use M3u8Helper which may reject it
                 callback.invoke(
                     newExtractorLink(
                         source = "Enma",
                         name = "Enma $serverName $displayType",
-                        url = fullM3u8,
+                        url = resolved,
                         type = ExtractorLinkType.M3U8
                     ) {
                         this.referer = "$host/"
-                        this.headers = m3u8Headers
+                        this.headers = mapOf(
+                            "Referer" to "$host/",
+                            "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
+                        )
                     }
                 )
+                return true
             }
-
-            try {
-                val tracks = root.getAsJsonArray("tracks")
-                if (tracks != null) {
-                    for (element in tracks) {
-                        val track = element.asJsonObject
-                        val kind = track.get("kind")?.asString ?: continue
-                        if (kind != "captions" && kind != "subtitles") continue
-                        val file = track.get("file")?.asString ?: continue
-                        val label = track.get("label")?.asString ?: "English"
-                        val fullSub = if (file.startsWith("http")) file else "$host$file"
-                        subtitleCallback.invoke(newSubtitleFile(label, fullSub))
-                    }
-                }
-            } catch (e: Exception) { e.message?.let { Log.d("Plugin", it) } }
-            return true
+            Log.d("Enma", "4Animo: no m3u8 intercepted for $serverName")
+            return false
         } catch (e: Exception) {
-            Log.d("Enma", "4Animo resolution failed for $iframeUrl - ${e.message}")
+            Log.d("Enma", "4Animo resolution failed - ${e.message}")
             return false
         }
     }
 
+    /**
+     * Resolve a vidnest.fun embed (HD-3).
+     * Uses WebViewResolver to intercept m3u8. Pass directly as ExtractorLink.
+     */
     private suspend fun resolveVidnest(
         iframeUrl: String,
         serverName: String,
@@ -501,6 +432,13 @@ class EnmaProvider : MainAPI() {
         }
     }
 
+    /**
+     * Resolve a tryembed.us.cc embed (HD-2).
+     * v15 FIX: WebViewResolver DOES find the m3u8, but M3u8Helper rejects it
+     * ("not a Master Playlist nor Media Playlist"). Now passes the m3u8 URL
+     * directly as an ExtractorLink with proper Referer headers, bypassing
+     * M3u8Helper's validation entirely.
+     */
     private suspend fun resolveTryEmbed(
         iframeUrl: String,
         serverName: String,
@@ -510,18 +448,34 @@ class EnmaProvider : MainAPI() {
     ): Boolean {
         try {
             val host = Regex("""(https?://[^/]+)""").find(iframeUrl)?.groupValues?.get(1) ?: return false
+            Log.d("Enma", "TryEmbed: resolving $iframeUrl via WebViewResolver")
             val resolver = WebViewResolver(
                 interceptUrl = Regex("""\.m3u8"""),
                 additionalUrls = listOf(Regex("""\.mp4""")),
                 script = """try{var b=document.querySelector('button,.vjs-big-play-button,[class*=play]');if(b){b.click()}}catch(e){}""",
                 useOkhttp = false,
-                timeout = 20_000L
+                timeout = 25_000L
             )
             val resolved = app.get(iframeUrl, referer = "$mainUrl/", interceptor = resolver).url
             if (resolved.contains(".m3u8", true)) {
-                M3u8Helper.generateM3u8(
-                    "Enma $serverName $displayType", resolved, host
-                ).forEach(callback)
+                Log.d("Enma", "TryEmbed: intercepted m3u8=$resolved")
+                // Pass directly as ExtractorLink — M3u8Helper rejects tryembed m3u8s
+                // because they return non-standard content when fetched without cookies.
+                // ExoPlayer can play them directly with the right Referer header.
+                callback.invoke(
+                    newExtractorLink(
+                        source = "Enma",
+                        name = "Enma $serverName $displayType",
+                        url = resolved,
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = "$host/"
+                        this.headers = mapOf(
+                            "Referer" to "$host/",
+                            "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
+                        )
+                    }
+                )
                 return true
             }
             Log.d("Enma", "TryEmbed $serverName no m3u8 intercepted")
