@@ -230,7 +230,9 @@ object EnmaDecryptor {
         return sb.toString()
     }
 
-    /** Parse a double-JSON-encoded string (result of evaluateJavascript on a string value) */
+
+    suspend fun fetchAndDecrypt(url: String, headers: Map<String, String>): String? {
+        Log.d(TAG, "fetchAndDecrypt: $url init=$initialized")
         if (!initialized) startInit()
         return try {
             val encrypted = com.lagradost.cloudstream3.app.get(url, headers = headers, timeout = 15_000L).text
