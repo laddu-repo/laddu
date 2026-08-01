@@ -237,7 +237,7 @@ class TimStreamsProvider : MainAPI() {
                 allVars[m.groupValues[1]] = m.groupValues[2].toInt()
             }
 
-            val formulaMatch = Regex("""\^_(\w+)\)\s*-\s*_(\w+)""").find(html) ?: return false
+            val formulaMatch = Regex("\\\^_(\\w+)\\)\\s*-\\s*_(\\w+)").find(html) ?: return false
             val xorKey = allVars[formulaMatch.groupValues[1]] ?: return false
             val subVal = allVars[formulaMatch.groupValues[2]] ?: return false
 
