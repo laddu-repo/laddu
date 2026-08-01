@@ -11,7 +11,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.network.WebViewResolver
+import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -23,11 +23,11 @@ class TimStreamsProvider : MainAPI() {
     override val hasDownloadSupport = false
     override val supportedTypes = setOf(TvType.Live)
 
-    private val apiUrl = "https://api.vixnuvew.uk/api"
-    private val cdnBase = "https://pacquiao.inproviszon.st/"
+    private val apiUrl = "https://api.timstreams.st/api"
     private val TAG = "TimStreams"
 
-    // ==================== DATA MODELS ====================
+    private val mobileUA =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class TimStream(
@@ -75,23 +75,6 @@ class TimStreamsProvider : MainAPI() {
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    data class ReplaysResponse(
-        @JsonProperty("replays") val replays: List<TimEvent>? = null
-    )
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class SettingsResponse(
-        @JsonProperty("settings") val settings: Map<String, String>? = null,
-        @JsonProperty("genres") val genres: Map<String, String>? = null
-    )
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class MultiviewResponse(
-        @JsonProperty("streams") val streams: List<TimStream>? = null
-    )
-
-    // Load data passed from search → loadLinks
-    @JsonIgnoreProperties(ignoreUnknown = true)
     data class LoadData(
         val title: String,
         val streams: List<TimStream>,
@@ -99,20 +82,15 @@ class TimStreamsProvider : MainAPI() {
         val isUpcoming: Boolean = false
     )
 
-    // ==================== getMainPage ====================
-    // Fetch ALL data in one call, return multiple sections (like DamiTV)
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        Log.d(TAG, "getMainPage START: section='${request.name}' page=$page")
-        val lists = mutableListOf<HomePageList>()
+    override val mainPage = mainPageOf("$apiUrl/live-upcoming" to "All")
 
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val lists = mutableListOf<HomePageList>()
         try {
             coroutineScope {
                 val liveDeferred = async { fetchLiveUpcoming() }
                 val channelsDeferred = async { fetchChannels() }
-                val replaysDeferred = async { fetchReplays() }
-                val multiviewDeferred = async { fetchMultiview() }
 
-                // Live Events (split into Live Now + Upcoming)
                 val liveData = liveDeferred.await()
                 if (liveData != null) {
                     val (live, upcoming) = liveData.partition { e ->
@@ -122,194 +100,85 @@ class TimStreamsProvider : MainAPI() {
                             eventTime <= System.currentTimeMillis()
                         } catch (ex: Exception) { true }
                     }
-                    if (live.isNotEmpty()) {
-                        val items = live.mapNotNull { it.toSearchResponse() }
-                        Log.d(TAG, "getMainPage: Live Now -> ${items.size} items")
-                        lists.add(HomePageList("🔴 Live Now", items, isHorizontalImages = true))
-                    }
-                    if (upcoming.isNotEmpty()) {
-                        val items = upcoming.mapNotNull { it.toUpcomingSearchResponse() }
-                        Log.d(TAG, "getMainPage: Upcoming -> ${items.size} items")
-                        lists.add(HomePageList("📅 Upcoming Events", items, isHorizontalImages = true))
-                    }
+                    if (live.isNotEmpty())
+                        lists.add(HomePageList("Live Now", live.mapNotNull { it.toSearchResponse() }, isHorizontalImages = true))
+                    if (upcoming.isNotEmpty())
+                        lists.add(HomePageList("Upcoming Events", upcoming.mapNotNull { it.toUpcomingSearchResponse() }, isHorizontalImages = true))
                 }
 
-                // Live TV Channels
                 val channelsData = channelsDeferred.await()
-                if (channelsData != null && channelsData.isNotEmpty()) {
-                    val items = channelsData.mapNotNull { it.toSearchResponse() }
-                    Log.d(TAG, "getMainPage: Live TV -> ${items.size} items")
-                    lists.add(HomePageList("📺 Live TV Channels", items, isHorizontalImages = true))
-                }
-
-                // Replays
-                val replaysData = replaysDeferred.await()
-                if (replaysData != null && replaysData.isNotEmpty()) {
-                    val items = replaysData.mapNotNull { it.toSearchResponse() }
-                    Log.d(TAG, "getMainPage: Replays -> ${items.size} items")
-                    lists.add(HomePageList("🎬 Replays", items, isHorizontalImages = true))
-                }
-
-                // Multiview
-                val multiviewData = multiviewDeferred.await()
-                if (multiviewData != null && multiviewData.isNotEmpty()) {
-                    val loadData = LoadData(title = "Multiview", streams = multiviewData)
-                    val item = newLiveSearchResponse("Multiview", loadData.toJson(), TvType.Live) {
-                        this.posterUrl = multiviewData.firstOrNull()?.logo
-                    }
-                    lists.add(HomePageList("🟢 Multiview", listOf(item), isHorizontalImages = true))
-                }
+                if (channelsData != null && channelsData.isNotEmpty())
+                    lists.add(HomePageList("Live TV Channels", channelsData.mapNotNull { it.toSearchResponse() }, isHorizontalImages = true))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "getMainPage FAILED: ${e.message}")
-            Log.e(TAG, "getMainPage error: ${e.stackTraceToString().take(400)}")
+            Log.e(TAG, "getMainPage: ${e.message}")
         }
-
-        Log.d(TAG, "getMainPage END: ${lists.size} sections, ${lists.sumOf { it.list.size }} total items")
         return newHomePageResponse(lists, hasNext = false)
     }
 
     private suspend fun fetchLiveUpcoming(): List<TimEvent>? {
         return try {
-            val res = app.get("$apiUrl/live-upcoming", timeout = 30_000L)
-            Log.d(TAG, "fetchLiveUpcoming: HTTP ${res.code}, size=${res.text.length}")
+            val res = app.get("$apiUrl/live-upcoming", timeout = 30_000L, headers = mapOf("User-Agent" to mobileUA, "Referer" to "$mainUrl/"))
             parseJson<LiveUpcomingResponse>(res.text).events
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchLiveUpcoming FAILED: ${e.message}"); null
-        }
+        } catch (e: Exception) { Log.e(TAG, "fetchLiveUpcoming: ${e.message}"); null }
     }
 
     private suspend fun fetchChannels(): List<TimChannel>? {
         return try {
-            val res = app.get("$apiUrl/channels", timeout = 30_000L)
-            Log.d(TAG, "fetchChannels: HTTP ${res.code}, size=${res.text.length}")
+            val res = app.get("$apiUrl/channels", timeout = 30_000L, headers = mapOf("User-Agent" to mobileUA, "Referer" to "$mainUrl/"))
             parseJson<ChannelsResponse>(res.text).channels
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchChannels FAILED: ${e.message}"); null
-        }
+        } catch (e: Exception) { Log.e(TAG, "fetchChannels: ${e.message}"); null }
     }
-
-    private suspend fun fetchReplays(): List<TimEvent>? {
-        return try {
-            val res = app.get("$apiUrl/replays", timeout = 30_000L)
-            Log.d(TAG, "fetchReplays: HTTP ${res.code}, size=${res.text.length}")
-            parseJson<ReplaysResponse>(res.text).replays
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchReplays FAILED: ${e.message}"); null
-        }
-    }
-
-    private suspend fun fetchMultiview(): List<TimStream>? {
-        return try {
-            val res = app.get("$apiUrl/multiview", timeout = 30_000L)
-            Log.d(TAG, "fetchMultiview: HTTP ${res.code}, size=${res.text.length}")
-            parseJson<MultiviewResponse>(res.text).streams
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchMultiview FAILED: ${e.message}"); null
-        }
-    }
-
-    // mainPage — single section triggers getMainPage which returns ALL sections at once
-    override val mainPage = mainPageOf(
-        "$apiUrl/live-upcoming" to "All"
-    )
 
     private fun TimEvent.toSearchResponse(): SearchResponse? {
         val title = name ?: return null
         val streams = streams ?: return null
         if (streams.isEmpty()) return null
-        Log.d(TAG, "toSearchResponse: '$title' streams=${streams.size} poster=${logo?.take(50)}")
-        val loadData = LoadData(title = title, streams = streams, posterUrl = logo)
-        return newLiveSearchResponse(title, loadData.toJson(), TvType.Live) {
-            this.posterUrl = logo
-        }
+        return newLiveSearchResponse(title, LoadData(title, streams, logo).toJson(), TvType.Live) { this.posterUrl = logo }
     }
 
     private fun TimEvent.toUpcomingSearchResponse(): SearchResponse? {
         val title = name ?: return null
         val streams = streams ?: return null
         if (streams.isEmpty()) return null
-        val displayTitle = "$title [Upcoming: ${time ?: date ?: "TBD"}]"
-        Log.d(TAG, "toUpcomingSearchResponse: '$displayTitle' streams=${streams.size}")
-        val loadData = LoadData(title = title, streams = streams, posterUrl = logo, isUpcoming = true)
-        return newLiveSearchResponse(displayTitle, loadData.toJson(), TvType.Live) {
-            this.posterUrl = logo
-        }
+        val displayTitle = "$title [${time ?: date ?: "TBD"}]"
+        return newLiveSearchResponse(displayTitle, LoadData(title, streams, logo, true).toJson(), TvType.Live) { this.posterUrl = logo }
     }
 
     private fun TimChannel.toSearchResponse(): SearchResponse? {
         val title = name ?: return null
         val streams = streams ?: return null
         if (streams.isEmpty()) return null
-        Log.d(TAG, "toSearchResponse: channel '$title' streams=${streams.size}")
-        val loadData = LoadData(title = title, streams = streams, posterUrl = logo)
-        return newLiveSearchResponse(title, loadData.toJson(), TvType.Live) {
-            this.posterUrl = logo
-        }
+        return newLiveSearchResponse(title, LoadData(title, streams, logo).toJson(), TvType.Live) { this.posterUrl = logo }
     }
 
-    // ==================== search ====================
-
     override suspend fun search(query: String): List<SearchResponse> {
-        Log.d(TAG, "search START: query='$query'")
         if (query.isBlank()) return emptyList()
         val results = mutableListOf<SearchResponse>()
-
         try {
-            // Search events
-            val eventsRes = app.get("$apiUrl/live-upcoming", timeout = 30_000L)
-            val eventsParsed = parseJson<LiveUpcomingResponse>(eventsRes.text)
-            eventsParsed.events?.forEach { e ->
-                if (e.name?.contains(query, ignoreCase = true) == true) {
-                    e.toSearchResponse()?.let { results.add(it) }
-                }
+            val headers = mapOf("User-Agent" to mobileUA)
+            val eventsRes = app.get("$apiUrl/live-upcoming", timeout = 30_000L, headers = headers)
+            parseJson<LiveUpcomingResponse>(eventsRes.text).events?.forEach { e ->
+                if (e.name?.contains(query, ignoreCase = true) == true) e.toSearchResponse()?.let { results.add(it) }
             }
-
-            // Search channels
-            val channelsRes = app.get("$apiUrl/channels", timeout = 30_000L)
-            val channelsParsed = parseJson<ChannelsResponse>(channelsRes.text)
-            channelsParsed.channels?.forEach { c ->
-                if (c.name?.contains(query, ignoreCase = true) == true) {
-                    c.toSearchResponse()?.let { results.add(it) }
-                }
+            val channelsRes = app.get("$apiUrl/channels", timeout = 30_000L, headers = headers)
+            parseJson<ChannelsResponse>(channelsRes.text).channels?.forEach { c ->
+                if (c.name?.contains(query, ignoreCase = true) == true) c.toSearchResponse()?.let { results.add(it) }
             }
-
-            // Search replays
-            val replaysRes = app.get("$apiUrl/replays", timeout = 30_000L)
-            val replaysParsed = parseJson<ReplaysResponse>(replaysRes.text)
-            replaysParsed.replays?.forEach { r ->
-                if (r.name?.contains(query, ignoreCase = true) == true) {
-                    r.toSearchResponse()?.let { results.add(it) }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "search FAILED: ${e.message}")
-        }
-
-        Log.d(TAG, "search END: '$query' -> ${results.size} results")
+        } catch (e: Exception) { Log.e(TAG, "search: ${e.message}") }
         return results
     }
 
-    // ==================== load ====================
-
     override suspend fun load(url: String): LoadResponse? {
-        Log.d(TAG, "load START: url='$url'")
         return try {
             val loadData = parseJson<LoadData>(url)
-            Log.d(TAG, "load: title='${loadData.title}' streams=${loadData.streams.size} isUpcoming=${loadData.isUpcoming}")
-
             newLiveStreamLoadResponse(loadData.title, url, this.name) {
                 this.posterUrl = loadData.posterUrl
                 this.plot = "${loadData.streams.size} stream sources available"
                 this.dataUrl = loadData.toJson()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "load FAILED: ${e.message}")
-            null
-        }
+        } catch (e: Exception) { null }
     }
-
-    // ==================== loadLinks ====================
 
     override suspend fun loadLinks(
         data: String,
@@ -317,310 +186,78 @@ class TimStreamsProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d(TAG, "loadLinks START: data='$data'")
-
-        val loadData = try {
-            parseJson<LoadData>(data)
-        } catch (e: Exception) {
-            Log.e(TAG, "loadLinks: failed to parse LoadData: ${e.message}")
-            return false
-        }
-
-        Log.d(TAG, "loadLinks: title='${loadData.title}' streams=${loadData.streams.size}")
-        if (loadData.streams.isEmpty()) {
-            Log.e(TAG, "loadLinks: no streams in LoadData")
-            return false
-        }
+        val loadData = try { parseJson<LoadData>(data) } catch (e: Exception) { return false }
+        if (loadData.streams.isEmpty()) return false
 
         var found = false
         for (stream in loadData.streams) {
-            val streamName = stream.name
-            val streamUrl = stream.url
-            Log.d(TAG, "loadLinks: processing stream '$streamName' -> $streamUrl")
-
             try {
-                when {
-                    streamUrl.contains("icelanders.st") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is icelanders.st embed — using WebViewResolver")
-                        try {
-                            val resolver = WebViewResolver(
-                                interceptUrl = Regex("""(?i)\.(m3u8|mp4)(?:\?|$)"""),
-                                additionalUrls = listOf(Regex("""(?i)\.(m3u8|mp4)(?:\?|$)""")),
-                                script = """document.querySelector('video,[role="button"],.vjs-big-play-button,button,.play-button')?.click();""",
-                                useOkhttp = false,
-                                timeout = 30_000L
-                            )
-                            val resolvedUrl = app.get(streamUrl, referer = "$mainUrl/", interceptor = resolver).url
-                            Log.d(TAG, "loadLinks: '$streamName' icelanders.st resolved: $resolvedUrl")
-
-                            if (resolvedUrl.contains(".m3u8", ignoreCase = true) || resolvedUrl.contains(".mp4", ignoreCase = true)) {
-                                val embedHost = try {
-                                    val uri = android.net.Uri.parse(streamUrl)
-                                    "${uri.scheme}://${uri.host}"
-                                } catch (e: Exception) { null }
-
-                                val cookieStr = if (embedHost != null) {
-                                    try { android.webkit.CookieManager.getInstance().getCookie(embedHost) ?: "" } catch (e: Exception) { "" }
-                                } else { "" }
-
-                                val cdnHost = try {
-                                    val uri = android.net.Uri.parse(resolvedUrl)
-                                    "${uri.scheme}://${uri.host}"
-                                } catch (e: Exception) { null }
-
-                                val cdnCookies = if (cdnHost != null) {
-                                    try { android.webkit.CookieManager.getInstance().getCookie(cdnHost) ?: "" } catch (e: Exception) { "" }
-                                } else { "" }
-
-                                val allCookies = listOf(cookieStr, cdnCookies).filter { it.isNotBlank() }.joinToString("; ")
-
-                                val headers = mutableMapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-                                    "Referer" to streamUrl
-                                )
-                                if (allCookies.isNotBlank()) headers["Cookie"] = allCookies
-
-                                val isM3u8 = resolvedUrl.contains(".m3u8", ignoreCase = true)
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = "$name - $streamName",
-                                        name = "$name - $streamName",
-                                        url = resolvedUrl,
-                                        type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                                    ) {
-                                        this.quality = Qualities.Unknown.value
-                                        this.headers = headers
-                                    }
-                                )
-                                found = true
-                                Log.d(TAG, "loadLinks: '$streamName' icelanders.st stream intercepted")
-                            } else {
-                                Log.e(TAG, "loadLinks: '$streamName' icelanders.st no stream URL intercepted")
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "loadLinks: '$streamName' icelanders.st failed: ${e.message}")
-                        }
+                val resolved = when {
+                    stream.url.contains("icelanders.st") -> resolveIcelanders(stream.url, subtitleCallback, callback)
+                    stream.url.contains("luluvdo.com") || stream.url.contains("luluvid.com") -> {
+                        loadExtractor(stream.url.replace("luluvid.com", "luluvdo.com"), "$mainUrl/", subtitleCallback, callback)
                     }
-
-                    streamUrl.contains("ritzembeds.pages.dev") || streamUrl.contains("vileembeds.pages.dev") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is ritz/vile embed — using WebViewResolver to intercept m3u8")
-                        try {
-                            val resolver = WebViewResolver(
-                                interceptUrl = Regex("""(?i)\.m3u8(?:\?|$)"""),
-                                additionalUrls = listOf(Regex("""(?i)\.m3u8(?:\?|$)""")),
-                                script = """document.querySelector('.vjs-big-play-button,.play-button,button,[role=button]')?.click();""",
-                                useOkhttp = false,
-                                timeout = 30_000L
-                            )
-                            val resolvedUrl = app.get(streamUrl, referer = "$mainUrl/", interceptor = resolver).url
-                            Log.d(TAG, "loadLinks: '$streamName' WebViewResolver resolved: $resolvedUrl")
-
-                            if (resolvedUrl.contains(".m3u8", ignoreCase = true)) {
-                                // Extract CF cookies from CookieManager for the CDN domain
-                                // The WebView already solved the CF challenge, cookies are in CookieManager
-                                val cdnHost = try {
-                                    val uri = android.net.Uri.parse(resolvedUrl)
-                                    "${uri.scheme}://${uri.host}"
-                                } catch (e: Exception) { null }
-
-                                val cookieStr = if (cdnHost != null) {
-                                    try {
-                                        android.webkit.CookieManager.getInstance().getCookie(cdnHost) ?: ""
-                                    } catch (e: Exception) { "" }
-                                } else { "" }
-
-                                // Also extract cookies from the ritzembeds domain
-                                val ritzCookies = try {
-                                    android.webkit.CookieManager.getInstance().getCookie("https://ritzembeds.pages.dev") ?: ""
-                                } catch (e: Exception) { "" }
-
-                                // Combine all cookies (cdn + ritzembeds)
-                                val allCookies = listOf(cookieStr, ritzCookies)
-                                    .filter { it.isNotBlank() }
-                                    .joinToString("; ")
-
-                                Log.d(TAG, "loadLinks: '$streamName' CDN cookies: ${cookieStr.take(80)}")
-                                Log.d(TAG, "loadLinks: '$streamName' ritz cookies: ${ritzCookies.take(80)}")
-
-                                // Build headers with cookies + Referer (matching what the WebView sent)
-                                val headers = mutableMapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-                                    "Referer" to streamUrl,
-                                    "Origin" to "https://ritzembeds.pages.dev"
-                                )
-                                if (allCookies.isNotBlank()) {
-                                    headers["Cookie"] = allCookies
-                                }
-
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = "$name - $streamName",
-                                        name = "$name - $streamName",
-                                        url = resolvedUrl,
-                                        type = ExtractorLinkType.M3U8
-                                    ) {
-                                        this.quality = Qualities.Unknown.value
-                                        this.headers = headers
-                                    }
-                                )
-                                found = true
-                                Log.d(TAG, "loadLinks: '$streamName' m3u8 intercepted with cookies successfully")
-                            } else {
-                                Log.e(TAG, "loadLinks: '$streamName' WebViewResolver did not intercept .m3u8 (got: $resolvedUrl)")
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "loadLinks: '$streamName' WebViewResolver failed: ${e.message}")
-                        }
+                    stream.url.contains("player.vimeo.com") -> {
+                        loadExtractor(stream.url, "$mainUrl/", subtitleCallback, callback)
                     }
-
-                    // luluvdo.com / luluvid.com → built-in extractor
-                    streamUrl.contains("luluvdo.com") || streamUrl.contains("luluvid.com") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is luluvdo — using loadExtractor")
-                        val realUrl = streamUrl.replace("luluvid.com", "luluvdo.com")
-                        val loaded = loadExtractor(realUrl, "$mainUrl/", subtitleCallback, callback)
-                        if (loaded) {
-                            found = true
-                            Log.d(TAG, "loadLinks: '$streamName' luluvdo resolved via loadExtractor")
-                        } else {
-                            Log.e(TAG, "loadLinks: '$streamName' loadExtractor returned false")
-                        }
+                    stream.url.contains(".m3u8") -> {
+                        callback.invoke(newExtractorLink("$name", "$name", stream.url, ExtractorLinkType.M3U8) { this.quality = Qualities.Unknown.value })
+                        true
                     }
-
-                    // player.vimeo.com → built-in extractor
-                    streamUrl.contains("player.vimeo.com") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is Vimeo — using loadExtractor")
-                        val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
-                        if (loaded) {
-                            found = true
-                            Log.d(TAG, "loadLinks: '$streamName' Vimeo resolved via loadExtractor")
-                        } else {
-                            Log.e(TAG, "loadLinks: '$streamName' Vimeo loadExtractor returned false")
-                        }
+                    stream.url.contains(".mp4") -> {
+                        callback.invoke(newExtractorLink("$name", "$name", stream.url, ExtractorLinkType.VIDEO) { this.quality = Qualities.Unknown.value })
+                        true
                     }
-
-                    // timstreams.upn.one → custom player with encrypted API
-                    // Use WebViewResolver to load the page, let the JS player init,
-                    // and intercept the .m3u8 or .mp4 URL it requests
-                    streamUrl.contains("upn.one") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is upn.one — using WebViewResolver to intercept stream")
-                        try {
-                            val resolver = WebViewResolver(
-                                interceptUrl = Regex("""(?i)\.(m3u8|mp4)(?:\?|$)"""),
-                                additionalUrls = listOf(Regex("""(?i)\.(m3u8|mp4)(?:\?|$)""")),
-                                script = """document.querySelector('video,[role="button"],.vds-play-button,button')?.click();""",
-                                useOkhttp = false,
-                                timeout = 30_000L
-                            )
-                            val resolvedUrl = app.get(streamUrl, referer = "$mainUrl/", interceptor = resolver).url
-                            Log.d(TAG, "loadLinks: '$streamName' upn.one WebViewResolver resolved: $resolvedUrl")
-
-                            if (resolvedUrl.contains(".m3u8", ignoreCase = true) || resolvedUrl.contains(".mp4", ignoreCase = true)) {
-                                // Extract cookies from the upn.one domain
-                                val upnCookies = try {
-                                    android.webkit.CookieManager.getInstance().getCookie("https://timstreams.upn.one") ?: ""
-                                } catch (e: Exception) { "" }
-
-                                val headers = mutableMapOf(
-                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-                                    "Referer" to "https://timstreams.upn.one/"
-                                )
-                                if (upnCookies.isNotBlank()) {
-                                    headers["Cookie"] = upnCookies
-                                }
-                                Log.d(TAG, "loadLinks: '$streamName' upn.one cookies: ${upnCookies.take(80)}")
-
-                                val isM3u8 = resolvedUrl.contains(".m3u8", ignoreCase = true)
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = "$name - $streamName",
-                                        name = "$name - $streamName",
-                                        url = resolvedUrl,
-                                        type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                                    ) {
-                                        this.quality = Qualities.Unknown.value
-                                        this.headers = headers
-                                    }
-                                )
-                                found = true
-                                Log.d(TAG, "loadLinks: '$streamName' upn.one stream intercepted successfully")
-                            } else {
-                                Log.e(TAG, "loadLinks: '$streamName' upn.one WebViewResolver did not intercept stream URL (got: $resolvedUrl)")
-                                // Fallback: try loadExtractor
-                                val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
-                                if (loaded) {
-                                    found = true
-                                    Log.d(TAG, "loadLinks: '$streamName' upn.one resolved via loadExtractor fallback")
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "loadLinks: '$streamName' upn.one WebViewResolver failed: ${e.message}")
-                            // Fallback: try loadExtractor
-                            val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
-                            if (loaded) {
-                                found = true
-                                Log.d(TAG, "loadLinks: '$streamName' upn.one resolved via loadExtractor fallback")
-                            }
-                        }
-                    }
-
-                    // Direct m3u8/mp4 URLs
-                    streamUrl.contains(".m3u8") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is direct m3u8")
-                        callback.invoke(
-                            newExtractorLink(
-                                source = "$name - $streamName",
-                                name = "$name - $streamName",
-                                url = streamUrl,
-                                type = ExtractorLinkType.M3U8
-                            )
-                        )
-                        found = true
-                    }
-
-                    streamUrl.contains(".mp4") -> {
-                        Log.d(TAG, "loadLinks: '$streamName' is direct mp4")
-                        callback.invoke(
-                            newExtractorLink(
-                                source = "$name - $streamName",
-                                name = "$name - $streamName",
-                                url = streamUrl,
-                                type = ExtractorLinkType.VIDEO
-                            )
-                        )
-                        found = true
-                    }
-
-                    // Fallback: try loadExtractor for any other URL
-                    else -> {
-                        Log.d(TAG, "loadLinks: '$streamName' unknown domain — trying loadExtractor")
-                        val loaded = loadExtractor(streamUrl, "$mainUrl/", subtitleCallback, callback)
-                        if (loaded) {
-                            found = true
-                            Log.d(TAG, "loadLinks: '$streamName' resolved via loadExtractor fallback")
-                        } else {
-                            Log.e(TAG, "loadLinks: '$streamName' loadExtractor fallback failed")
-                        }
-                    }
+                    else -> loadExtractor(stream.url, "$mainUrl/", subtitleCallback, callback)
                 }
+                if (resolved) found = true
             } catch (e: Exception) {
-                Log.e(TAG, "loadLinks: FAILED for stream '$streamName': ${e.message}")
+                Log.e(TAG, "loadLinks: ${stream.name} - ${e.message}")
             }
         }
-
-        Log.d(TAG, "loadLinks END: found=$found for '${loadData.title}'")
         return found
     }
 
-    /**
-     * Extract the embed ID from a ritzembeds/vileembeds URL.
-     * "https://ritzembeds.pages.dev/embed/fox-usa" → "fox-usa"
-     */
-    private fun extractEmbedId(url: String): String? {
-        val embedIndex = url.indexOf("/embed/")
-        if (embedIndex < 0) return null
-        val afterEmbed = url.substring(embedIndex + 7) // after "/embed/"
-        // Take everything up to the next /, ?, #, or end
-        val id = afterEmbed.split("/", "?", "#").firstOrNull()
-        return id?.takeIf { it.isNotBlank() }
+    // The icelanders.st embed page has an obfuscated script with XOR+sub encoding.
+    // We decode it to find the signed m3u8 URL, then pass it to ExoPlayer with
+    // the embed host as Referer (required by the CDN).
+    private suspend fun resolveIcelanders(
+        embedUrl: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            val html = app.get(embedUrl, referer = "$mainUrl/", headers = mapOf("User-Agent" to mobileUA)).text
+
+            val arrayMatch = Regex("""var\s+_\w+\s*=\s*\[([^\]]+)\]""").find(html) ?: return false
+            val nums = arrayMatch.groupValues[1].split(",").mapNotNull { it.trim().toIntOrNull() }
+
+            val allVars = mutableMapOf<String, Int>()
+            Regex("""_(\w+)\s*=\s*(\d+)""").findAll(html).forEach { m ->
+                allVars[m.groupValues[1]] = m.groupValues[2].toInt()
+            }
+
+            val formulaMatch = Regex("""\^_(\w+)\)\s*-\s*_(\w+)""").find(html) ?: return false
+            val xorKey = allVars[formulaMatch.groupValues[1]] ?: return false
+            val subVal = allVars[formulaMatch.groupValues[2]] ?: return false
+
+            val decoded = nums.joinToString("") { chr(((it ^ xorKey) - subVal + 256) % 256) }
+
+            val m3u8Match = Regex("""https?://[^"\s']+\.m3u8[^"\s']*""").find(decoded) ?: return false
+            val m3u8Url = m3u8Match.value
+
+            val embedHost = Regex("""(https?://[^/]+)""").find(embedUrl)?.groupValues?.get(1) ?: mainUrl
+
+            callback.invoke(
+                newExtractorLink("$name", "$name", m3u8Url, ExtractorLinkType.M3U8) {
+                    this.quality = Qualities.Unknown.value
+                    this.headers = mapOf("User-Agent" to mobileUA, "Referer" to "$embedHost/")
+                }
+            )
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "resolveIcelanders: ${e.message}")
+            false
+        }
     }
 }
