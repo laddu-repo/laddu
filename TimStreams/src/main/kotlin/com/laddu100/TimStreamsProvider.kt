@@ -242,7 +242,11 @@ class TimStreamsProvider : MainAPI() {
             val xorKey = allVars[formulaMatch.groupValues[1]] ?: return false
             val subVal = allVars[formulaMatch.groupValues[2]] ?: return false
 
-            val decoded = nums.map { (((it ^ xorKey) - subVal + 256) % 256).toChar() }.joinToString("")
+            val decoded = buildString {
+                for (n in nums) {
+                    append((((n ^ xorKey) - subVal + 256) % 256).toChar())
+                }
+            }
 
             val m3u8Match = Regex("""https?://[^"\s']+\.m3u8[^"\s']*""").find(decoded) ?: return false
             val m3u8Url = m3u8Match.value
