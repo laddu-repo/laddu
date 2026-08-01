@@ -248,7 +248,7 @@ class TimStreamsProvider : MainAPI() {
                 }
             }
 
-            val m3u8Match = Regex("""https?://[^"\s']+\.m3u8[^"\s']*""").find(decoded) ?: return false
+            val m3u8Match = Regex("""https?://\S+\.m3u8\S*""").find(decoded) ?: return false
             val m3u8Url = m3u8Match.value
 
             val embedHost = Regex("""(https?://[^/]+)""").find(embedUrl)?.groupValues?.get(1) ?: mainUrl
