@@ -244,7 +244,7 @@ class TimStreamsProvider : MainAPI() {
 
             val decoded = buildString {
                 for (n in nums) {
-                    append((((n ^ xorKey) - subVal + 256) % 256).toChar())
+                    append(((n ^ xorKey) - subVal + 256) % 256).toChar()
                 }
             }
 
