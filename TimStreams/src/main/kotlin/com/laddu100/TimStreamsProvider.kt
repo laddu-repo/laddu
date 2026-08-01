@@ -25,17 +25,14 @@ class TimStreamsProvider : MainAPI() {
 
     private val apiUrl = "https://api.timstreams.st/api"
     private val TAG = "TimStreams"
-
-    private val mobileUA =
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    private val mobileUA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class TimStream(
         @JsonProperty("name") val name: String,
         @JsonProperty("url") val url: String,
         @JsonProperty("vip") val vip: Boolean? = null,
-        @JsonProperty("logo") val logo: String? = null,
-        @JsonProperty("type") val type: String? = null
+        @JsonProperty("logo") val logo: String? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -43,11 +40,7 @@ class TimStreamsProvider : MainAPI() {
         @JsonProperty("url") val url: String? = null,
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("logo") val logo: String? = null,
-        @JsonProperty("genre") val genre: Int? = null,
         @JsonProperty("time") val time: String? = null,
-        @JsonProperty("isevent") val isevent: Boolean? = null,
-        @JsonProperty("vip") val vip: Boolean? = null,
-        @JsonProperty("featured") val featured: Boolean? = null,
         @JsonProperty("streams") val streams: List<TimStream>? = null,
         @JsonProperty("date") val date: String? = null
     )
@@ -57,21 +50,17 @@ class TimStreamsProvider : MainAPI() {
         @JsonProperty("url") val url: String? = null,
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("logo") val logo: String? = null,
-        @JsonProperty("genre") val genre: Int? = null,
-        @JsonProperty("vip") val vip: Boolean? = null,
         @JsonProperty("streams") val streams: List<TimStream>? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class LiveUpcomingResponse(
-        @JsonProperty("events") val events: List<TimEvent>? = null,
-        @JsonProperty("genres") val genres: Map<String, String>? = null
+        @JsonProperty("events") val events: List<TimEvent>? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class ChannelsResponse(
-        @JsonProperty("channels") val channels: List<TimChannel>? = null,
-        @JsonProperty("genres") val genres: Map<String, String>? = null
+        @JsonProperty("channels") val channels: List<TimChannel>? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -90,7 +79,6 @@ class TimStreamsProvider : MainAPI() {
             coroutineScope {
                 val liveDeferred = async { fetchLiveUpcoming() }
                 val channelsDeferred = async { fetchChannels() }
-
                 val liveData = liveDeferred.await()
                 if (liveData != null) {
                     val (live, upcoming) = liveData.partition { e ->
@@ -105,7 +93,6 @@ class TimStreamsProvider : MainAPI() {
                     if (upcoming.isNotEmpty())
                         lists.add(HomePageList("Upcoming Events", upcoming.mapNotNull { it.toUpcomingSearchResponse() }, isHorizontalImages = true))
                 }
-
                 val channelsData = channelsDeferred.await()
                 if (channelsData != null && channelsData.isNotEmpty())
                     lists.add(HomePageList("Live TV Channels", channelsData.mapNotNull { it.toSearchResponse() }, isHorizontalImages = true))
@@ -188,12 +175,11 @@ class TimStreamsProvider : MainAPI() {
     ): Boolean {
         val loadData = try { parseJson<LoadData>(data) } catch (e: Exception) { return false }
         if (loadData.streams.isEmpty()) return false
-
         var found = false
         for (stream in loadData.streams) {
             try {
                 val resolved = when {
-                    stream.url.contains("icelanders.st") -> resolveIcelanders(stream.url, subtitleCallback, callback)
+                    stream.url.contains("icelanders.st") -> resolveIcelanders(stream.url, stream.name, callback)
                     stream.url.contains("luluvdo.com") || stream.url.contains("luluvid.com") -> {
                         loadExtractor(stream.url.replace("luluvid.com", "luluvdo.com"), "$mainUrl/", subtitleCallback, callback)
                     }
@@ -201,11 +187,11 @@ class TimStreamsProvider : MainAPI() {
                         loadExtractor(stream.url, "$mainUrl/", subtitleCallback, callback)
                     }
                     stream.url.contains(".m3u8") -> {
-                        callback.invoke(newExtractorLink("$name", "$name", stream.url, ExtractorLinkType.M3U8) { this.quality = Qualities.Unknown.value })
+                        callback.invoke(newExtractorLink("$name - ${stream.name}", "$name - ${stream.name}", stream.url, ExtractorLinkType.M3U8) { this.quality = Qualities.Unknown.value })
                         true
                     }
                     stream.url.contains(".mp4") -> {
-                        callback.invoke(newExtractorLink("$name", "$name", stream.url, ExtractorLinkType.VIDEO) { this.quality = Qualities.Unknown.value })
+                        callback.invoke(newExtractorLink("$name - ${stream.name}", "$name - ${stream.name}", stream.url, ExtractorLinkType.VIDEO) { this.quality = Qualities.Unknown.value })
                         true
                     }
                     else -> loadExtractor(stream.url, "$mainUrl/", subtitleCallback, callback)
@@ -218,43 +204,39 @@ class TimStreamsProvider : MainAPI() {
         return found
     }
 
-    // The icelanders.st embed page has an obfuscated script with XOR+sub encoding.
-    // We decode it to find the signed m3u8 URL, then pass it to ExoPlayer with
-    // the embed host as Referer (required by the CDN).
     private suspend fun resolveIcelanders(
         embedUrl: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
+        streamName: String,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
             val html = app.get(embedUrl, referer = "$mainUrl/", headers = mapOf("User-Agent" to mobileUA)).text
 
-            val arrayMatch = Regex("""var\s+_\w+\s*=\s*\[([^\]]+)\]""").find(html) ?: return false
+            val arrayMatch = Regex("var\\s+_\\w+\\s*=\\s*\\[([^\\]]+)\\]").find(html) ?: return false
             val nums = arrayMatch.groupValues[1].split(",").mapNotNull { it.trim().toIntOrNull() }
 
             val allVars = mutableMapOf<String, Int>()
-            Regex("""_(\w+)\s*=\s*(\d+)""").findAll(html).forEach { m ->
+            Regex("_(\\w+)\\s*=\\s*(\\d+)").findAll(html).forEach { m ->
                 allVars[m.groupValues[1]] = m.groupValues[2].toInt()
             }
 
-            val formulaPattern = """\^_(\w+)\)\s*-\s*_(\w+)"""
-            val formulaMatch = Regex(formulaPattern).find(html) ?: return false
+            val formulaMatch = Regex("""\^_(\w+)\)\s*-\s*_(\w+)""").find(html) ?: return false
             val xorKey = allVars[formulaMatch.groupValues[1]] ?: return false
             val subVal = allVars[formulaMatch.groupValues[2]] ?: return false
 
-            val decoded = buildString {
-                for (n in nums) {
-                    append(((n ^ xorKey) - subVal + 256) % 256).toChar()
-                }
+            val sb = StringBuilder()
+            for (n in nums) {
+                sb.append((((n xor xorKey) - subVal + 256) % 256).toChar())
             }
+            val decoded = sb.toString()
 
-            val m3u8Match = Regex("""https?://\S+\.m3u8\S*""").find(decoded) ?: return false
+            val m3u8Match = Regex("https?://\\S+\\.m3u8\\S*").find(decoded) ?: return false
             val m3u8Url = m3u8Match.value
 
-            val embedHost = Regex("""(https?://[^/]+)""").find(embedUrl)?.groupValues?.get(1) ?: mainUrl
+            val embedHost = Regex("(https?://[^/]+)").find(embedUrl)?.groupValues?.get(1) ?: mainUrl
 
             callback.invoke(
-                newExtractorLink("$name", "$name", m3u8Url, ExtractorLinkType.M3U8) {
+                newExtractorLink("$name - $streamName", "$name - $streamName", m3u8Url, ExtractorLinkType.M3U8) {
                     this.quality = Qualities.Unknown.value
                     this.headers = mapOf("User-Agent" to mobileUA, "Referer" to "$embedHost/")
                 }
