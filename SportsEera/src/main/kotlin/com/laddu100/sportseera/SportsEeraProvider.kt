@@ -171,7 +171,7 @@ class SportsEeraProvider : MainAPI() {
                                     val quality = when {
                                         resolution.contains("1080") -> Qualities.P1080.value
                                         resolution.contains("720") -> Qualities.P720.value
-                                        resolution.contains("540") -> Qualities.P540.value
+                                        resolution.contains("540") -> Qualities.P480.value
                                         resolution.contains("480") -> Qualities.P480.value
                                         resolution.contains("360") -> Qualities.P360.value
                                         resolution.contains("240") -> Qualities.P240.value
