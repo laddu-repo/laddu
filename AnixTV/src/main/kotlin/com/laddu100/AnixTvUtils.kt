@@ -93,6 +93,12 @@ data class SearchHtml(@JsonProperty("html") val html: String? = null)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class GetServerResponse(
+    @JsonProperty("status") val status: Int = 0,
+    @JsonProperty("result") val result: GetServerData? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class GetServerData(
     @JsonProperty("url") val url: String? = null,
     @JsonProperty("skip_data") val skipData: SkipData? = null
 )

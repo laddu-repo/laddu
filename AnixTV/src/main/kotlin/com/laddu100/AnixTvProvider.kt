@@ -49,7 +49,7 @@ class AnixTvProvider : MainAPI() {
                 timeout = 30_000L
             ).text
             val html = parseJson<AjaxHtmlResult>(text).result ?: return newHomePageResponse(request.name, emptyList())
-            val cards = org.jsoup.Jsoup.parse(html).select(".content-item").mapNotNull { parseCard(it) }
+            val cards = org.jsoup.Jsoup.parse(html).select(".content-item .piece").mapNotNull { parseCard(it) }
             newHomePageResponse(request.name, cards)
         } catch (e: Exception) {
             Log.e(TAG, "getMainPage failed: ${e.message}")
@@ -62,13 +62,23 @@ class AnixTvProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.length < 2) return emptyList()
         return try {
-            val text = app.get(
-                "$mainUrl/ajax/anime/search?keyword=${urlEncode(query)}",
-                headers = anixAjaxHeaders("$mainUrl/"),
-                timeout = 30_000L
-            ).text
-            val html = parseJson<AjaxSearchResult>(text).result?.html ?: return emptyList()
-            org.jsoup.Jsoup.parse(html).select(".search-item").mapNotNull { parseCard(it) }
+            val results = mutableListOf<SearchResponse>()
+            val seen = mutableSetOf<String>()
+            for (page in 1..5) {
+                val text = app.get(
+                    "$mainUrl/search?keyword=${urlEncode(query)}&page=$page",
+                    headers = anixAjaxHeaders("$mainUrl/"),
+                    timeout = 30_000L
+                ).text
+                val items = org.jsoup.Jsoup.parse(text).select(".content-item .piece")
+                    .mapNotNull { parseCard(it) }
+                if (items.isEmpty()) break
+                val fresh = items.filter { seen.add(it.url) }
+                if (fresh.isEmpty()) break
+                results += fresh
+                if (items.size < 30) break
+            }
+            results
         } catch (e: Exception) {
             Log.e(TAG, "search failed: ${e.message}")
             emptyList()
@@ -182,7 +192,7 @@ class AnixTvProvider : MainAPI() {
                         headers = anixAjaxHeaders("$mainUrl/"),
                         timeout = 30_000L
                     ).text
-                    val embedUrl = parseJson<GetServerResponse>(getText).url ?: continue
+                    val embedUrl = parseJson<GetServerResponse>(getText).result?.url ?: continue
                     val resolved = resolveEmbed(embedUrl, serverName, subtitleCallback, callback)
                     if (resolved) found = true
                 } catch (e: Exception) {
