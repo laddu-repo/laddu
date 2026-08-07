@@ -5,7 +5,7 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-val disabled = listOf<String>()
+val disabled = listOf<String>("Zenkai")
 
 File(rootDir, ".").eachDir { dir ->
     if (!disabled.contains(dir.name) && File(dir, "build.gradle.kts").exists()) {
@@ -16,4 +16,3 @@ File(rootDir, ".").eachDir { dir ->
 fun File.eachDir(block: (File) -> Unit) {
     listFiles()?.filter { it.isDirectory }?.forEach { block(it) }
 }
-  
