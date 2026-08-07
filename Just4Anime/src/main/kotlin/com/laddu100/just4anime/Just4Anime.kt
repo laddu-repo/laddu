@@ -111,18 +111,13 @@ class Just4Anime : MainAPI() {
             ?: epMeta?.title
             ?: return null
 
-        val poster = info?.coverImage?.extraLarge ?: info?.coverImage?.large ?: info?.bannerImage
+        // anilist.info schema: image = large cover, cover = banner
+        val poster = info?.image ?: info?.cover
         val plot = info?.description?.let { Jsoup.parse(it).text() }?.ifBlank { null }
-        val genres = info?.genres?.mapNotNull {
-            when (it) {
-                is String -> it
-                is Map<*, *> -> it["name"] as? String
-                else -> null
-            }
-        } ?: emptyList()
+        val genres = info?.genres.orEmpty()
 
-        val format = info?.format?.uppercase()
-        val tvType = when (format) {
+        // anilist.info schema: type = TV / MOVIE / OVA / ONA / SPECIAL
+        val tvType = when (info?.type?.uppercase()) {
             "MOVIE" -> TvType.AnimeMovie
             "OVA", "ONA", "SPECIAL", "MUSIC" -> TvType.OVA
             else -> TvType.Anime
@@ -133,7 +128,7 @@ class Just4Anime : MainAPI() {
         val dubProviders = availability?.dub?.providers.orEmpty()
             .filter { (it.totalEpisodes ?: 0) > 0 }
 
-        val anilistEps = info?.episodes ?: 0
+        val anilistEps = info?.totalEpisodes ?: 0
         val metaEps = epMeta?.totalEpisodes ?: 0
         val subMax = (subProviders.maxOfOrNull { it.totalEpisodes ?: 0 } ?: 0)
             .coerceAtLeast(anilistEps).coerceAtLeast(metaEps).coerceAtLeast(1)
@@ -141,9 +136,10 @@ class Just4Anime : MainAPI() {
             (dubProviders.maxOfOrNull { it.totalEpisodes ?: 0 } ?: 0).coerceAtLeast(1)
         else 0
 
-        // Real episode names — the frontend endpoint is keyed by AniList id but backed by
-        // TheTVDB; guard against id mismatch by comparing series titles (fuzzy).
+        // Real episode names + thumbnails — the frontend endpoint is keyed by AniList id but
+        // backed by TheTVDB; guard against id mismatch by comparing series titles (fuzzy).
         val names = mutableMapOf<Int, String>()
+        val thumbs = mutableMapOf<Int, String>()
         epMeta?.let { meta ->
             val metaTitle = meta.title.orEmpty()
             val infoTitle = (info?.title?.english ?: info?.title?.romaji).orEmpty()
@@ -154,36 +150,40 @@ class Just4Anime : MainAPI() {
                 meta.episodes.orEmpty().forEach { e ->
                     e.number?.let { n ->
                         e.title?.takeIf { it.isNotBlank() }?.let { names[n] = it }
+                        e.image?.takeIf { it.isNotBlank() }?.let { thumbs[n] = it }
                     }
                 }
             }
         }
-        if (names.isEmpty()) {
-            fetchAniZip(anilistId)?.episodes.orEmpty().forEach { e ->
-                e.number?.let { n ->
-                    (e.title?.en ?: e.title?.romaji)?.takeIf { it.isNotBlank() }?.let { names[n] = it }
-                }
+        // Fill any gaps (or everything, if the fuzzy check failed) from AniZip.
+        fetchAniZip(anilistId)?.episodes.orEmpty().forEach { e ->
+            e.number?.let { n ->
+                (e.title?.en ?: e.title?.romaji)?.takeIf { it.isNotBlank() }?.let { names.getOrPut(n) { it } }
+                e.image?.takeIf { it.isNotBlank() }?.let { thumbs.getOrPut(n) { it } }
             }
         }
 
         val defaultName = if (tvType == TvType.AnimeMovie) "Movie" else null
+        // NOTE: CloudStream's newEpisode() applies fixUrl() to the url string, so the episode
+        // data string becomes "https://just4anime.online/21|1171|sub" (mainUrl prefixed).
+        // loadLinks() strips that prefix defensively (see below).
         val subEpisodes = (1..subMax).map { n ->
             newEpisode("$anilistId|$n|sub") {
                 this.episode = n
                 this.name = names[n] ?: defaultName ?: "Episode $n"
-                this.posterUrl = poster
+                this.posterUrl = thumbs[n] ?: poster
             }
         }
         val dubEpisodes = if (dubMax > 0) (1..dubMax).map { n ->
             newEpisode("$anilistId|$n|dub") {
                 this.episode = n
                 this.name = names[n] ?: defaultName ?: "Episode $n"
-                this.posterUrl = poster
+                this.posterUrl = thumbs[n] ?: poster
             }
         } else emptyList()
 
-        val score = info?.averageScore?.let { com.lagradost.cloudstream3.Score.from10(it / 10f) }
-        val year = info?.startDate?.year?.takeIf { it > 0 } ?: info?.seasonYear ?: 0
+        val score = info?.rating?.let { com.lagradost.cloudstream3.Score.from10(it / 10f) }
+        val year = info?.startDate?.year?.takeIf { it > 0 } ?: 0
 
         return newAnimeLoadResponse(title, url, tvType) {
             this.posterUrl = poster
@@ -204,7 +204,15 @@ class Just4Anime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val parts = data.split("|")
+        // CloudStream prepends mainUrl to the episode data string when it doesn't start
+        // with http (newEpisode -> fixUrl). Strip it so "21|1171|sub" is always detected.
+        val cleanData = when {
+            data.startsWith("$mainUrl/") -> data.removePrefix("$mainUrl/")
+            data.startsWith("/") && data.contains("|") -> data.removePrefix("/")
+            else -> data
+        }
+        Log.d("Just4Anime", "loadLinks data=$cleanData")
+        val parts = cleanData.split("|")
         if (parts.size < 3) return false
         val anilistId = parts[0]
         val epNum = parts[1].toIntOrNull() ?: return false
@@ -302,8 +310,9 @@ class Just4Anime : MainAPI() {
             val label = if (quality.isNotBlank()) "$baseName $quality" else baseName
             val srcHeaders = src.headers.orEmpty()
             val isProxied = src.proxied ?: false
+            val isHls = src.isM3U8 == true || srcUrl.contains(".m3u8", ignoreCase = true)
 
-            if (src.isM3U8 == true) {
+            if (isHls) {
                 val generated = if (isProxied)
                     M3u8Helper.generateM3u8(label, srcUrl, referer = "")
                 else
@@ -377,7 +386,7 @@ class Just4Anime : MainAPI() {
     private suspend fun fetchAniListInfo(id: String): J4aAnimeDetail? {
         J4aCache.get<J4aAnimeDetail>("info:$id", TTL_30M)?.let { return it }
         val body = apiGet("$apiBase/v1/meta/anilist/info/$id") ?: return null
-        val parsed = parseJsonSafe<J4aAniListInfoResponse>(body)?.anilist ?: return null
+        val parsed = parseJsonSafe<J4aAniListInfoResponse>(body)?.data?.anilist ?: return null
         J4aCache.put("info:$id", parsed)
         return parsed
     }
@@ -503,32 +512,33 @@ private data class J4aTitle(
     @JsonProperty("userPreferred") val userPreferred: String? = null,
 )
 
+// The anilist/info endpoint nests the payload: {"success":true,"data":{"anilist":{...}}}
 @JsonIgnoreProperties(ignoreUnknown = true)
 private data class J4aAniListInfoResponse(
+    @JsonProperty("success") val success: Boolean? = null,
+    @JsonProperty("data") val data: J4aAniListInfoData? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+private data class J4aAniListInfoData(
     @JsonProperty("anilist") val anilist: J4aAnimeDetail? = null,
 )
 
+// Real schema (probed live): image=large cover, cover=banner, totalEpisodes=count,
+// rating=0-100 int, type=TV|MOVIE|OVA|ONA|SPECIAL, startDate={year,month,day}
 @JsonIgnoreProperties(ignoreUnknown = true)
 private data class J4aAnimeDetail(
     @JsonProperty("id") val id: String? = null,
     @JsonProperty("title") val title: J4aTitle? = null,
     @JsonProperty("description") val description: String? = null,
-    @JsonProperty("coverImage") val coverImage: J4aCoverImage? = null,
-    @JsonProperty("bannerImage") val bannerImage: String? = null,
-    @JsonProperty("format") val format: String? = null,
-    @JsonProperty("episodes") val episodes: Int? = null,
-    @JsonProperty("genres") val genres: List<Any>? = null,
-    @JsonProperty("averageScore") val averageScore: Int? = null,
+    @JsonProperty("image") val image: String? = null,
+    @JsonProperty("cover") val cover: String? = null,
+    @JsonProperty("type") val type: String? = null,
+    @JsonProperty("totalEpisodes") val totalEpisodes: Int? = null,
+    @JsonProperty("rating") val rating: Int? = null,
     @JsonProperty("status") val status: String? = null,
-    @JsonProperty("seasonYear") val seasonYear: Int? = null,
+    @JsonProperty("genres") val genres: List<String>? = null,
     @JsonProperty("startDate") val startDate: J4aDate? = null,
-)
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-private data class J4aCoverImage(
-    @JsonProperty("extraLarge") val extraLarge: String? = null,
-    @JsonProperty("large") val large: String? = null,
-    @JsonProperty("medium") val medium: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

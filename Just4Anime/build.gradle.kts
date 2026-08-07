@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 cloudstream {
     description = "Just4Anime - Watch Anime with Sub, Dub & HardSub from all sources"
