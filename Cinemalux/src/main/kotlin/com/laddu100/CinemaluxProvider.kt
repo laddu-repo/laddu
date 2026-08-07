@@ -1,32 +1,26 @@
 package com.laddu100
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.base64Decode
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.api.Log
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import com.lagradost.nicehttp.NiceResponse
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jsoup.nodes.Element
+import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Cinemalux - Movie & TV download provider.
+ * Cinemalux - Movie & TV download provider (v3).
  *
- * Site: cinemalux.click (WordPress / Dooplay theme, no Cloudflare)
+ * Site: cinemalux.click (WordPress / Dooplay theme)
  *
  * Verified chain (all probed live, zero guesswork):
- *   Homepage    GET /movies/, /series/, /genre/{slug}/   pagination: /page/N/
- *   Search      GET /?s={query}
  *   Detail      GET /movies/{slug}/ or /series/{slug}/
  *   Buttons     a.ep-simple-button  (href=https://tpi.li/{code}, label="1080P BLURAY 2.88 GB")
  *               Movies: grouped per div.secontainer with a "Languages:" header
@@ -41,11 +35,13 @@ import java.util.concurrent.ConcurrentHashMap
  *   Step 4      GET instant page -> href="https://video-downloads.googleusercontent.com/..."
  *                   -> direct MKV (multi-audio: ExoPlayer audio-track selector works natively)
  *
- * Series packs (linkstore.zip/{id}/) list real episodes:
- *   <a href="https://drive.linkstore.zip/file/{epId}" class="ep-simple-button">
- *       <span>EPISODE - 01 (477.26 MB)</span></a>
- * So each pack is resolved at load() time into REAL episode numbers + names, and each
- * episode carries JSON data with one variant per quality (720P/1080P/...).
+ * Reliability layers (patterns from Moviesmod / VegaMovies / CineStream):
+ *   - CloudflareKiller interceptor: tpi.li / linkstore / luxedrive can 403/503 on phone
+ *     networks even though desktop curl passes -> cfGet() retries with CF bypass.
+ *   - Manual redirect resolution: linkstore -> luxedrive is a 301; resolveFinalUrl()
+ *     walks Location headers explicitly instead of relying on the HTTP client.
+ *   - Episode data = JSON array serialized from a data class (same proven pattern as
+ *     Moviesmod's newEpisode(list) + parseJson<ArrayList<...>>(data)).
  */
 class CinemaluxProvider : MainAPI() {
     override var mainUrl = "https://cinemalux.click"
@@ -61,6 +57,10 @@ class CinemaluxProvider : MainAPI() {
         "Accept-Language" to "en-US,en;q=0.9",
     )
 
+    // CF bypass for hosts that challenge the phone's requests (tpi.li, linkstore, luxedrive)
+    private val cfKiller by lazy { CloudflareKiller() }
+    private val cfMutex = Mutex()
+
     override val mainPage = mainPageOf(
         "$mainUrl/movies" to "Latest Movies",
         "$mainUrl/series" to "Latest Series",
@@ -74,7 +74,7 @@ class CinemaluxProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + if (page <= 1) "/" else "/page/$page/"
-        val doc = app.get(url, headers = headers, timeout = 30_000L).document
+        val doc = cfGet(url).document
         val items = doc.select("article.item").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, items)
     }
@@ -83,7 +83,7 @@ class CinemaluxProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val doc = app.get("$mainUrl/?s=$encoded", headers = headers, timeout = 30_000L).document
+        val doc = cfGet("$mainUrl/?s=$encoded").document
         val items = doc.select("div.result-item article").mapNotNull { it.toSearchResult() }
         // Fallback: the homepage grid is used when WordPress returns items in article.item form
         return items.ifEmpty { doc.select("article.item").mapNotNull { it.toSearchResult() } }
@@ -118,7 +118,7 @@ class CinemaluxProvider : MainAPI() {
     // ------------------------------------------------------------------ details
 
     override suspend fun load(url: String): LoadResponse? {
-        val doc = app.get(url, headers = headers, timeout = 30_000L).document
+        val doc = cfGet(url).document
 
         val title = doc.selectFirst("div.data h1")?.text()?.trim()?.ifBlank { null }
             ?: doc.selectFirst("h1:not(.text-logo)")?.text()?.trim()?.ifBlank { null }
@@ -149,7 +149,7 @@ class CinemaluxProvider : MainAPI() {
         if (!isSeries) {
             // Movie: every download button = one episode (quality + language + size)
             val episodes = buttons.mapIndexed { i, b ->
-                newEpisode(listOf(b.toVariant()).toJson()) {
+                newEpisode(listOf(b.toVariant())) {
                     this.episode = i + 1
                     this.name = b.displayName
                     this.posterUrl = poster
@@ -182,12 +182,9 @@ class CinemaluxProvider : MainAPI() {
      *  - movies: div.custom-links > div.secontainer (has "Languages:" header) > a.ep-simple-button
      *  - series: div.custom-links > a.ep-simple-button (label = season pack)
      *  - some movies (e.g. The Prestige): plain a.ep-simple-button "Download Now" (no secontainer)
-     * So we just select ALL a.ep-simple-button and, when a secontainer exists nearby, reuse its
-     * language header; otherwise the label is used as-is.
      */
     private fun extractButtons(doc: org.jsoup.nodes.Document): List<CinemaluxButton> {
         val out = mutableListOf<CinemaluxButton>()
-        // secontainer blocks carry the "Languages:" header
         doc.select("div.secontainer").forEach { container ->
             val lang = container.selectFirst("p")?.text()?.let {
                 Regex("""Languages:\s*([A-Za-z][A-Za-z -]*)""").find(it)?.groupValues?.get(1)?.trim()
@@ -199,7 +196,6 @@ class CinemaluxProvider : MainAPI() {
                 out.add(CinemaluxButton(href, label, lang))
             }
         }
-        // buttons outside any secontainer (The Prestige layout, series packs)
         doc.select("a.ep-simple-button, a[href*='tpi.li']").forEach { a ->
             val href = a.attr("href").ifBlank { return@forEach }
             val label = a.selectFirst("span")?.text()?.trim()?.ifBlank { null }
@@ -213,28 +209,20 @@ class CinemaluxProvider : MainAPI() {
     /**
      * For a series, each button is a season pack:
      *   "Season 01 - 720P AMZN WEB-DL (450MB/EP)" -> https://tpi.li/{code}
-     * We decode the shortener and read the pack's episode list page
-     * (linkstore.zip/{id}/) to get REAL episode numbers + names.
-     *
-     * Episodes with the same (season, episode) from different qualities are merged:
-     * each episode's data = JSON array of variants [{u, q, l}] -> all qualities available.
+     * Decode the shortener and read the pack's episode list page (linkstore.zip/{id}/)
+     * to get REAL episode numbers + names. Episodes with the same (season, episode)
+     * from different quality packs are merged into one episode with all variants.
      */
     private suspend fun resolveSeriesEpisodes(
         buttons: List<CinemaluxButton>,
         poster: String?,
     ): List<Episode> {
-        val semaphore = Semaphore(3)
-        val results = coroutineScope {
-            buttons.map { b ->
-                async { semaphore.withPermit { resolvePack(b) } }
-            }.awaitAll()
+        val results = buttons.map { b ->
+            runCatching { resolvePack(b) }.getOrElse { PackResult.PackFailed(seasonOf(b.label), b) }
         }
 
-        // variants grouped by (season, episodeNumber)
         val bySeasonEp = mutableMapOf<SeasonEpKey, MutableList<CinemaluxVariant>>()
-        // packs that failed to resolve -> single episode with the tpi.li url as data
         val fallbackEpisodes = mutableListOf<Episode>()
-        // single-file packs (e.g. a whole season in one rar) -> one episode each
         val singleEpisodes = mutableListOf<Pair<Int, CinemaluxButton>>()
 
         results.forEach { res ->
@@ -248,7 +236,7 @@ class CinemaluxProvider : MainAPI() {
                 }
                 is PackResult.PackSingle -> singleEpisodes.add(res.season to res.button)
                 is PackResult.PackFailed -> fallbackEpisodes.add(
-                    newEpisode(listOf(res.button.toVariant()).toJson()) {
+                    newEpisode(listOf(res.button.toVariant())) {
                         this.season = res.season
                         this.episode = 1
                         this.name = res.button.displayName
@@ -260,11 +248,10 @@ class CinemaluxProvider : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
 
-        // real episodes (merged across qualities)
         bySeasonEp.toSortedMap().forEach { (seasonEp, variants) ->
             val qualities = variants.mapNotNull { it.qualityTag }.distinct()
             episodes.add(
-                newEpisode(variants.toJson()) {
+                newEpisode(variants) {
                     this.season = seasonEp.season
                     this.episode = seasonEp.episode
                     this.name = "Episode ${seasonEp.episode}" +
@@ -274,10 +261,9 @@ class CinemaluxProvider : MainAPI() {
             )
         }
 
-        // single-file packs -> one episode per pack
         singleEpisodes.forEach { (season, b) ->
             episodes.add(
-                newEpisode(listOf(b.toVariant()).toJson()) {
+                newEpisode(listOf(b.toVariant())) {
                     this.season = season
                     this.episode = episodes.count { it.season == season } + 1
                     this.name = b.displayName
@@ -290,10 +276,13 @@ class CinemaluxProvider : MainAPI() {
         return episodes.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
     }
 
+    private fun seasonOf(label: String): Int =
+        Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE)
+            .find(label)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+
     /** Decode one pack button: tpi.li -> dest -> episode list (or single file). */
     private suspend fun resolvePack(b: CinemaluxButton): PackResult {
-        val season = Regex("""Season\s*(\d+)""", RegexOption.IGNORE_CASE)
-            .find(b.label)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+        val season = seasonOf(b.label)
         val quality = b.label.replace(Regex("""Season\s*\d+\s*-\s*""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\([\d.]+\s*MB/EP\)|\([\d.]+\s*GB/EP\)"""), "")
             .trim().ifBlank { b.label }
@@ -302,10 +291,9 @@ class CinemaluxProvider : MainAPI() {
 
         return try {
             if (isPackPage(dest)) {
-                val doc = app.get(dest, headers = headers, timeout = 30_000L).document
+                val doc = cfGet(dest).document
                 val rows = doc.select("a[href*='drive.linkstore.zip/file/']")
                 if (rows.isEmpty()) {
-                    // empty list page -> treat pack as a single link
                     PackResult.PackSingle(season, CinemaluxButton(dest, quality, b.lang))
                 } else {
                     val variants = rows.mapNotNull { row ->
@@ -328,7 +316,6 @@ class CinemaluxProvider : MainAPI() {
                     }
                 }
             } else {
-                // single file (whole season in one archive)
                 PackResult.PackSingle(season, CinemaluxButton(dest, quality, b.lang))
             }
         } catch (e: Exception) {
@@ -351,38 +338,26 @@ class CinemaluxProvider : MainAPI() {
         val variants = parseVariants(data) ?: return false
         Log.d("Cinemalux", "loadLinks variants=${variants.size}")
 
-        val semaphore = Semaphore(2)
-        val results = coroutineScope {
-            variants.map { v ->
-                async { semaphore.withPermit { resolveVariant(v, callback) } }
-            }.awaitAll()
-        }
-        return results.any { it }
+        return variants.amap { v -> resolveVariant(v, callback) }.any { it }
     }
 
-    /** Parse episode data: JSON array of {u,q,l} variants, with legacy pipe fallback. */
+    /** Parse episode data: JSON array of variants, with legacy pipe fallback. */
     private fun parseVariants(data: String): List<CinemaluxVariant>? {
-        // defensive: strip mainUrl prefix if CloudStream added it
         var clean = when {
             data.startsWith("$mainUrl/") -> data.removePrefix("$mainUrl/")
             data.startsWith("/") -> data.removePrefix("/")
             else -> data
         }
-        // the player may URL-encode the data string
         try {
             val decoded = URLDecoder.decode(clean, "UTF-8")
             if (decoded != clean) clean = decoded
         } catch (e: Exception) { /* keep as-is */ }
 
-        // JSON array: [{"u":"...","q":"...","l":"..."}] (also accepts {"data":..,"name":..} shape)
+        // JSON array of variants (newEpisode auto-serializes CinemaluxVariant via AppUtils)
         if (clean.trimStart().startsWith("[")) {
             try {
-                val parsed = JSON.readValue<List<EpisodeVariantJson>>(clean)
-                val out = parsed.mapNotNull { j ->
-                    val url = j.u ?: j.data
-                    val label = j.q ?: j.name
-                    url?.let { CinemaluxVariant(it, label, j.l, j.n, j.r) }
-                }
+                val parsed = parseJson<ArrayList<CinemaluxVariant>>(clean)
+                val out = parsed.filter { !it.url.isNullOrBlank() }
                 if (out.isNotEmpty()) return out
             } catch (e: Exception) {
                 Log.d("Cinemalux", "JSON parse failed: ${e.message}")
@@ -418,33 +393,25 @@ class CinemaluxProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         return try {
-            val doc = app.get(packUrl, headers = headers, timeout = 30_000L).document
+            val doc = cfGet(packUrl).document
             val rows = doc.select("a[href*='drive.linkstore.zip/file/']")
-            val semaphore = Semaphore(2)
-            val results = coroutineScope {
-                rows.map { row ->
-                    async {
-                        semaphore.withPermit {
-                            val href = row.attr("href").ifBlank { return@withPermit false }
-                            val label = row.selectFirst("span")?.text()?.trim()?.ifBlank { null }
-                                ?: "Episode"
-                            resolveFileLinks(
-                                href,
-                                CinemaluxVariant(href, v.quality, v.lang, null, label),
-                                callback,
-                            )
-                        }
-                    }
-                }.awaitAll()
-            }
-            results.any { it }
+            return rows.amap { row ->
+                val href = row.attr("href").ifBlank { return@amap false }
+                val label = row.selectFirst("span")?.text()?.trim()?.ifBlank { null }
+                    ?: "Episode"
+                resolveFileLinks(href, CinemaluxVariant(href, v.quality, v.lang, null, label), callback)
+            }.any { it }
         } catch (e: Exception) {
             Log.d("Cinemalux", "pack links failed: ${e.message}")
             false
         }
     }
 
-    /** drive.linkstore.zip/file/{id} -> luxedrive -> instant CDN -> direct video URL. */
+    /**
+     * drive.linkstore.zip/file/{id} -> luxedrive -> instant CDN -> direct video URL.
+     * Handles the linkstore->luxedrive 301 via resolveFinalUrl() and retries with
+     * CloudflareKiller when a host challenges the request.
+     */
     private suspend fun resolveFileLinks(
         driveUrl: String,
         v: CinemaluxVariant,
@@ -455,22 +422,36 @@ class CinemaluxProvider : MainAPI() {
             return true
         }
 
-        val page = app.get(driveUrl, headers = headers, timeout = 30_000L).text
+        // 1. resolve redirects (linkstore.zip -> luxedrive.dad) explicitly; on failure
+        //    fall back to the original URL (cfGet follows redirects by default)
+        val resolved = resolveFinalUrl(driveUrl) ?: driveUrl
+        val page = try {
+            cfGet(resolved).text
+        } catch (e: Exception) {
+            Log.d("Cinemalux", "luxedrive fetch failed: ${e.message}")
+            return false
+        }
         val fileTitle = Regex("""file-title">\s*([^<]+)""").find(page)?.groupValues?.get(1)?.trim()
 
-        // Instant DL mirror (works without any cookie)
+        // 2. Instant DL mirror href (works without any cookie)
         val instantUrl = Regex("""https://[a-zA-Z0-9-]+\.ultra-fast-r2-cdn\.workers\.dev/\?token=[^"'\s]+""")
             .find(page)?.value
             ?: Regex("""href=['"](https://[^'"]*ultra-fast-r2-cdn[^'"]*)['"]""")
                 .find(page)?.groupValues?.get(1)
 
         if (instantUrl == null) {
-            // Some files only have a gdflix.dev mirror (Cloudflare-protected) -> not resolvable
             Log.d("Cinemalux", "no instant mirror for $driveUrl (title=$fileTitle)")
             return false
         }
 
-        val instantPage = app.get(instantUrl, headers = headers, timeout = 30_000L).text
+        // 3. resolve instant page redirects + read the direct video URL
+        val instantFinal = resolveFinalUrl(instantUrl) ?: instantUrl
+        val instantPage = try {
+            cfGet(instantFinal).text
+        } catch (e: Exception) {
+            Log.d("Cinemalux", "instant page failed: ${e.message}")
+            return false
+        }
         val direct = Regex("""https://video-downloads\.googleusercontent\.com/[^"'\s]+""")
             .find(instantPage)?.value
             ?: Regex("""href=['"](https://video-downloads[^'"]*)['"]""")
@@ -492,7 +473,6 @@ class CinemaluxProvider : MainAPI() {
         val generic = v.label.isNullOrBlank()
             || v.label == "Download" || v.label == "Download Now" || v.label == "Episode"
 
-        // Prefer the real file title (has codec + audio languages) unless the label carries info
         val name = if (!generic && v.label != null) {
             v.label
         } else {
@@ -501,18 +481,84 @@ class CinemaluxProvider : MainAPI() {
                 ?: "Download"
         }
 
-        // quality: check label, pack quality hint, and file title
-        val quality = listOfNotNull(v.label, v.quality, fileTitle).joinToString(" ").let { text ->
-            Regex("""(?i)\b(2160p|4k|1440p|1080p|720p|480p|360p)\b""").find(text)?.value?.lowercase()
-                ?.let { getQualityFromName(it) }
-        } ?: Qualities.Unknown.value
+        val quality = getQualityFromName(listOfNotNull(v.label, v.quality, fileTitle).joinToString(" "))
 
         callback(
             newExtractorLink("Cinemalux", name, direct, ExtractorLinkType.VIDEO) {
                 this.quality = quality
                 this.referer = driveUrl
+                this.headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0",
+                    "Referer" to driveUrl,
+                )
             }
         )
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    /** GET with Cloudflare bypass: try plain, retry with CloudflareKiller on 403/503. */
+    private suspend fun cfGet(
+        url: String,
+        headers: Map<String, String> = this.headers,
+        allowRedirects: Boolean = true,
+    ): NiceResponse {
+        val response = app.get(url, headers = headers, allowRedirects = allowRedirects, timeout = 30_000L)
+        if (response.code !in listOf(403, 503)) return response
+
+        return cfMutex.withLock {
+            val retry = app.get(
+                url,
+                headers = headers,
+                interceptor = cfKiller,
+                allowRedirects = allowRedirects,
+                timeout = 30_000L,
+            )
+            if (retry.code in listOf(403, 503)) {
+                cfKiller.savedCookies.clear()
+                app.get(
+                    url,
+                    headers = headers,
+                    interceptor = cfKiller,
+                    allowRedirects = allowRedirects,
+                    timeout = 30_000L,
+                )
+            } else {
+                retry
+            }
+        }
+    }
+
+    /** Walk redirect chains explicitly using HEAD + Location (VegaMovies pattern). */
+    private suspend fun resolveFinalUrl(startUrl: String): String? {
+        var currentUrl = startUrl
+        var loopCount = 0
+        val maxRedirects = 7
+
+        while (loopCount < maxRedirects) {
+            try {
+                val res = app.head(currentUrl, headers = headers, allowRedirects = false, timeout = 2_500L)
+                if (res.code == 200 || res.code in 300..399) {
+                    val location = res.headers["location"] ?: res.headers["Location"]
+                    if (location.isNullOrEmpty()) break
+                    currentUrl = if (location.startsWith("http")) location
+                    else getBaseUrl(currentUrl) + location
+                } else {
+                    return null
+                }
+                loopCount++
+            } catch (e: Exception) {
+                return null
+            }
+        }
+        return currentUrl
+    }
+
+    private fun getBaseUrl(url: String): String = try {
+        val uri = URI(url)
+        "${uri.scheme}://${uri.host}"
+    } catch (e: Exception) {
+        url
     }
 
     // ------------------------------------------------------------------ tpi.li decode
@@ -525,17 +571,15 @@ class CinemaluxProvider : MainAPI() {
         TpiCache.get(tpiUrl)?.let { return it }
 
         val dest = try {
-            val page = app.get(tpiUrl, headers = headers, timeout = 30_000L).text
+            val page = cfGet(tpiUrl).text
             val token = Regex("""name="token" value="([^"]+)"""").find(page)?.groupValues?.get(1)
                 ?: null
             if (token == null) {
                 null
             } else {
-                // primary: payload is everything after the "0708" marker
                 token.substringAfter("0708", "").takeIf { it.isNotBlank() }
                     ?.let { decodeToUrl(it) }
                     ?: run {
-                        // bounded fallback: payload sits at the tail of the token
                         val tailStart = (token.length - 120).coerceAtLeast(0)
                         var found: String? = null
                         for (i in tailStart until token.length) {
@@ -590,17 +634,6 @@ class CinemaluxProvider : MainAPI() {
         val qualityTag: String? get() = quality
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class EpisodeVariantJson(
-        @JsonProperty("u") val u: String? = null,
-        @JsonProperty("q") val q: String? = null,
-        @JsonProperty("l") val l: String? = null,
-        @JsonProperty("n") val n: Int? = null,
-        @JsonProperty("r") val r: String? = null,
-        @JsonProperty("data") val data: String? = null,
-        @JsonProperty("name") val name: String? = null,
-    )
-
     private data class SeasonEpKey(val season: Int, val episode: Int) : Comparable<SeasonEpKey> {
         override fun compareTo(other: SeasonEpKey): Int {
             val s = season.compareTo(other.season)
@@ -608,27 +641,10 @@ class CinemaluxProvider : MainAPI() {
         }
     }
 
-    private fun List<CinemaluxVariant>.toJson(): String {
-        val list = this.map { v ->
-            EpisodeVariantJson(
-                u = v.url,
-                q = v.label,
-                l = v.lang,
-                n = v.epNum,
-                r = v.rowLabel,
-            )
-        }
-        return JSON.writeValueAsString(list)
-    }
-
     private sealed class PackResult {
         data class PackList(val season: Int, val variants: List<CinemaluxVariant>) : PackResult()
         data class PackSingle(val season: Int, val button: CinemaluxButton) : PackResult()
         data class PackFailed(val season: Int, val button: CinemaluxButton) : PackResult()
-    }
-
-    companion object {
-        private val JSON: ObjectMapper = jacksonObjectMapper()
     }
 }
 
