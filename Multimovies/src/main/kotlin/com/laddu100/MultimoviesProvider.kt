@@ -132,18 +132,24 @@ class MultimoviesProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Dooplay cards carry two anchors: one wrapping the poster <img> (empty text)
-        // and one holding the title (.data h3 a). Prefer the title anchor so the card
-        // text is never blank; fall back to any content anchor, then to the img alt.
-        val a = selectFirst(".data h3 a, .details .title a, .thumbnail a")
-            ?: selectFirst("a[href*='/movies/'], a[href*='/tvshows/']")
+        // jsoup's selectFirst() with a comma-separated list returns the first match in
+        // DOCUMENT order, not the first selector. On the search page the poster link
+        // (.thumbnail a) precedes the title link (.details .title a) and its text is
+        // only the "TV"/"Movie" type badge - so the title anchor must be resolved
+        // separately and preferred, otherwise every result is named "TV" or "Movie".
+        val titleA = selectFirst(".details .title a, .data h3 a")
+        val a = titleA
+            ?: selectFirst(".thumbnail a, a[href*='/movies/'], a[href*='/tvshows/']")
             ?: return null
         val href = a.attr("href").trim()
-        var title = a.text().trim()
+        if (href.isBlank()) return null
+        var title = titleA?.text()?.trim() ?: ""
+        // Only fall back to the img alt for cards without a real title anchor, and
+        // never surface the "TV"/"Movie" badge as the title.
         if (title.isBlank()) {
             title = selectFirst("img")?.attr("alt")?.trim() ?: ""
         }
-        if (href.isBlank() || title.isBlank()) return null
+        if (title.isBlank()) return null
 
         val poster = firstImg(this)
         val isTv = href.contains("/tvshows/") || selectFirst(".tvshows, .item.tvshows, span.tvshows") != null
