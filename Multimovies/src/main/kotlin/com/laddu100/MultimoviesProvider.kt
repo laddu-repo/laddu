@@ -132,10 +132,17 @@ class MultimoviesProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val a = selectFirst("a[href*='/movies/'], a[href*='/tvshows/'], .thumbnail a, .data h3 a, .details .title a")
+        // Dooplay cards carry two anchors: one wrapping the poster <img> (empty text)
+        // and one holding the title (.data h3 a). Prefer the title anchor so the card
+        // text is never blank; fall back to any content anchor, then to the img alt.
+        val a = selectFirst(".data h3 a, .details .title a, .thumbnail a")
+            ?: selectFirst("a[href*='/movies/'], a[href*='/tvshows/']")
             ?: return null
-        val href = a.attr("href")
-        val title = a.text().trim().ifBlank { attr("alt") }
+        val href = a.attr("href").trim()
+        var title = a.text().trim()
+        if (title.isBlank()) {
+            title = selectFirst("img")?.attr("alt")?.trim() ?: ""
+        }
         if (href.isBlank() || title.isBlank()) return null
 
         val poster = firstImg(this)
