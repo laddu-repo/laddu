@@ -83,6 +83,7 @@ class MultimoviesProvider : MainAPI() {
 
     private fun deEsc(s: String): String =
         s.replace("\\/", "/").replace("\\\"", "\"").replace("&amp;", "&")
+            .replace("\\t", "\t").replace("\\n", "\n").replace("\\r", "\r")
 
     private fun hostOf(url: String): String = try {
         URI(url).host?.lowercase() ?: ""
@@ -243,12 +244,20 @@ class MultimoviesProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         var any = false
+        modiplayBase = null // always re-discover for the current page
         try {
             val doc = app.get(data, headers = headers).document
             val options = doc.select("li.dooplay_player_option")
                 .filter { !it.attr("id").contains("trailer") }
             if (options.isEmpty()) return false
 
+            // Pre-resolve every option's embed URL and learn the Cineverse
+            // (modiplay) base BEFORE resolving any source. GDMIRROR's file
+            // codes are served through the same modiplay proxy, and GDMIRROR
+            // is listed before Cineverse on most movie pages - so the base
+            // must be discovered up-front, otherwise every GDMIRROR source
+            // is silently dropped and movies end up with zero playable links.
+            val embeds = mutableListOf<Pair<String, String>>()
             for (opt in options) {
                 val postId = opt.attr("data-post").trim()
                 val type = opt.attr("data-type").trim().ifBlank { "movie" }
@@ -258,6 +267,16 @@ class MultimoviesProvider : MainAPI() {
                 try {
                     val embed = fetchEmbedUrl(postId, nume, type, data)
                     if (embed.isBlank()) continue
+                    if (hostOf(embed).contains("modiplay") && modiplayBase == null) {
+                        modiplayBase = originOf(embed)
+                    }
+                    embeds.add(embed to label)
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+            for ((embed, label) in embeds) {
+                try {
                     any = resolveEmbed(embed, label, subtitleCallback, callback) || any
                 } catch (e: Exception) {
                     continue
@@ -276,8 +295,15 @@ class MultimoviesProvider : MainAPI() {
             headers = mapOf("X-Requested-With" to "XMLHttpRequest"),
             referer = pageUrl,
         ).text
-        return Regex("\"embed_url\"\\s*:\\s*\"([^\"]+)\"").find(body)
-            ?.groupValues?.get(1)?.let { deEsc(it) } ?: ""
+        // embed_url is JSON-escaped and may contain escaped quotes when the
+        // site wraps the player in an <IFRAME SRC="..."> tag (type=dtshcode) -
+        // grab the full escaped value, then unwrap the iframe if present.
+        val raw = Regex("\"embed_url\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(body)
+            ?.groupValues?.get(1) ?: return ""
+        val cleaned = deEsc(raw).replace(Regex("[\\x00-\\x1F]"), "").trim()
+        val iframeSrc = Regex("<IFRAME\\b[^>]*\\bSRC\\s*=\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+            .find(cleaned)?.groupValues?.get(1)?.let { deEsc(it) }
+        return iframeSrc ?: cleaned
     }
 
     private suspend fun resolveEmbed(
