@@ -1,0 +1,1300 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anichi.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Anichi",
+        "internalName": "Anichi",
+        "authors": [
+            "raghav",
+            "Antigravity"
+        ],
+        "description": "Anime from Anichi.to with Sub and Dub support",
+        "fileSize": 34861,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anichi.to/anichi/images/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-b550d6eb238c820da308513f09508db6d5a0b6fcf663f1be8641308794419bad"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anicine.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Anicine",
+        "internalName": "Anicine",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime with Sub & Dub from AniCine (anicine.xyz) \u2014 MegaPlay + 4animo sources. AniList metadata.",
+        "fileSize": 46455,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anicine.xyz/icons/icon-192.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-837806df3ad433bbec5ee32a4ad2c993f1fc5fad8ade2dba294ece60c5f46c4b"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniDao.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "AniDao",
+        "internalName": "AniDao",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Anime Online Free in HD with English Sub & Dub from AniDao",
+        "fileSize": 28357,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anidao.to/assets/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-ddaaeb8564cbe4c8449ee3a65d7f2c46af5586187608048df0a567dd4afd5ead"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anidap.cs3",
+        "status": 1,
+        "version": 13,
+        "name": "Anidap",
+        "internalName": "Anidap",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime with Sub, Dub & Hardsub from Anidap",
+        "fileSize": 76064,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anidap.se/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-eeb4725dd47611c5cec33dbf45f8053aa7d31be943324dae0719f03134470a09"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniKage.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "AniKage",
+        "internalName": "AniKage",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Anime Online Free in HD with English Sub & Dub from AniKage",
+        "fileSize": 37050,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anikage.cc/favicon.svg",
+        "apiVersion": 1,
+        "fileHash": "sha256-d2103b9e9e9c9d33766c0b4140911cbcff54ee1435144eecaa2a36429bdc5e89"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anikai.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "Anikai",
+        "internalName": "Anikai",
+        "authors": [
+            "raghav"
+        ],
+        "description": "ANIME- scrapper, clone , aggregator :( NOT ORIGINAL ANIKAI AND NOT ORIGINAL SERVER CLONE",
+        "fileSize": 25083,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://www3.anikai.cc/img/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-cba6e3653d1c47ebbf2354b236edefecbb2f037cfc8eb436a917506e113f8d00"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniKotoAnime.cs3",
+        "status": 1,
+        "version": 11,
+        "name": "AniKotoAnime",
+        "internalName": "AniKotoAnime",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "AniKoto Anime - Watch Anime Sub & Dub in HD",
+        "fileSize": 38384,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anikototv.to/AnikotoTheme/assets/images/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-706a185c88a1fb74f22f0ed66d9c520ebe8242134c0d2e22cf4e2923d1c4cd17"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniLight.cs3",
+        "status": 1,
+        "version": 5,
+        "name": "AniLight",
+        "internalName": "AniLight",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Anime Online Free in HD with English Sub & Dub from AniLight",
+        "fileSize": 43300,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anilight.live/favicon.svg",
+        "apiVersion": 1,
+        "fileHash": "sha256-f9815cde6a3f1b891798f4c2c2e0c5433001503f3d3a949ca03907d8a4c473fb"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnimeDex.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "AnimeDex",
+        "internalName": "AnimeDex",
+        "authors": [
+            "raghav"
+        ],
+        "description": "AnimeDex - Multi-source anime with sub & dub",
+        "fileSize": 66883,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://raw.githubusercontent.com/laddu-repo/laddu/master/AnimeDex/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-2ae545cd035d9ab59a4f5dae76dd66fbfef8d06d143f1ea0a062380d27fc602d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Animelok.cs3",
+        "status": 1,
+        "version": 10,
+        "name": "Animelok",
+        "internalName": "Animelok",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime with Sub, Dub & Multi-language (Hindi, Tamil, Telugu, Malayalam) from Animelok",
+        "fileSize": 39691,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://animelok.net/icons/icon-192.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-6ef99a27de2fbe75744c8afa9a638d931346c5796147e2f48a193225bbe13aa9"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnimeShrineDownloader.cs3",
+        "status": 1,
+        "version": 5,
+        "name": "AnimeShrineDownloader",
+        "internalName": "AnimeShrineDownloader",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Download anime in Hindi, English, Tamil, Telugu, Japanese, Malayalam - Multi-Audio Anime",
+        "fileSize": 23362,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie"
+        ],
+        "iconUrl": "https://animeshrine.xyz/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-dc7523ea5a09a851407d835ce521060cd09d6844c1df5a440ce27666ebd25b76"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnimeSogo.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "AnimeSogo",
+        "internalName": "AnimeSogo",
+        "authors": [
+            "Raghav"
+        ],
+        "description": "AnimeSogo - Watch Anime Sub & Dub",
+        "fileSize": 36360,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "apiVersion": 1,
+        "fileHash": "sha256-2a41174238aa52b2a7f44fe93c2b91d8f61fd8df34fde8fac1e3550dc92ccebe"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Animetsu.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Animetsu",
+        "internalName": "Animetsu",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "Anime from Animetsu with Sub and Dub support",
+        "fileSize": 33051,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://animetsu.live/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-bf35c39aea9806f6412d2ba9caabbaeda78c801357e4ec5365030afa0f6e3ec1"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnimeX.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "AnimeX",
+        "internalName": "AnimeX",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch anime online with English sub and dub",
+        "fileSize": 34804,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie"
+        ],
+        "iconUrl": "https://animex.one/icons/ios/180.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-b1dc1d318a39eb74a505517bf2be42081a0747118e82dfa200f0baa3ba181245"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Animo.cs3",
+        "status": 1,
+        "version": 6,
+        "name": "Animo",
+        "internalName": "Animo",
+        "authors": [
+            "raghav"
+        ],
+        "description": "ANIMO (4animo.xyz) - DO NOT INSTALL - FOR TESTING ONLY",
+        "fileSize": 47995,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://4animo.xyz/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-ad94573dbbdab54960abf68e96ad987bb1e6ac3179fe62fd21630c7714a291e0"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnimoTvSlash.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "AnimoTvSlash",
+        "internalName": "AnimoTvSlash",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime from ANIMOTVSLASH with Sub and Dub (self-hosted Videas CDN)",
+        "fileSize": 63209,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://animotvslash.org/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-10ee3d3888deb47dd2ad69d6ec5cf9a024d4499dc0ee2755504f18b0cc9a9d55"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniNami.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "AniNami",
+        "internalName": "AniNami",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime with Sub & Dub from AniNami",
+        "fileSize": 51183,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://www.aninami.site/android-chrome-512x512.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-fccec68eeb84219e1a74fca97abce01d518e76cdda29c5a30611f1b3a385cf94"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniPm.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "AniPm",
+        "internalName": "AniPm",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Anime Online Free in HD with English Sub & Dub from ani.pm",
+        "fileSize": 56624,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://ani.pm/favicon.svg",
+        "apiVersion": 1,
+        "fileHash": "sha256-24513e60dfea31fe66d30a8a2ddedec071f578a6dfcf159afad0bb6899e58700"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniSnatch.cs3",
+        "status": 1,
+        "version": 14,
+        "name": "AniSnatch",
+        "internalName": "AniSnatch",
+        "authors": [
+            "raghav"
+        ],
+        "description": "AniSnatch - Multi-source anime with sub, dub, Hindi & multi-language",
+        "fileSize": 66196,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anisnatch.top/favicon.ico?v1.3.9",
+        "apiVersion": 1,
+        "fileHash": "sha256-262b8ac0d6866679216c073040e9b7879388773a8ea9906453134ccfce4200f8"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniSuge.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "AniSuge",
+        "internalName": "AniSuge",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime from AniSuge with Sub and Dub support",
+        "fileSize": 34647,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anisuge.tv/assets/images/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-19e46519f83efa6f60d17d860b10dd798e9465b5d39bb3eb2028160354dd0512"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anitaku2.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "Anitaku2",
+        "internalName": "Anitaku2",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anitaku2 - Enhanced anitaku.online with sub/dub, real episode titles, AniList metadata, and multiple sources",
+        "fileSize": 50275,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anitaku.online/img/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-db2a49a629a380ed1b12a590dfc460bf6af68da3c93ea8bc6d25a365654dc151"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AniWaves.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "AniWaves",
+        "internalName": "AniWaves",
+        "authors": [
+            "raghav"
+        ],
+        "description": "720p sub and dub anime",
+        "fileSize": 32463,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://aniwaves.ru/assets/images/aniwave.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-447fe60bb547555d099c0e025c6c15327eaae119e78998a5aebc09a5ad1298c2"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/AnixTV.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "AnixTV",
+        "internalName": "AnixTV",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime with Sub, Dub & Movies from AnixTV",
+        "fileSize": 43778,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anixtv.me/animixplay/images/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-87cafa3c2332ee0a8fc3867a6683ca82ea842a6d7194d7f3628bab1b8fd797de"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Anizen.cs3",
+        "status": 3,
+        "version": 2,
+        "name": "Anizen",
+        "internalName": "Anizen",
+        "authors": [
+            "raghav"
+        ],
+        "description": "AniZen(sub and dub) may face issues under work ",
+        "fileSize": 44650,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie"
+        ],
+        "iconUrl": "https://www.google.com/s2/favicons?domain=anizen.tr&sz=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-3b3f3bc7c1e482ab971e87f2f4c5cb0e0342dd9feee5b820a264167c4c96af6d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/BinTV.cs3",
+        "status": 1,
+        "version": 8,
+        "name": "BinTV",
+        "internalName": "BinTV",
+        "authors": [
+            "errorcodeQQ",
+            "RAGHAV"
+        ],
+        "description": "4K SPORTS - USE THIS IF YOUR DEVICE SUPPORTS 4K",
+        "fileSize": 60847,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhsQsag_KQPokaomZsgDV4fiXQ_fi494N6wV8cwKyQQuhSnOh1pAl4lV2Ur-yHCG6IFBimoeWaZKiOTQyyEmfYLetghJRbhyoTHZuzfbZ9VOWZV5aNE4L4akyYmk5D1sB-QLzVQLy200JxziBg0Wwetdxb0Ybf7oqv4R1W8t49rsYLsFkLHZuNPL42I8Q/s512/letter-b.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-a7e0ea3fab703017b61ac300d5d7be0f7ea61b1320eabf8911f1891fb804d1e4"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Cinemalux.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Cinemalux",
+        "internalName": "Cinemalux",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "Cinemalux - Download Movies & TV Shows in 4K/1080p/720p with multi-audio MKV files (Google Drive links)",
+        "fileSize": 40766,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "AsianDrama",
+            "Anime"
+        ],
+        "iconUrl": "https://cinemalux.click/wp-content/uploads/2025/03/icons8-film-reel-48.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-ce12487ffff2cb336fdf789e1e3fd332b3cb3c9576f0f938285e2fc5247f9d2f"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/DamiTVProvider.cs3",
+        "status": 1,
+        "version": 24,
+        "name": "DamiTVProvider",
+        "internalName": "DamiTVProvider",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "Live sports HIGH QAULITY",
+        "fileSize": 50466,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTAvvc01IqbjrBZ-AhXwvyrIblnaJBA04IUNKmJNRbqEh46fWVItaGuoRsj&s=10",
+        "apiVersion": 1,
+        "fileHash": "sha256-faba9d34353665b115e088e170a0b6cbbeb223af91c1ce37333df546b66603b6"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/DesiDubAnime.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "DesiDubAnime",
+        "internalName": "DesiDubAnime",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Indian Regional Dubbed Anime Online from DesiDubAnime - Sub and Dub",
+        "fileSize": 34852,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://www.desidubanime.me/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-1194af153ffd35a638216c2ffcdb63eb3f7b1dd238272ae548b64ffede076a02"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Enma.cs3",
+        "status": 1,
+        "version": 18,
+        "name": "Enma",
+        "internalName": "Enma",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Enma - Watch Anime Sub & Dub in HD",
+        "fileSize": 64128,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://www.enma.lol/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-d1716837c28f7a294126d3f74c04c9d40de9794e72bf33805f4f1ac944ddfe9a"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Just4Anime.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "Just4Anime",
+        "internalName": "Just4Anime",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "Just4Anime - Watch Anime with Sub, Dub & HardSub from all sources",
+        "fileSize": 55069,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://just4anime.online/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-75a2d31f3bdd0cf51e8f3e278503ae7c8e7d0b7dae5b42a60f58a637256a9df5"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/KMMovies.cs3",
+        "status": 1,
+        "version": 8,
+        "name": "KMMovies",
+        "internalName": "KMMovies",
+        "authors": [
+            "raghav"
+        ],
+        "description": "KMMovies - Download/stream 4K movies & TV series in Hindi, English, South. Multiple qualities (480p/720p/1080p/4K).",
+        "fileSize": 25302,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://kmmovies.shop/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-e66f36a08fffc0337eaedfe7ab7298de6d35c967f9abcf95b941573645b3b2f4"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/LIVETVProvider.cs3",
+        "status": 1,
+        "version": 17,
+        "name": "LIVETVProvider",
+        "internalName": "LIVETVProvider",
+        "authors": [
+            "raghav",
+            "NivinCNC"
+        ],
+        "description": "Watch LIVE TV channels & sports via LIVE TV",
+        "fileSize": 80998,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://png.pngtree.com/png-vector/20191026/ourmid/pngtree-live-icon-design-template-vector-isolated-illustration-png-image_1874482.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-5b065f2c0295cdcabe1f2f6cad32d89c38e04d8ef0069b9c24e470f616ed50b7"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/LunarAnime.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "LunarAnime",
+        "internalName": "LunarAnime",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime from LunarAnime with Sub and Dub support (eng-sub, ger-sub, ger-dub)",
+        "fileSize": 39616,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "de",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://lunaranime.ru/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-dbd5e949d57c1e0cbe3f74afb88be89fb5bca7fb8ac0cdfc7726e85d28e2852d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Miruro.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Miruro",
+        "internalName": "Miruro",
+        "authors": [
+            "raghav"
+        ],
+        "description": "ANIME(SUB,DUB)-MULTI SOURCE",
+        "fileSize": 76180,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://repository-images.githubusercontent.com/567000493/281ea6b4-7159-4ac7-b5f1-34abf335c033",
+        "apiVersion": 1,
+        "fileHash": "sha256-b88640b954b7625bf369edf6c9ae706c3339f68348d09c74523fec16b85081d2"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Movish.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "Movish",
+        "internalName": "Movish",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Movish Provider - Movies and TV Shows",
+        "fileSize": 41620,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Live"
+        ],
+        "iconUrl": "https://media.istockphoto.com/id/1944783914/vector/cinema-film.jpg?s=612x612&w=0&k=20&c=FEAMMl1hur-NKlA3OieFEsVB0D5kI1Xg9is2bCmFg9o=",
+        "apiVersion": 1,
+        "fileHash": "sha256-1d73a43f1ddb3f9a836d80fba86440660e4cf3382a48a1aff3d13c759ccff49d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Multimovies.cs3",
+        "status": 1,
+        "version": 5,
+        "name": "Multimovies",
+        "internalName": "Multimovies",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "Multimovies - Movies, TV Shows & Anime with Cineverse (StreamHG/EarnVids/SeekStreaming/RPMShare/UpnShare/StreamP2P...) + GDMIRROR sources, multi-audio & subtitles",
+        "fileSize": 43588,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "iconUrl": "https://multimovies.motorcycles/wp-content/uploads/2024/01/cropped-CompressJPEG.online_512x512_image.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-5e982f39e7cf33a15dd91105ca95dfaaaa1d325bb163a211528a2c2acb1f5900"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/NetMirror.cs3",
+        "status": 1,
+        "version": 13,
+        "name": "NetMirror",
+        "internalName": "NetMirror",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Netflix, PrimeVideo, Hotstar, Disney \u2014 multiple languages via netmirror",
+        "fileSize": 39603,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AsianDrama"
+        ],
+        "iconUrl": "https://raw.githubusercontent.com/KSHITIJ8473/raghav/master/NetMirror/logo.jpeg",
+        "apiVersion": 1,
+        "fileHash": "sha256-bca6ed6e4c199eaa2bc1fa8f8dd9324f6ed96019b3518e6b76224df8127bf3b0"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/NetNaija.cs3",
+        "status": 1,
+        "version": 8,
+        "name": "NetNaija",
+        "internalName": "NetNaija",
+        "authors": [
+            "raghav"
+        ],
+        "description": "NetNaija - Watch Movies, TV Series, Anime, bollywood, Korean & Hollywood. HD streaming with multi-language.",
+        "fileSize": 48132,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://netnaija.film/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-5cfd2e6395a4b7d9c8de0f35cf02410b282adc9f60dff6ab55366f713495be13"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/NineAnime.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "NineAnime",
+        "internalName": "NineAnime",
+        "authors": [
+            "raghav"
+        ],
+        "description": "anime from 9anime clone with sub and dub",
+        "fileSize": 30567,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://9anime.org.lv/wp-content/uploads/2024/08/9animecomee-logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-639037ec88056f478e13fdb59229a3306fdf33c91f45a8187cea946e20339c51"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/OneTube.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "OneTube",
+        "internalName": "OneTube",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Stream movies & TV shows with multi-server support - OneTube Provider",
+        "fileSize": 55576,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://www.1tube.org/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-77724e28c679beaa5afdf361963c232db1ce4c9d960747bbdd184b4c0d946923"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/PlayFyProvider.cs3",
+        "status": 1,
+        "version": 11,
+        "name": "PlayFyProvider",
+        "internalName": "PlayFyProvider",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch Live TV channels & sports via PlayFy TV",
+        "fileSize": 82109,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://www.google.com/s2/favicons?domain=playfy.tv&sz=%size%",
+        "apiVersion": 1,
+        "fileHash": "sha256-3e3e1d3a63fd7dacdf02f9703696061b88a2c407a91778222ba1fb63c92f0e21"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Ppv.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Ppv",
+        "internalName": "Ppv",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "under work dont install",
+        "fileSize": 10296,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTVgXotVMUiHc-BjE8KnZWLw256jTJcM2RywSh432dr9qWdg0iFDqRZVscp&s=10",
+        "apiVersion": 1,
+        "fileHash": "sha256-75bd09872810aca01ec6d7b0d40a8a9b6c843b7e23702f612b8b6feced4dbe03"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/PPVLiveSports.cs3",
+        "status": 1,
+        "version": 5,
+        "name": "PPVLiveSports",
+        "internalName": "PPVLiveSports",
+        "authors": [
+            "raghav"
+        ],
+        "description": "PPV Live Sports - All sports, 24/7 channels, live & upcoming",
+        "fileSize": 30241,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://ppv.st/assets/img/ppv.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-2d6a6a73ca2d1f0af3aece96986f580a3819c6f596d2b329002f8f9754560b5f"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/PrimeShows.cs3",
+        "status": 1,
+        "version": 11,
+        "name": "PrimeShows",
+        "internalName": "PrimeShows",
+        "authors": [
+            "KSHITIJ8473"
+        ],
+        "description": "PrimeShows - Movies, TV Shows & Anime with Multi-Language Sources (Hindi Dub, Multi Audio)",
+        "fileSize": 45958,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "iconUrl": "https://primeshows.uk/favicon.svg",
+        "apiVersion": 1,
+        "fileHash": "sha256-9ece624da3a2e93063b9e96e5c01754a75625f862825875551318e09c31ebeca"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Reanime.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "Reanime",
+        "internalName": "Reanime",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Re:ANIME (reanime.to) - DO NOT INSTALL - FOR TESTING ONLY",
+        "fileSize": 34591,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://reanime.to/logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-258623055f970289ec31acb2eb530606ce56633060d97cab7d89d8e6ee89032d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/ReplayZone.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "ReplayZone",
+        "internalName": "ReplayZone",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Sports Replays \u2014 Football, Baseball, Rugby & Motorsport",
+        "fileSize": 23853,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://media.istockphoto.com/id/1321048723/vector/r-letter-in-the-circle-logo.jpg?s=612x612&w=0&k=20&c=S9TWFtRs2omUlxY2RsyUImNadAVyK3xLdMZJOxAfpSM=",
+        "apiVersion": 1,
+        "fileHash": "sha256-9f7055264ce091ef08ac3fbd939624db2446391aa899fa088fa56e08b00230a6"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Senshi.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "Senshi",
+        "internalName": "Senshi",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Best site for hard subs and some dubs",
+        "fileSize": 67067,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://senshi.live/assets/Senshi_Logo-DRQDIkgF.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-3957db997fa5ff7f51c5359cee8c0bb186e04d29680fb5b40d7db85824f3e16d"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/SportsEera.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "SportsEera",
+        "internalName": "SportsEera",
+        "authors": [
+            "raghav"
+        ],
+        "description": "SportsEera - Live Sports Streams",
+        "fileSize": 24114,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://fancodexeera.pages.dev/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-4b1d4185e816774d76a961da81f59c2e0d526105a0c64885c32dd052091f8e09"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/SSRmovies.cs3",
+        "status": 1,
+        "version": 5,
+        "name": "SSRmovies",
+        "internalName": "SSRmovies",
+        "authors": [
+            "raghav"
+        ],
+        "description": "SSRmovies - Bollywood, Hollywood, Web Series & TV Shows in HD",
+        "fileSize": 29377,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://ssrmovies.archi/wp-content/uploads/2024/09/SSRmovies.COM-Logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-7cf7cf7a634642ef1ee107d2e44bf2f5ab0368ac9c9d8fcb56a0e6099e51a819"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/StreamEast.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "StreamEast",
+        "internalName": "StreamEast",
+        "authors": [
+            "RAGHAV"
+        ],
+        "description": "StreamEast Sports(REQUIRES CLOUDFLARE DNS)",
+        "fileSize": 25443,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://d3e6ckxkrs5ntg.cloudfront.net/artists/images/8639152/original/crop:x0y0w500h500/hash:1698153106/a.jpg?1698153106",
+        "apiVersion": 1,
+        "fileHash": "sha256-219058d0ba8bdd15de46a65291587e139f0e26a62e0c0b4aba916091d20ac27b"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/StreamedPk.cs3",
+        "status": 1,
+        "version": 6,
+        "name": "StreamedPk",
+        "internalName": "StreamedPk",
+        "authors": [
+            "RAGHAV"
+        ],
+        "description": "ALL LIVE SPORTS WITH MULTIPLE SERVER",
+        "fileSize": 42753,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://streamed.pk/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-650846e2ef5c23fc23359c884a7d178ef18e5ac8f536a7a9ed135c6b18d273f0"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Themoviesboss.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "Themoviesboss",
+        "internalName": "Themoviesboss",
+        "authors": [
+            "raghav"
+        ],
+        "description": "TheMoviesBoss - Bollywood, Hollywood, Web Series & TV Shows in HD",
+        "fileSize": 27679,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "iconUrl": "https://ww1.themoviesboss.blog/wp-content/uploads/2025/06/cropped-favicon-32x32.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-489f6011c6491fad862f5bb525e2e76c30c45a313bddda61e7a9613c264fe2fb"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/TheMoviesFlix.cs3",
+        "status": 1,
+        "version": 17,
+        "name": "TheMoviesFlix",
+        "internalName": "TheMoviesFlix",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Download and stream movies & TV series HINDI,ENGLISH - TheMoviesFlix Provider",
+        "fileSize": 39124,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://moviesflixhq.com/wp-content/uploads/2026/06/cropped-favicon-192x192.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-122141ed677ec06682270988ef1c7c1770985d4473e849a87a8352222d9248e4"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/TimStreams.cs3",
+        "status": 1,
+        "version": 3,
+        "name": "TimStreams",
+        "internalName": "TimStreams",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Live Sports, Events, Replays & Live TV Channels from TimStreams",
+        "fileSize": 27463,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Live"
+        ],
+        "iconUrl": "https://i.ibb.co/7tBHzxnY/ff.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-ba33919b4e3d25c448d0861cb3db721402fdbe57d00ff461a4ed951ef95f7058"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/Toonstream.cs3",
+        "status": 1,
+        "version": 4,
+        "name": "Toonstream",
+        "internalName": "Toonstream",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Watch cartoons and anime online",
+        "fileSize": 27801,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "Anime",
+            "Cartoon"
+        ],
+        "iconUrl": "https://images.seeklogo.com/logo-png/27/1/batman-logo-png_seeklogo-272686.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-6ebf6081ce86f63c6b0a9669806dc4350da1867b73be17ccb8368fc6d306ec5a"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/TorrentsV1.cs3",
+        "status": 1,
+        "version": 16,
+        "name": "TorrentsV1",
+        "internalName": "TorrentsV1",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Torrent support for Anime, Movies and TV via Torrentio, TorrentsDB, Animetosho and custom Stremio addons",
+        "fileSize": 90451,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA",
+            "Movie",
+            "TvSeries",
+            "Torrent"
+        ],
+        "iconUrl": "https://png.pngtree.com/element_our/png/20181227/movie-icon-which-is-designed-for-all-application-purpose-new-png_287896.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-6c8842d89aecf39930e633858545f9e35c2eafa39754f0235383f0f3eedabd70"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/TwoDHive.cs3",
+        "status": 1,
+        "version": 11,
+        "name": "TwoDHive",
+        "internalName": "TwoDHive",
+        "authors": [
+            "raghav"
+        ],
+        "description": "Anime and movies from 2Dhive with Sub and Dub support",
+        "fileSize": 27927,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://wallpapers.com/images/hd/anime-symbols-full-metal-alchemist-homunculi-black-and-red-59twpz44gslsiv1o.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-119a14b36e2dfebbe1f96c3acde1dd34e188a0afb34a9cc4a781d90d2bc99127"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/TwoMoviesFD.cs3",
+        "status": 1,
+        "version": 8,
+        "name": "TwoMoviesFD",
+        "internalName": "TwoMoviesFD",
+        "authors": [
+            "raghav"
+        ],
+        "description": "2MoviesFD - Hindi/Tamil/Telugu/Malayalam/Kannada movies & web series in 480p/720p/1080p. Streams via Byse, StreamTape, DoodStream, StreamHG.",
+        "fileSize": 28915,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://2moviesfd.shop/assets/uploads/favicon_1775898062_Icon%20MoviesFD.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-8985549ab675cc284724730ee9fd738ad38fb1d0362f243e0f1ec3b10afbe008"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/UniqueStream.cs3",
+        "status": 1,
+        "version": 11,
+        "name": "UniqueStream",
+        "internalName": "UniqueStream",
+        "authors": [
+            "raghav"
+        ],
+        "description": "UniqueStream - Dynamic Anime Provider (with AES-256-CTR playback decryption support).",
+        "fileSize": 41869,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "en",
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "iconUrl": "https://anime.uniquestream.net/favicon.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-2d3202a01f7c371e2032ffb3f1d5adda57aa18ec7d90d4376550c584e2236e93"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/laddu-repo/laddu/builds/YupFlixFast.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "YupFlixFast",
+        "internalName": "YupFlixFast",
+        "authors": [
+            "raghav"
+        ],
+        "description": "YupFlix Fast - No batching, full parallel fetch",
+        "fileSize": 37619,
+        "repositoryUrl": "https://github.com/laddu-repo/laddu",
+        "language": "hi",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://watch.yupflix.org/favicon.svg",
+        "apiVersion": 1,
+        "fileHash": "sha256-6c584b3042956565f70f7d690c4023a026121bcc6f191d409737f7a72d593ada"
+    }
+]

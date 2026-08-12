@@ -1,0 +1,9 @@
+{
+  "name": "laddu(clone)",
+  "iconUrl": "https://i.pinimg.com/280x280_RS/b1/7b/3b/b17b3b92b09e7ff526b928a484142f2c.jpg",
+  "description": "Raghav clone CloudStream extensions",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/laddu-repo/laddu/builds/plugins.json"
+  ]
+}
