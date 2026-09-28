@@ -45,7 +45,7 @@ jobs:
           java-version: 17
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4.0.1
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Build Plugins
         run: |
