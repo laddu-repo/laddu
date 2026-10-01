@@ -58,6 +58,80 @@ class FastDlExtractor : ExtractorApi() {
     }
 }
 
+class VCloudExtractor : ExtractorApi() {
+    override val name = "V-Cloud"
+    override val mainUrl = "https://vcloud.zip"
+    override val requiresReferer = true
+
+    private val cfKiller = CloudflareKiller()
+    private val headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer" to "https://nexdrive.fit/"
+    )
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        try {
+            val response = app.get(url, headers = headers, interceptor = cfKiller, timeout = 30L)
+            val doc = response.document
+
+            val downloadLink = doc.selectFirst("div.main h4 a")?.attr("href")
+            if (downloadLink != null && downloadLink.isNotBlank()) {
+                val fullUrl = if (downloadLink.startsWith("http")) downloadLink else "$mainUrl$downloadLink"
+                val doc2 = app.get(fullUrl, headers = headers, interceptor = cfKiller, timeout = 30L).document
+
+                val scriptData = doc2.selectFirst("script:containsData(url)")?.data()
+                if (scriptData != null) {
+                    val encoded = Regex("""atob\(atob\('([^']+)'\)\)""").find(scriptData)?.groupValues?.get(1)
+                    if (encoded != null) {
+                        val decoded = try {
+                            base64Decode(base64Decode(encoded))
+                        } catch (_: Exception) { null }
+                        if (decoded != null && decoded.startsWith("http")) {
+                            emitLink(decoded, callback)
+                            return
+                        }
+                    }
+
+                    val varUrl = Regex("""var\s+url\s*=\s*'([^']*)'""").find(scriptData)?.groupValues?.get(1)
+                    if (varUrl != null && varUrl.startsWith("http")) {
+                        emitLink(varUrl, callback)
+                        return
+                    }
+                }
+
+                doc2.selectFirst("div.card-body")?.select("h2 a.btn")?.forEach { btn ->
+                    val href = btn.attr("href")
+                    if (href.isNotBlank() && href.startsWith("http")) {
+                        emitLink(href, callback)
+                    }
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.d(TAG, "VCloud error: ${e.message}")
+        }
+    }
+
+    private fun emitLink(url: String, callback: (ExtractorLink) -> Unit) {
+        callback.invoke(
+            ExtractorLink(
+                source = name,
+                name = name,
+                url = url,
+                referer = mainUrl,
+                quality = Qualities.Unknown.value,
+                type = ExtractorLinkType.VIDEO,
+                headers = mapOf("Referer" to "$mainUrl/")
+            )
+        )
+    }
+}
 
 class GoFileExtractor : ExtractorApi() {
     override val name = "GoFile"

@@ -12,6 +12,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+import com.raghav.donation.DonationManager
 
 private const val TAG = "TMF"
 
@@ -50,6 +51,7 @@ class TheMoviesFlix : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        DonationManager.checkAndShow()
         mainUrl = FirebaseDomainHelper.getDomain("themoviesflix") ?: mainUrl
         val path = request.data
         val url = if (path.isBlank()) {
@@ -57,7 +59,7 @@ class TheMoviesFlix : MainAPI() {
         } else {
             if (page > 1) "$mainUrl/$path/page/$page/" else "$mainUrl/$path/"
         }
-        val doc = app.get(url, headers = baseHeaders).document
+        val doc = tmfGet(url, headers = baseHeaders).document
         val items = doc.select("article.latestpost a[id=featured-thumbnail]").mapNotNull { it.toSearchResult() }
         val hasNext = doc.select("div.navigation a.nextpostslink, div.navigation li a:contains(Next)").isNotEmpty()
         return newHomePageResponse(request.name, items, hasNext = hasNext)
@@ -110,13 +112,13 @@ class TheMoviesFlix : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         mainUrl = FirebaseDomainHelper.getDomain("themoviesflix") ?: mainUrl
         val url = "$mainUrl/?s=${URLEncoder.encode(query, "UTF-8")}"
-        val doc = app.get(url, headers = baseHeaders).document
+        val doc = tmfGet(url, headers = baseHeaders).document
         return doc.select("article.latestpost a[id=featured-thumbnail]").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         mainUrl = FirebaseDomainHelper.getDomain("themoviesflix") ?: mainUrl
-        val doc = app.get(url, headers = baseHeaders).document
+        val doc = tmfGet(url, headers = baseHeaders).document
         val entry = doc.selectFirst("div.entry-content") ?: return null
 
         val titleRaw = doc.selectFirst("h2.mfx-main-title")?.text()
@@ -258,7 +260,7 @@ class TheMoviesFlix : MainAPI() {
             }
             episodes
         } catch (e: Exception) {
-            Log.d(TAG, "resolveNexdriveEpisodes: ${e.message}")
+            Log.e(TAG, "resolveNexdriveEpisodes: ${e.message}")
             emptyList()
         }
     }
@@ -277,7 +279,7 @@ class TheMoviesFlix : MainAPI() {
             }
             links.toList()
         } catch (e: Exception) {
-            Log.d(TAG, "resolveRedirectPage: ${e.message}")
+            Log.e(TAG, "resolveRedirectPage: ${e.message}")
             emptyList()
         }
     }
@@ -321,7 +323,7 @@ class TheMoviesFlix : MainAPI() {
             }
             allLinks
         } catch (e: Exception) {
-            Log.d(TAG, "resolveNexdriveEpisodeLinks: ${e.message}")
+            Log.e(TAG, "resolveNexdriveEpisodeLinks: ${e.message}")
             emptyList()
         }
     }
@@ -348,7 +350,7 @@ class TheMoviesFlix : MainAPI() {
                 try {
                     allLinks.addAll(resolveNexdriveEpisodeLinks(nexdriveUrl, episodeNum))
                 } catch (e: Exception) {
-                    Log.d(TAG, "loadLinks TV: ${e.message}")
+                    Log.e(TAG, "loadLinks TV: ${e.message}")
                 }
             }
         } else {
@@ -357,7 +359,7 @@ class TheMoviesFlix : MainAPI() {
                 try {
                     allLinks.addAll(resolveRedirectPage(redirectUrl))
                 } catch (e: Exception) {
-                    Log.d(TAG, "loadLinks: ${e.message}")
+                    Log.e(TAG, "loadLinks: ${e.message}")
                 }
             }
         }
@@ -374,7 +376,7 @@ class TheMoviesFlix : MainAPI() {
                                 try {
                                     loadExtractor(link, "https://nexdrive.fit/", subtitleCallback, callback)
                                 } catch (e: Exception) {
-                                    Log.d(TAG, "extractor: ${e.message}")
+                                    Log.e(TAG, "extractor: ${e.message}")
                                     false
                                 }
                             }
@@ -386,7 +388,7 @@ class TheMoviesFlix : MainAPI() {
                 foundAny = results.any { it }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "loadLinks: ${e.message}")
+            Log.e(TAG, "loadLinks: ${e.message}")
         }
 
         return foundAny
