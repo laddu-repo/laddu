@@ -5,7 +5,6 @@ import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.nicehttp.NiceResponse
 
 /**
  * Shiro API layer — shiro.so.
@@ -59,26 +58,67 @@ object ShiroApi {
     // ---------- Cookie bootstrap ----------
 
     /**
-     * Visit the anime page so the Next.js middleware sets the `shiro_watch` cookie. Cloudstream's
-     * okhttp cookie jar persists it for every subsequent request in the session. Cheap and
-     * idempotent — safe to call before every /api/episode.
+     * Visit shiro's EPISODE page so the Next.js middleware sets the `shiro_watch` cookie, then
+     * extract that cookie from the Set-Cookie response header and return it.
      *
-     * Returns the page response (sometimes useful) or null on failure. Failures here are NOT fatal
-     * — a previously-set cookie from an earlier call may still be valid.
+     * KEY FINDINGS (verified by live probing + logcat analysis):
+     *  - /api/episode returns {"status":"unavailable","reason":"forbidden"} WITHOUT the cookie.
+     *  - The cookie is set by the /anime/{id}/{ep} EPISODE page response (NOT the /anime/{id} page,
+     *    which is CDN-cached and often returns no Set-Cookie on GET).
+     *  - The cookie works regardless of TLS fingerprint (curl-captured cookie unlocks the API for
+     *    every anime, including ones that were "forbidden" without it). So okhttp's app.get will
+     *    capture it just as well as a browser would.
+     *  - The cookie is NOT auto-persisted across separate app.post calls in all cases, so we
+     *    capture it explicitly here and pass it as a Cookie header on /api/episode.
+     *
+     * Returns the cookie string ("shiro_watch=...") or null on failure.
      */
-    private suspend fun warmSession(anilistId: Int): Boolean {
+    private suspend fun fetchWatchCookie(anilistId: Int): String? {
         return try {
-            // The slug is cosmetic; shiro's middleware matches on /anime/<id>- prefix, so any slug
-            // (or even just the id) triggers the Set-Cookie. We use the bare id to avoid having to
-            // build a real slug.
-            val resp = app.get("$MAIN_URL/anime/$anilistId-$", headers = pageHeaders, timeout = 15_000L)
-            // 200 is the normal case (page renders). 404 also sets the cookie on the middleware
-            // path, but we treat non-2xx/4xx as soft failures.
-            resp.code in 200..404
+            // Episode page URL. The slug is cosmetic for the middleware — it matches on /anime/<id>/.
+            // Using episode 1 is always safe (every anime has at least ep 1).
+            val resp = app.get(
+                "$MAIN_URL/anime/$anilistId/1",
+                headers = pageHeaders,
+                timeout = 15_000L
+            )
+            // Cloudstream's NiceResponse exposes all Set-Cookie headers via headers.values("Set-Cookie").
+            // The cookie looks like: shiro_watch=xxx.yyy.zzz; Path=/; Expires=...; ...
+            val cookies = resp.headers.values("Set-Cookie")
+            val watch = cookies
+                .firstOrNull { it.startsWith("shiro_watch=") }
+                ?.substringBefore(";")
+                ?.trim()
+            if (watch.isNullOrBlank()) {
+                Log.d(TAG, "fetchWatchCookie($anilistId): no shiro_watch in Set-Cookie (cookies=$cookies)")
+                null
+            } else {
+                Log.d(TAG, "fetchWatchCookie($anilistId): got cookie ${watch.take(30)}...")
+                watch
+            }
         } catch (e: Exception) {
-            Log.d(TAG, "warmSession($anilistId) failed: ${e.message}")
-            false
+            Log.d(TAG, "fetchWatchCookie($anilistId) failed: ${e.message}")
+            null
         }
+    }
+
+    /** Cached cookie — shiro_watch lasts 24h, so we reuse it across many episode loads. */
+    @Volatile
+    private var cachedCookie: String? = null
+    @Volatile
+    private var cachedCookieTs: Long = 0L
+    private const val COOKIE_TTL_MS = 23 * 60 * 60 * 1000L // 23h (cookie lasts 24h)
+
+    private suspend fun watchCookie(anilistId: Int): String? {
+        val now = System.currentTimeMillis()
+        val cached = cachedCookie
+        if (cached != null && now - cachedCookieTs < COOKIE_TTL_MS) return cached
+        val fresh = fetchWatchCookie(anilistId)
+        if (fresh != null) {
+            cachedCookie = fresh
+            cachedCookieTs = now
+        }
+        return fresh ?: cached // fall back to stale cookie if fetch failed
     }
 
     // ---------- AniList GraphQL ----------
@@ -188,32 +228,37 @@ object ShiroApi {
     // ---------- Shiro /api/episode ----------
 
     /**
-     * THE critical call. Warms the session cookie first, then POSTs /api/episode.
-     * Returns the full ShiroEpisodeResponse (status + variants + sources + tracks) or null.
+     * THE critical call. Fetches the shiro_watch cookie (from the episode page) then POSTs
+     * /api/episode with the cookie explicitly passed as a Cookie header.
+     *
+     * Without the cookie the API returns {"status":"unavailable","reason":"forbidden"}.
+     * With it, returns {"status":"ready","variants":[...]} for every anime on shiro's catalog.
      */
     suspend fun episodeServers(anilistId: Int, episode: Int): ShiroEpisodeResponse? {
-        // Always warm the session — cheap and idempotent. If the cookie is already in the jar,
-        // the GET is still a single round-trip and harmless. If it's expired/missing, this sets it.
-        warmSession(anilistId)
+        // Fetch the cookie first. watchCookie() caches it for 23h (cookie lasts 24h) so subsequent
+        // episode loads skip the page GET.
+        val cookie = watchCookie(anilistId)
 
-        var resp: NiceResponse? = null
+        // Try up to 2 times: first with the cached cookie, and if that returns "forbidden",
+        // force a fresh cookie fetch and retry.
         for (attempt in 1..2) {
-            resp = try {
+            val resp = try {
+                val headers = baseHeaders.toMutableMap().apply {
+                    put("Content-Type", "application/json")
+                    put("Origin", MAIN_URL)
+                    put("Referer", "$MAIN_URL/anime/$anilistId/1")
+                    if (!cookie.isNullOrBlank()) put("Cookie", cookie)
+                }
                 app.post(
                     "$MAIN_URL/api/episode",
-                    headers = baseHeaders + mapOf(
-                        "Content-Type" to "application/json",
-                        "Origin" to MAIN_URL,
-                        "Referer" to "$MAIN_URL/anime/$anilistId"
-                    ),
+                    headers = headers,
                     json = mapOf("anilistId" to anilistId, "episode" to episode),
                     timeout = 20_000L
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "episode POST error: ${e.message}")
-                null
+                return null
             }
-            if (resp == null) return null
 
             if (!resp.isSuccessful) {
                 Log.d(TAG, "episode POST $anilistId:$episode -> ${resp.code}")
@@ -227,24 +272,34 @@ object ShiroApi {
                 return null
             }
 
-            // If we got "forbidden" the cookie wasn't actually set (rare — e.g. middleware
-            // skipped on a cached page). Warm once more with a cache-buster and retry.
+            // If forbidden, the cookie was missing/expired. Force a fresh fetch and retry once.
             if (parsed.status == "unavailable" && parsed.reason == "forbidden" && attempt == 1) {
-                Log.d(TAG, "forbidden on first attempt, re-warming session for $anilistId")
-                warmSession(anilistId)
+                Log.d(TAG, "forbidden on attempt 1 for $anilistId:$episode — forcing fresh cookie")
+                cachedCookie = null
+                cachedCookieTs = 0L
+                val fresh = fetchWatchCookie(anilistId)
+                if (fresh.isNullOrBlank()) {
+                    Log.d(TAG, "fresh cookie fetch failed — giving up")
+                    return parsed
+                }
+                cachedCookie = fresh
+                cachedCookieTs = System.currentTimeMillis()
                 continue
             }
             return parsed
         }
-        return resp?.let { parseJson<ShiroEpisodeResponse>(it.text) }
+        return null
     }
 
     // ---------- Shiro /api/recent-episodes (home schedule) ----------
 
     suspend fun recentEpisodes(): List<ShiroSchedule> {
         return try {
-            warmSession(1) // any id works; just to get a cookie for the API call
-            val resp = app.get("$MAIN_URL/api/recent-episodes", headers = baseHeaders)
+            val cookie = watchCookie(1) // any id works; just need a cookie
+            val headers = baseHeaders.toMutableMap().apply {
+                if (!cookie.isNullOrBlank()) put("Cookie", cookie)
+            }
+            val resp = app.get("$MAIN_URL/api/recent-episodes", headers = headers)
             if (!resp.isSuccessful) return emptyList()
             parseJson<ShiroRecentEpisodes>(resp.text)?.schedules ?: emptyList()
         } catch (e: Exception) {
