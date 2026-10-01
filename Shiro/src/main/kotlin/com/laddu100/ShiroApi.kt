@@ -5,16 +5,28 @@ import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.api.Log
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import java.util.Calendar
+import com.lagradost.nicehttp.NiceResponse
 
 /**
- * Shiro API layer.
+ * Shiro API layer — shiro.so.
  *
- * Two data sources (both verified to require NO auth/cookies):
- *  1. AniList GraphQL (https://graphql.anilist.co/) — all catalog metadata + real episode titles
+ * KEY INSIGHT (learned from logcat + live probing):
+ *   The `POST /api/episode` endpoint is GATED behind a `shiro_watch` session cookie. Without it
+ *   the API returns `{"status":"unavailable","reason":"forbidden"}`. The cookie is NOT set by
+ *   Cloudflare; it is set by a Next.js middleware on the `/anime/{id}-{slug}` PAGE response
+ *   (Set-Cookie header, 24h expiry, HttpOnly, SameSite=lax). Cloudstream's okhttp client
+ *   (NiceHttp) keeps a cookie jar, so a single `app.get("/anime/{id}-...")` warms it and every
+ *   subsequent `app.post("/api/episode")` carries the cookie automatically.
+ *
+ * Two data sources:
+ *  1. AniList GraphQL (`https://graphql.anilist.co/`) — all catalog metadata + real episode titles
  *     via `Media.streamingEpisodes { title thumbnail url }`.
- *  2. Shiro's own backend (https://shiro.so/api/episode) — returns HLS stream URLs + VTT subtitle
- *     tracks for every variant (sub/dub) and every server (Plum/Lemon/Cherry/Grape).
+ *  2. Shiro's own backend (`https://shiro.so/api/episode`) — returns HLS URLs + VTT subtitle tracks
+ *     for every variant (sub/dub) and every server (Plum / Cherry / Cherry 2 / Cherry 3 / Lemon /
+ *     Grape / Melon — the set varies per anime and per episode).
+ *
+ * All stream + subtitle URLs are RELATIVE (`/stream/...`) and must be prefixed with MAIN_URL.
+ * Streams + subtitles fetch cleanly with plain GET (no cookie needed for the actual media URLs).
  */
 object ShiroApi {
 
@@ -22,7 +34,6 @@ object ShiroApi {
     private const val TAG = "Shiro"
     private const val ANILIST_URL = "https://graphql.anilist.co"
 
-    // AniList soft rate limit is 90/min; we make at most a handful per screen so this is safe.
     private val mapper: ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
 
     private const val USER_AGENT =
@@ -39,11 +50,41 @@ object ShiroApi {
         "Content-Type" to "application/json"
     )
 
+    private val pageHeaders = mapOf(
+        "User-Agent" to USER_AGENT,
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language" to "en-US,en;q=0.9"
+    )
+
+    // ---------- Cookie bootstrap ----------
+
+    /**
+     * Visit the anime page so the Next.js middleware sets the `shiro_watch` cookie. Cloudstream's
+     * okhttp cookie jar persists it for every subsequent request in the session. Cheap and
+     * idempotent — safe to call before every /api/episode.
+     *
+     * Returns the page response (sometimes useful) or null on failure. Failures here are NOT fatal
+     * — a previously-set cookie from an earlier call may still be valid.
+     */
+    private suspend fun warmSession(anilistId: Int): Boolean {
+        return try {
+            // The slug is cosmetic; shiro's middleware matches on /anime/<id>- prefix, so any slug
+            // (or even just the id) triggers the Set-Cookie. We use the bare id to avoid having to
+            // build a real slug.
+            val resp = app.get("$MAIN_URL/anime/$anilistId-$", headers = pageHeaders, timeout = 15_000L)
+            // 200 is the normal case (page renders). 404 also sets the cookie on the middleware
+            // path, but we treat non-2xx/4xx as soft failures.
+            resp.code in 200..404
+        } catch (e: Exception) {
+            Log.d(TAG, "warmSession($anilistId) failed: ${e.message}")
+            false
+        }
+    }
+
     // ---------- AniList GraphQL ----------
 
     private suspend inline fun <reified T : Any> anilist(query: String, variables: Map<String, Any?>): T? {
         return try {
-            // NiceHttp serializes `json` map to a JSON request body automatically.
             val resp = app.post(
                 ANILIST_URL,
                 headers = anilistHeaders,
@@ -60,10 +101,6 @@ object ShiroApi {
         }
     }
 
-    /**
-     * Search anime. Returns AniList media list.
-     * Replicates shiro's `SearchAnime` operation.
-     */
     suspend fun search(query: String, page: Int = 1, perPage: Int = 25): List<AniListMedia> {
         val q = """
             query(${'$'}search: String!, ${'$'}page: Int!, ${'$'}perPage: Int!) {
@@ -82,12 +119,7 @@ object ShiroApi {
         return res.data?.page?.media ?: emptyList()
     }
 
-    /**
-     * Home-page rows. Each section is a single AniList query.
-     * Returns null on failure so the provider can skip that section cleanly.
-     */
     suspend fun homeList(sort: String, page: Int = 1, perPage: Int = 30): List<AniListMedia> {
-        // sort: TRENDING | POPULARITY_DESC | SCORE_DESC | FAVOURITES_DESC
         val q = """
             query(${'$'}page: Int!, ${'$'}perPage: Int!, ${'$'}sort: [MediaSort]!) {
               Page(page: ${'$'}page, perPage: ${'$'}perPage) {
@@ -105,9 +137,6 @@ object ShiroApi {
         return res.data?.page?.media ?: emptyList()
     }
 
-    /**
-     * Current-season row (anime airing THIS season THIS year, by popularity).
-     */
     suspend fun currentSeasonList(page: Int = 1, perPage: Int = 30): List<AniListMedia> {
         val (season, year) = currentSeason()
         val q = """
@@ -127,10 +156,6 @@ object ShiroApi {
         return res.data?.page?.media ?: emptyList()
     }
 
-    /**
-     * Full anime detail. Critically includes `streamingEpisodes` (real episode titles +
-     * Crunchyroll thumbnails) and `recommendations`.
-     */
     suspend fun detail(id: Int): AniListMedia? {
         val q = """
             query(${'$'}id: Int!) {
@@ -163,33 +188,62 @@ object ShiroApi {
     // ---------- Shiro /api/episode ----------
 
     /**
-     * THE critical call: returns every variant (sub/dub) and every source (Plum/Lemon/Cherry/Grape)
-     * with HLS URLs + VTT subtitle tracks for a given episode.
-     *
-     * No auth, no cookies, no Origin/Referer required (verified with plain curl).
+     * THE critical call. Warms the session cookie first, then POSTs /api/episode.
+     * Returns the full ShiroEpisodeResponse (status + variants + sources + tracks) or null.
      */
     suspend fun episodeServers(anilistId: Int, episode: Int): ShiroEpisodeResponse? {
-        return try {
-            val resp = app.post(
-                "$MAIN_URL/api/episode",
-                headers = baseHeaders + mapOf("Content-Type" to "application/json"),
-                json = mapOf("anilistId" to anilistId, "episode" to episode)
-            )
+        // Always warm the session — cheap and idempotent. If the cookie is already in the jar,
+        // the GET is still a single round-trip and harmless. If it's expired/missing, this sets it.
+        warmSession(anilistId)
+
+        var resp: NiceResponse? = null
+        for (attempt in 1..2) {
+            resp = try {
+                app.post(
+                    "$MAIN_URL/api/episode",
+                    headers = baseHeaders + mapOf(
+                        "Content-Type" to "application/json",
+                        "Origin" to MAIN_URL,
+                        "Referer" to "$MAIN_URL/anime/$anilistId"
+                    ),
+                    json = mapOf("anilistId" to anilistId, "episode" to episode),
+                    timeout = 20_000L
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "episode POST error: ${e.message}")
+                null
+            }
+            if (resp == null) return null
+
             if (!resp.isSuccessful) {
                 Log.d(TAG, "episode POST $anilistId:$episode -> ${resp.code}")
                 return null
             }
-            parseJson<ShiroEpisodeResponse>(resp.text)
-        } catch (e: Exception) {
-            Log.e(TAG, "episode error: ${e.message}")
-            null
+
+            val parsed = try {
+                parseJson<ShiroEpisodeResponse>(resp.text)
+            } catch (e: Exception) {
+                Log.e(TAG, "episode parse error: ${e.message}")
+                return null
+            }
+
+            // If we got "forbidden" the cookie wasn't actually set (rare — e.g. middleware
+            // skipped on a cached page). Warm once more with a cache-buster and retry.
+            if (parsed.status == "unavailable" && parsed.reason == "forbidden" && attempt == 1) {
+                Log.d(TAG, "forbidden on first attempt, re-warming session for $anilistId")
+                warmSession(anilistId)
+                continue
+            }
+            return parsed
         }
+        return resp?.let { parseJson<ShiroEpisodeResponse>(it.text) }
     }
 
     // ---------- Shiro /api/recent-episodes (home schedule) ----------
 
     suspend fun recentEpisodes(): List<ShiroSchedule> {
         return try {
+            warmSession(1) // any id works; just to get a cookie for the API call
             val resp = app.get("$MAIN_URL/api/recent-episodes", headers = baseHeaders)
             if (!resp.isSuccessful) return emptyList()
             parseJson<ShiroRecentEpisodes>(resp.text)?.schedules ?: emptyList()
@@ -201,7 +255,6 @@ object ShiroApi {
 
     // ---------- helpers ----------
 
-    /** Builds an absolute stream URL from the relative path returned by /api/episode. */
     fun absolute(url: String?): String? {
         if (url.isNullOrBlank()) return null
         return when {
@@ -211,17 +264,10 @@ object ShiroApi {
         }
     }
 
-    /** Quick probe to determine whether a dub variant exists for this anime. */
-    suspend fun hasDub(anilistId: Int): Boolean {
-        val resp = episodeServers(anilistId, 1) ?: return false
-        if (resp.status != "ready") return false
-        return resp.variants?.any { it.id == "dub" && !it.sources.isNullOrEmpty() } == true
-    }
-
     private fun currentSeason(): Pair<String, Int> {
-        val cal = Calendar.getInstance()
-        val year = cal.get(Calendar.YEAR)
-        val month = cal.get(Calendar.MONTH) + 1 // 1-12
+        val cal = java.util.Calendar.getInstance()
+        val year = cal.get(java.util.Calendar.YEAR)
+        val month = cal.get(java.util.Calendar.MONTH) + 1
         val season = when (month) {
             in 1..3 -> "WINTER"
             in 4..6 -> "SPRING"

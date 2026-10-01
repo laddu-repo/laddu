@@ -120,6 +120,7 @@ data class AniListRecommendationNode(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ShiroEpisodeResponse(
     @JsonProperty("status") val status: String? = null,
+    @JsonProperty("reason") val reason: String? = null,
     @JsonProperty("variants") val variants: List<ShiroVariant>? = null
 )
 

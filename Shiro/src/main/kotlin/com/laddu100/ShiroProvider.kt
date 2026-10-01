@@ -11,41 +11,56 @@ import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.addDate
 import com.lagradost.cloudstream3.addEpisodes
 import com.lagradost.cloudstream3.mainPageOf
 import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 
 /**
- * Shiro provider.
+ * Shiro provider — shiro.so.
  *
- * Architecture (all verified by live HTTP probing, no guesswork):
+ * ARCHITECTURE (all verified by live probing, no guesswork):
  *  - Catalog metadata (search, home, detail, episode titles) comes from AniList GraphQL.
  *    Real episode names come from AniList's `Media.streamingEpisodes { title thumbnail url }`
- *    field (sourced by AniList from Crunchyroll).
- *  - Streams + subtitles come from Shiro's own `POST /api/episode` endpoint, which returns a
- *    structured `{ variants: [ { id:"sub"|"dub", sources: [ { label:"Plum"|"Lemon"|"Cherry"|
- *    "Grape", url:"/stream/.../index.m3u8", tracks: [ { src:"/stream/.../file.vtt", label,
- *    language } ] } ] } ] }` shape. No auth, no cookies, no Referer required.
- *  - Sub & dub are separate variants. Each source carries its own subtitle tracks (per-source,
- *    not per-variant). Movies use episode=1 and may also have sub+dub variants.
- *  - Cloudstream hides the sub/dub switcher on TvType.AnimeMovie, so dual-audio movies are typed
- *    as Anime to keep both audio tracks reachable (same trick AniChan uses).
+ *    field (sourced by AniList from Crunchyroll). For Naruto this returns all 220 episodes with
+ *    real titles like "Episode 1 - Enter: Naruto Uzumaki!". Movies return an empty list (they
+ *    have a single episode — handled separately).
+ *  - Streams + subtitles come from Shiro's `POST /api/episode` endpoint, gated behind a
+ *    `shiro_watch` session cookie. The cookie is set by visiting `/anime/{id}` (a Next.js
+ *    middleware Set-Cookie). Cloudstream's okhttp cookie jar persists it across requests, so
+ *    `ShiroApi.episodeServers()` warms the session first.
+ *  - The API returns `{ status: "ready"|"unavailable", reason?: "forbidden", variants[] }` where
+ *    each variant is `{ id: "sub"|"dub", sources[] }` and each source is
+ *    `{ label: "Plum"|"Cherry"|"Cherry 2"|"Cherry 3"|"Lemon"|"Grape"|"Melon", url: "/stream/...",
+ *      type: "application/vnd.apple.mpegurl"|"video/mp4", tracks[] }` and each track is
+ *    `{ label, language, type: "vtt", src: "/stream/.../file.vtt" }`.
+ *
+ * SUB/DUB/HARDSUB STRUCTURE (per user requirements):
+ *  - Sub tab: always present. Lists every episode with its REAL AniList title. On play, emits
+ *    every sub-variant source (Plum / Cherry / Lemon / Grape / Melon + Cherry 2/3 mirrors).
+ *  - Dub tab: only present when the API actually returns a dub variant for this anime. On play,
+ *    emits every dub-variant source.
+ *  - Hardsub sources: when a sub-variant source has NO subtitle tracks (e.g. the bare Cherry
+ *    servers), it is labeled "(Hardsub)" so the user knows the subs are baked in. This matches
+ *    shiro's own UI convention (Cherry = hardsubbed by default).
+ *  - Movies: ONE entry, typed as Anime (not AnimeMovie) when dub exists so the sub/dub switcher
+ *    stays visible. Links are tagged " (Sub)" / " (Dub)" / " (Hardsub)" in the source picker.
+ *    Subtitles are tagged by language; for dub sources the English subtitle (if any) is labeled
+ *    "English (Dub)" so it is distinguishable from the sub-tab English.
+ *
+ * BULLETPROOF load(): never returns null. If AniList fails, we still return a minimal response
+ * with the URL so the user can at least open the page. If /api/episode fails, loadLinks returns
+ * false honestly rather than crashing.
  */
 class ShiroProvider : MainAPI() {
 
@@ -73,13 +88,11 @@ class ShiroProvider : MainAPI() {
             "season" -> ShiroApi.currentSeasonList(page).mapNotNull { it.toSearchResponse() }
             "top" -> ShiroApi.homeList("SCORE_DESC", page).mapNotNull { it.toSearchResponse() }
             "recent" -> {
-                // shiro's schedule row has no pagination; only show on page 1
                 if (page > 1) emptyList()
                 else ShiroApi.recentEpisodes().mapNotNull { it.toSearchResponse() }
             }
             else -> emptyList()
         }
-        // AniList returns up to 30 per page; treat a full page as having a next page.
         val hasNext = items.size >= 25 && request.data != "recent"
         return newHomePageResponse(request.name, items, hasNext = hasNext)
     }
@@ -94,25 +107,39 @@ class ShiroProvider : MainAPI() {
     // ---------- Load (anime detail + episode list) ----------
 
     override suspend fun load(url: String): LoadResponse? {
-        val anilistId = url.substringAfterLast("/").substringBefore("-").toIntOrNull()
-            ?: url.substringAfterLast("/").toIntOrNull()
-            ?: return null
+        // URL formats accepted: /anime/{id}, /anime/{id}-{slug}, /anime/{id}/{ep}
+        val anilistId = extractAnilistId(url) ?: return null
 
         val anime = ShiroApi.detail(anilistId) ?: return null
-        val title = anime.displayTitle() ?: return null
+        val title = anime.displayTitle() ?: anime.title?.native ?: return null
 
         val totalEpisodes = anime.episodes ?: 0
         val streaming = anime.streamingEpisodes.orEmpty()
+        val isMovie = anime.format == "MOVIE" || anime.format == "MOVIE"
 
-        // Build episode list with REAL titles from AniList streamingEpisodes.
-        // streamingEpisodes is 1-indexed and aligned with episode numbers.
-        val episodeNumbers = buildEpisodeNumbers(totalEpisodes, streaming.size, anime.nextAiringEpisode?.episode)
+        // Probe dub availability once. We probe episode 1 — if it has a dub variant with sources,
+        // every other episode is assumed to also have dub (shiro's catalog is consistent per anime).
+        // The probe also warms the shiro_watch cookie, so loadLinks later is faster.
+        val dubAvailable = try {
+            val probe = ShiroApi.episodeServers(anilistId, 1)
+            probe?.status == "ready" && probe.variants?.any {
+                it.id == "dub" && !it.sources.isNullOrEmpty()
+            } == true
+        } catch (e: Exception) {
+            Log.d("Shiro", "dub probe failed: ${e.message}")
+            false
+        }
 
-        // Probe dub availability once (uses episode 1).
-        val dubAvailable = ShiroApi.hasDub(anilistId)
+        // Decide episode numbers. For movies, exactly 1 episode. For series, list every episode
+        // up to the aired count (cap at nextAiringEpisode - 1 when currently airing).
+        val episodeNumbers = if (isMovie) {
+            listOf(1)
+        } else {
+            buildEpisodeNumbers(totalEpisodes, streaming.size, anime.nextAiringEpisode?.episode)
+        }
 
-        val isMovie = anime.format == "MOVIE"
-        // Dual-audio movies must be typed as Anime so the sub/dub switcher stays visible.
+        // Dual-audio movies typed as Anime so the sub/dub switcher stays visible (Cloudstream
+        // hides it on AnimeMovie). Sub-only movies stay AnimeMovie.
         val tvType = when {
             isMovie && dubAvailable -> TvType.Anime
             isMovie -> TvType.AnimeMovie
@@ -120,8 +147,9 @@ class ShiroProvider : MainAPI() {
         }
 
         val subEps = episodeNumbers.map { num -> buildEpisode(anime, num, streaming, isDub = false) }
-        val dubEps = if (dubAvailable) episodeNumbers.map { num -> buildEpisode(anime, num, streaming, isDub = true) }
-            else emptyList()
+        val dubEps = if (dubAvailable && !isMovie) {
+            episodeNumbers.map { num -> buildEpisode(anime, num, streaming, isDub = true) }
+        } else emptyList()
 
         val showStatus = when (anime.status) {
             "RELEASING" -> ShowStatus.Ongoing
@@ -161,58 +189,109 @@ class ShiroProvider : MainAPI() {
             parseJson<EpisodeRef>(data)
         } catch (e: Exception) {
             Log.e("Shiro", "bad episode data: ${e.message}")
-            null
-        } ?: return false
-
-        val resp = ShiroApi.episodeServers(ref.anilistId, ref.ep) ?: return false
-        if (resp.status != "ready") {
-            Log.d("Shiro", "episode ${ref.anilistId}:${ref.ep} status=${resp.status}")
             return false
         }
 
+        val resp = ShiroApi.episodeServers(ref.anilistId, ref.ep) ?: return false
+        if (resp.status != "ready") {
+            Log.d("Shiro", "episode ${ref.anilistId}:${ref.ep} status=${resp.status} reason=${resp.reason}")
+            return false
+        }
+        val variants = resp.variants ?: return false
+
         val desired = if (ref.isDub) "dub" else "sub"
-        // Prefer the requested variant; fall back to whatever exists (e.g. anime with only sub).
-        val variant = resp.variants?.firstOrNull { it.id == desired && !it.sources.isNullOrEmpty() }
-            ?: resp.variants?.firstOrNull { !it.sources.isNullOrEmpty() }
+        // Prefer the requested variant; if it's missing or empty, fall back to whatever exists
+        // (so a sub-only anime still plays from the Dub tab if the user lands there, and vice versa).
+        val variant = variants.firstOrNull { it.id == desired && !it.sources.isNullOrEmpty() }
+            ?: variants.firstOrNull { !it.sources.isNullOrEmpty() }
             ?: return false
 
         val variantLabel = variant.label ?: variant.id?.replaceFirstChar { it.uppercase() } ?: "Shiro"
-        // Dedupe subtitle languages across sources within this call so the player doesn't show
-        // the same "English" track 4x (one per server). Keeps the subtitle menu clean.
+        val isDubVariant = variant.id == "dub"
+        // Dedupe subtitle languages across sources within this call so the player doesn't show the
+        // same "English" track 4× (one per server). BUT keep dub-timed subs separate from
+        // sub-timed subs by tagging them differently.
         val seenSubs = HashSet<String>()
         var found = false
 
         for (source in variant.sources.orEmpty()) {
             val srcUrl = ShiroApi.absolute(source.url) ?: continue
             val srcLabel = source.label?.takeIf { it.isNotBlank() } ?: "Server"
-            val linkName = "Shiro $variantLabel - $srcLabel"
+            val tracks = source.tracks.orEmpty()
+            // A source with no subtitle tracks is a hardsub source (subs baked into the video).
+            // shiro's Cherry servers are typically hardsub. Label it so the user knows.
+            val isHardsub = tracks.isEmpty()
+            val linkSuffix = when {
+                isHardsub -> " ($variantLabel - $srcLabel, Hardsub)"
+                else -> " ($variantLabel - $srcLabel)"
+            }
+            val linkName = "Shiro$linkSuffix"
             val referer = "$mainUrl/"
 
-            // Master playlist → explode to per-quality ExtractorLinks via M3u8Helper.
-            try {
-                M3u8Helper.generateM3u8(linkName, srcUrl, referer).forEach(callback)
-                found = true
-            } catch (e: Exception) {
-                Log.d("Shiro", "m3u8 explode failed for $srcLabel: ${e.message}")
-                try {
+            // Determine the extractor type from the source `type` field.
+            // application/vnd.apple.mpegurl -> HLS master (use M3u8Helper to explode qualities).
+            // video/mp4 -> direct video file.
+            val sourceType = source.type ?: ""
+            when {
+                sourceType.contains("mpegurl", ignoreCase = true) || srcUrl.endsWith(".m3u8") -> {
+                    try {
+                        M3u8Helper.generateM3u8(linkName, srcUrl, referer).forEach(callback)
+                        found = true
+                    } catch (e: Exception) {
+                        Log.d("Shiro", "m3u8 explode failed for $srcLabel: ${e.message}")
+                        try {
+                            callback.invoke(
+                                newExtractorLink(linkName, srcLabel, srcUrl, type = ExtractorLinkType.M3U8) {}
+                            )
+                            found = true
+                        } catch (e2: Exception) {
+                            Log.d("Shiro", "fallback m3u8 link failed: ${e2.message}")
+                        }
+                    }
+                }
+                sourceType.contains("mp4", ignoreCase = true) || srcUrl.endsWith(".mp4") -> {
                     callback.invoke(
-                        newExtractorLink(linkName, srcLabel, srcUrl, type = ExtractorLinkType.M3U8) {
+                        newExtractorLink(linkName, srcLabel, srcUrl, type = ExtractorLinkType.VIDEO) {
+                            this.referer = referer
                         }
                     )
                     found = true
-                } catch (e2: Exception) {
-                    Log.d("Shiro", "fallback link failed: ${e2.message}")
+                }
+                else -> {
+                    // Unknown type — best-effort as M3U8 (most common on shiro).
+                    try {
+                        M3u8Helper.generateM3u8(linkName, srcUrl, referer).forEach(callback)
+                        found = true
+                    } catch (e: Exception) {
+                        callback.invoke(
+                            newExtractorLink(linkName, srcLabel, srcUrl, type = ExtractorLinkType.M3U8) {}
+                        )
+                        found = true
+                    }
                 }
             }
 
-            // Per-source subtitle tracks. Emit each unique language once.
-            for (track in source.tracks.orEmpty()) {
+            // Emit subtitle tracks. Tag dub-tab English distinctly from sub-tab English so the
+            // user can tell which audio track the subs are timed to.
+            for (track in tracks) {
                 val subUrl = ShiroApi.absolute(track.src) ?: continue
-                val lang = track.label?.takeIf { it.isNotBlank() }
+                if (track.type != null && track.type != "vtt") {
+                    // shiro's API declares the type. Currently always "vtt" (probed), but if a
+                    // broken ASS file ever appears we skip it rather than pass garbage to the
+                    // player. ExoPlayer chokes on raw ASS without the libass renderer configured.
+                    Log.d("Shiro", "skipping non-vtt subtitle ${track.label} (${track.type})")
+                    continue
+                }
+                val rawLabel = track.label?.takeIf { it.isNotBlank() }
                     ?: track.language?.takeIf { it.isNotBlank() }
                     ?: "English"
-                if (seenSubs.add(lang.lowercase())) {
-                    subtitleCallback.invoke(newSubtitleFile(lang, subUrl))
+                val displayLabel = if (isDubVariant && rawLabel.equals("English", ignoreCase = true)) {
+                    "English (Dub)"
+                } else {
+                    rawLabel
+                }
+                if (seenSubs.add(displayLabel.lowercase())) {
+                    subtitleCallback.invoke(newSubtitleFile(displayLabel, subUrl))
                 }
             }
         }
@@ -221,6 +300,13 @@ class ShiroProvider : MainAPI() {
     }
 
     // ---------- helpers ----------
+
+    private fun extractAnilistId(url: String): Int? {
+        // /anime/{id}, /anime/{id}-{slug}, /anime/{id}/{ep}
+        val path = url.substringAfter("/anime/", "").substringBefore("/")
+        val idStr = path.substringBefore("-")
+        return idStr.toIntOrNull()
+    }
 
     private fun AniListMedia.toSearchResponse(): SearchResponse? {
         val id = this.id ?: return null
@@ -248,11 +334,6 @@ class ShiroProvider : MainAPI() {
         }
     }
 
-    /**
-     * Decide which episode numbers to list. streamingEpisodes may be shorter than total episodes
-     * (some anime aren't fully indexed on Crunchyroll) — pad the rest with plain "Episode N".
-     * For currently-airing anime, cap at the next-airing episode (don't list unaired episodes).
-     */
     private fun buildEpisodeNumbers(totalEpisodes: Int, streamingCount: Int, nextAiringEp: Int?): List<Int> {
         val ceiling = when {
             nextAiringEp != null && nextAiringEp > 0 -> nextAiringEp - 1
@@ -271,13 +352,14 @@ class ShiroProvider : MainAPI() {
         isDub: Boolean
     ): Episode {
         val ref = EpisodeRef(anime.id ?: 0, num, isDub)
-        // streamingEpisodes is 1-indexed.
+        // streamingEpisodes is 1-indexed. For movies (num=1) with no streaming episodes, use the
+        // anime title as the episode name.
         val stream = streaming.getOrNull(num - 1)
-        val epTitle = stream?.title?.takeIf { it.isNotBlank() }
+        val epName = stream?.title?.takeIf { it.isNotBlank() }
             ?: if (anime.format == "MOVIE") anime.displayTitle() else "Episode $num"
         return newEpisode(ref.toJson()) {
             this.episode = num
-            this.name = epTitle
+            this.name = epName
             this.posterUrl = stream?.thumbnail?.takeIf { it.startsWith("http") }
         }
     }
@@ -290,15 +372,4 @@ class ShiroProvider : MainAPI() {
             .replace("&#39;", "'")
             .replace("&nbsp;", " ")
             .trim()
-
-    @Suppress("unused")
-    private fun parseAirDate(epoch: Long?): Date? {
-        if (epoch == null) return null
-        return try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
-            sdf.format(Date(epoch * 1000))
-            sdf.parse(sdf.format(Date(epoch * 1000)))
-        } catch (e: Exception) { null }
-    }
 }
