@@ -24,7 +24,6 @@ import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -49,14 +48,20 @@ import java.util.concurrent.ConcurrentHashMap
  *  - links + subtitles  -> get_q07 (sourcesNode_list: signed HLS master + per-language VTT tracks)
  *  - real episode names -> AniList streamingEpisodes (matched by the site's own al_id field)
  *
- * Sub/dub separation is structural, matching how CloudStream models it:
- *  - newAnimeLoadResponse + addEpisodes(DubStatus.Subbed, ...) / addEpisodes(DubStatus.Dubbed, ...)
+ * Sub/dub separation is structural, matching how CloudStream models it (same pattern as the
+ * Senshi / AniKoto plugins):
+ *  - every episode (series AND movies) goes through newAnimeLoadResponse +
+ *    addEpisodes(DubStatus.Subbed, ...) / addEpisodes(DubStatus.Dubbed, ...)
  *    -> the app renders proper Sub / Dub episode tabs
- *  - each episode's data encodes which language track set it belongs to, so loadLinks only
- *    emits links (and subtitles) of that language
+ *  - per-episode availability comes from get_q01's own sourcesNode_list (verified live:
+ *    every episode node lists its sub and/or dub sources), so the Sub tab only lists
+ *    episodes that really have sub streams and vice versa
+ *  - each episode's data encodes which language it belongs to, so loadLinks only emits
+ *    links (and subtitles) of that language
  *  - search results carry addDubStatus(dubExist, subExist) from the site's own sou_types
- *  - movies (single-episode) get both SUB and DUB links in one list, sources named
- *    "Xanime SUB • <server>" / "Xanime DUB • <server>", subtitles labelled "... • SUB/DUB"
+ *  - MOVIES: the app hides the sub/dub switcher for movie types, so a movie that has a
+ *    dub is typed TvType.Anime (single episode under both tabs) and a sub-only movie
+ *    stays TvType.AnimeMovie — exactly like Senshi/AniKoto do it
  */
 class XanimeProvider : MainAPI() {
 
@@ -222,7 +227,7 @@ class XanimeProvider : MainAPI() {
         val tvType = mapTvType(metaTypes.firstOrNull(), epTotal)
         val isMovie = tvType == TvType.AnimeMovie || epTotal <= 1
 
-        // ---- episodes (parallel page fetch) + real names from AniList ----
+        // ---- episodes (parallel page fetch, per-episode sources included) + real names ----
         val episodeList = fetchAllEpisodes(aniId, epTotal)
         val realTitles: Map<Int, String> = if (alId != null) {
             fetchAnilistEpisodeTitles(alId)
@@ -235,6 +240,8 @@ class XanimeProvider : MainAPI() {
             val index = XanimeApi.int(ep, "ep_index") ?: return null
             val subIndex = XanimeApi.int(ep, "ep_sub_index") ?: 0
             val fallbackName = XanimeApi.text(ep, "ep_title") ?: "Episode $index"
+            // a movie's single entry is shown as its own title, series keep real ep names
+            val display = if (isMovie) (realTitles[index] ?: title) else (realTitles[index] ?: fallbackName)
             val payload = XanimeEpisodeData(
                 aniId = aniId,
                 epId = epId,
@@ -244,7 +251,7 @@ class XanimeProvider : MainAPI() {
             )
             return newEpisode(payload.toJson()) {
                 this.episode = index
-                this.name = realTitles[index] ?: fallbackName
+                this.name = display
             }
         }
 
@@ -274,51 +281,41 @@ class XanimeProvider : MainAPI() {
             else -> null
         }
 
-        return if (isMovie) {
-            // Movies: single load; both SUB and DUB links are emitted by loadLinks,
-            // separated by link source names and labelled subtitles.
-            val subData = subEpisodes.firstOrNull()?.data
-                ?: XanimeEpisodeData(aniId, "", 1, 0, "sub").toJson()
-            val dubData = dubEpisodes.firstOrNull()?.data
-            val movieData = if (dubData != null) "$subData|$dubData" else subData
-            newMovieLoadResponse(title, url, TvType.AnimeMovie, movieData) {
-                this.posterUrl = poster
-                this.backgroundPosterUrl = background
-                this.plot = plot
-                this.tags = tags
-                this.year = year
-                if (scoreVal != null && scoreVal in 1..100) {
-                    this.score = Score.from10((scoreVal / 10.0).toString())
-                }
-                if (malId != null) addMalId(malId.toIntOrNull())
-                if (alId != null) addAniListId(alId.toIntOrNull())
+        // Movie sub/dub handling identical to Senshi/AniKoto: the app hides the
+        // sub/dub switcher on movie types, so a DUBBED movie is typed as regular
+        // anime (the movie becomes episode 1 under both tabs); a sub-only movie
+        // stays AnimeMovie. Either way everything runs through newAnimeLoadResponse.
+        val finalType = when {
+            !isMovie -> tvType
+            dubEpisodes.isNotEmpty() -> TvType.Anime
+            else -> TvType.AnimeMovie
+        }
+
+        return newAnimeLoadResponse(title, url, finalType) {
+            this.posterUrl = poster
+            this.backgroundPosterUrl = background
+            this.plot = plot
+            this.tags = tags
+            this.year = year
+            if (scoreVal != null && scoreVal in 1..100) {
+                this.score = Score.from10((scoreVal / 10.0).toString())
             }
-        } else {
-            newAnimeLoadResponse(title, url, tvType) {
-                this.posterUrl = poster
-                this.backgroundPosterUrl = background
-                this.plot = plot
-                this.tags = tags
-                this.year = year
-                if (scoreVal != null && scoreVal in 1..100) {
-                    this.score = Score.from10((scoreVal / 10.0).toString())
-                }
-                if (showStatus != null) {
-                    this.showStatus = showStatus
-                }
-                season?.let { s ->
-                    // "Fall 2022" -> season number; Spring=1 Summer=2 Fall=3 Winter=4
-                    val parts = s.split(" ")
-                    val yearPart = parts.getOrNull(1)?.toIntOrNull()
-                    if (yearPart != null) this.year = yearPart
-                }
-                if (malId != null) addMalId(malId.toIntOrNull())
-                if (alId != null) addAniListId(alId.toIntOrNull())
-                if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
-                if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
-                if (subEpisodes.isEmpty() && dubEpisodes.isEmpty()) {
-                    addEpisodes(DubStatus.Subbed, episodeList.mapNotNull { buildEpisode(it, "sub") })
-                }
+            if (!isMovie && showStatus != null) {
+                this.showStatus = showStatus
+            }
+            if (!isMovie) season?.let { s ->
+                // "Fall 2022" -> season number; Spring=1 Summer=2 Fall=3 Winter=4
+                val parts = s.split(" ")
+                val yearPart = parts.getOrNull(1)?.toIntOrNull()
+                if (yearPart != null) this.year = yearPart
+            }
+            if (malId != null) addMalId(malId.toIntOrNull())
+            if (alId != null) addAniListId(alId.toIntOrNull())
+            if (subEpisodes.isNotEmpty()) addEpisodes(DubStatus.Subbed, subEpisodes)
+            if (dubEpisodes.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubEpisodes)
+            if (subEpisodes.isEmpty() && dubEpisodes.isEmpty()) {
+                // safety net: site stopped returning per-episode sources
+                addEpisodes(DubStatus.Subbed, episodeList.mapNotNull { buildEpisode(it, "sub") })
             }
         }
     }
@@ -420,7 +417,8 @@ class XanimeProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Movie payloads may be "subJson|dubJson" (both languages on one watch page)
+        // Payload is a single episode JSON; legacy "subJson|dubJson" movie payloads
+        // from older plugin versions are still tolerated and emit both languages
         val parts = data.split("|")
         val wantedLangs = HashSet<String>()
         val epIds = LinkedHashSet<String>()

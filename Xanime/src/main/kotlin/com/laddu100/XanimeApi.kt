@@ -221,7 +221,9 @@ object XanimeApi {
         }
     """.trimIndent()
 
-    /** Episode list for one anime, paged (server caps size at ~60). Fragment J from q-DVE1IA1x.js. */
+    /** Episode list for one anime, paged (server caps size at ~60). Fragment J from q-DVE1IA1x.js.
+     *  sourcesNode_list is accepted by the server on get_q01 items (verified live: every episode
+     *  carries its own {src_type: "sub"/"dub"} sources) — this is what drives the Sub/Dub tabs. */
     fun episodeListQuery(): String = """
         query get_q01(${'$'}select: AnimesEpisodesList_Select) {
           get_q01(select: ${'$'}select) {
@@ -239,6 +241,15 @@ object XanimeApi {
                 is_new
                 date_create
                 date_update
+                sourcesNode_list {
+                  id
+                  data {
+                    sou_id
+                    src_type
+                    src_name
+                    src_server
+                  }
+                }
               }
             }
           }

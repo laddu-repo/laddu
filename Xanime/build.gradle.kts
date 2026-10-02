@@ -1,8 +1,8 @@
-version = 3
+version = 4
 
 cloudstream {
     language = "en"
-    description = "Xanime - Watch anime with full Sub & Dub separation. Signed HLS streams up to 1080p, multi-language subtitles (EN, AR, FR, DE, IT, PT-BR, RU, ES, and more), real episode titles from AniList, intro/outro skip data. Powered by xanime.me."
+    description = "Xanime - Watch anime with full Sub & Dub separation (series tabs + dubbed movies open with Sub/Dub tabs like Senshi/AniKoto). Signed HLS streams up to 1080p, multi-language subtitles (EN, AR, FR, DE, IT, PT-BR, RU, ES, and more), real episode titles from AniList, intro/outro skip data. Powered by xanime.me."
     authors = listOf("laddu")
 
     status = 1
