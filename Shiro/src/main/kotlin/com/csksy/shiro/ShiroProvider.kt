@@ -14,7 +14,10 @@ import java.util.concurrent.ConcurrentHashMap
 
 class Shiro : MainAPI() {
     override var mainUrl = "https://shiro.so"
-    override var name = "Shiro"
+    // the "(Laddu)" suffix keeps this provider from colliding with csksy's
+    // Shiro when both repos are installed on one device: same-named
+    // providers shadow each other and one of the two silently stops working
+    override var name = "Shiro (Laddu)"
     override val hasMainPage = true
     override var lang = "en"
     override val hasQuickSearch = false

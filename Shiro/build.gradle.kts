@@ -1,7 +1,7 @@
-version = 7
+version = 8
 
 cloudstream {
-    description = "Anime with Sub, Dub and Hardsub - multiple servers, real episode titles, multi-language subtitles. Based on csksy's Shiro, hardened for filtering-proxy networks."
+    description = "Anime with Sub, Dub and Hardsub - multiple servers, real episode titles, multi-language subtitles. Based on csksy's Shiro, hardened for filtering-proxy networks. Named Shiro (Laddu) so it can coexist with the csky repo's Shiro."
     authors = listOf("csksy", "laddu")
 
     status = 1

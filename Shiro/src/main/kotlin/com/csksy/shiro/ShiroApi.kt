@@ -775,6 +775,8 @@ object ShiroApi {
         var sawBadAnswer = false
         var waitedOnce = false
         var rotatedJustNow = false
+        var emptyVerdict = false
+        var verdictCookie: String? = null
 
         for (round in 0 until 4) {
             val cookie = cookie(anilistId)
@@ -869,13 +871,29 @@ object ShiroApi {
                 }
             }
             // at least two labels got a 200 and every one of them said the
-            // episode has nothing, that is the site's own answer and no
-            // amount of retrying changes it
+            // episode has nothing, that would be the site's own answer - but
+            // it is also exactly what an empty post body produces: carriers
+            // that shred post bodies make the api read an unknown episode no
+            // matter what was asked, so the browser stack gets the final
+            // word before anything counts as truly empty
             if (unavailableLabels >= 2 && readyOrOtherLabels == 0 && !deadCookie && !sawChallenge) {
-                return StreamsAnswer(emptyStreams(), cookie)
+                emptyVerdict = true
+                verdictCookie = cookie
+                break
             }
             if (deadCookie) clearCookie()
             if (sawChallenge) break
+        }
+
+        // the webview fetch runs inside a real page of the site where the
+        // body arrives whole, so a ready there wins over the empty verdict;
+        // when the page itself says unavailable, or it cannot run at all,
+        // the episode really has nothing behind it
+        if (emptyVerdict) {
+            if (allowWebview) {
+                webviewEpisode(payload)?.let { return it }
+            }
+            return StreamsAnswer(emptyStreams(), verdictCookie ?: "")
         }
 
         if ((sawChallenge || sawBadAnswer) && allowWebview) {
@@ -1055,14 +1073,18 @@ object ShiroApi {
         }
     }
 
-    // the dub tab needs one episode answer per anime, remembering it for
-    // half a day keeps browsing from burning through the per cookie budget
     private val dubCache = ConcurrentHashMap<Int, Pair<Long, Boolean>>()
 
+    // the dub tab needs one episode answer per anime, remembering a yes for
+    // half a day keeps browsing from burning through the per cookie answer
+    // budget the endpoint hands out; a no is only held for half an hour
+    // because on a network that shreds post bodies the probe reads an empty
+    // answer and a long lived no would hide the dub tab for nothing
     suspend fun hasDub(anilistId: Int, malId: Int?): Boolean {
         val now = System.currentTimeMillis()
         dubCache[anilistId]?.let { (at, dub) ->
-            if (now - at < 12 * 60 * 60 * 1000L) return dub
+            val ttl = if (dub) 12 * 60 * 60 * 1000L else 30 * 60 * 1000L
+            if (now - at < ttl) return dub
         }
         // browsing only gets the direct calls, the webview pass would hold
         // the detail page hostage on a network that refuses the site
