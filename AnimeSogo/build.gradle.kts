@@ -6,4 +6,5 @@ cloudstream {
     status = 1
     tvTypes = listOf("Anime", "AnimeMovie", "OVA")
     language = "en"
+    iconUrl = "https://animesogo.to/favicon.ico"
 }
