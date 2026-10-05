@@ -1,24 +1,26 @@
 package com.justplay
 
 import android.animation.ObjectAnimator
-import android.animation.ValueAnimator
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.CompoundButton
 import android.widget.FrameLayout
@@ -32,13 +34,18 @@ import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.MainActivity
 
 /**
- * JustPlay settings — red & black theme, rebuilt after FLUMMOX's BingeAnime
- * settings: full-screen window, animated vector glyphs, staggered entrances,
- * press-scale feedback with a growing accent underline, themed switches.
+ * JustPlay settings — red & black with its own identity (not a FLUMMOX clone):
  *
- * The main screen is a BIG LIST (full-width tall rows) instead of boxes:
- *   SITES           — enable/disable the 7 source sites
- *   MANAGE SOURCES  — download-only vs stream-only link modes
+ * Home screen:
+ *   - gradient hero card with a custom drawn play mark, the plugin name and
+ *     two LIVE status pills (active link mode + enabled site count)
+ *   - sectioned big-list rows: a red accent bar that stretches to full height
+ *     while pressed, a bordered chevron chip that nudges right, haptics
+ *   - rows slide in from the right with a soft overshoot
+ *
+ * Sub-windows:
+ *   SITES           — enable/disable the 7 source sites + Save & Restart
+ *   MANAGE SOURCES  — link modes (download-only vs stream-only) + Save & Restart
  */
 object JustPlaySettings {
 
@@ -84,7 +91,7 @@ object JustPlaySettings {
         )
     }
 
-    // ── staggered entrance ──
+    // ── fade-up entrance (sub windows) ──
     private fun stagger(v: View, i: Int, base: Long = 60L) {
         v.alpha = 0f
         v.translationY = 30f
@@ -93,102 +100,116 @@ object JustPlaySettings {
             .setInterpolator(DecelerateInterpolator()).start()
     }
 
-    // ── animated vector glyph (custom drawn, pulsing red) ──
-    class GlyphView(context: Context, private val kind: String) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = RED_BRIGHT
+    // ── slide-from-right entrance with overshoot (home rows) ──
+    private fun slideIn(v: View, i: Int, base: Long = 90L) {
+        v.animate().alpha(1f).translationX(0f)
+            .setStartDelay(base + 80L * i).setDuration(430)
+            .setInterpolator(OvershootInterpolator(0.9f)).start()
+    }
+
+    // ── custom drawn play mark: red ring + gradient play triangle ──
+    class LogoMark(context: Context) : View(context) {
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
         }
-        private var pulse = 1f
-
-        init {
-            ValueAnimator.ofFloat(0.7f, 1f).apply {
-                duration = 2200
-                repeatCount = ValueAnimator.INFINITE
-                repeatMode = ValueAnimator.REVERSE
-                addUpdateListener {
-                    pulse = it.animatedValue as Float
-                    invalidate()
-                }
-                start()
-            }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            strokeJoin = Paint.Join.ROUND
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val cx = width / 2f
             val cy = height / 2f
-            val r = minOf(width, height) / 3f
-            paint.strokeWidth = r * 0.2f
-            paint.alpha = (pulse * 255).toInt()
-            val fill = Paint(paint).apply { style = Paint.Style.FILL }
-
-            when (kind) {
-                // globe: circle + equator + meridian
-                "SITES" -> {
-                    canvas.drawCircle(cx, cy, r, paint)
-                    canvas.drawLine(cx - r, cy, cx + r, cy, paint)
-                    val meridian = RectF(cx - r * 0.45f, cy - r, cx + r * 0.45f, cy + r)
-                    canvas.drawOval(meridian, paint)
-                }
-                // sliders: three rails with offset knobs
-                "MANAGE" -> {
-                    val ys = listOf(cy - r * 0.65f, cy, cy + r * 0.65f)
-                    val xs = listOf(cx - r * 0.3f, cx + r * 0.35f, cx - r * 0.05f)
-                    for (i in ys.indices) {
-                        canvas.drawLine(cx - r, ys[i], cx + r, ys[i], paint)
-                        canvas.drawCircle(xs[i], ys[i], r * 0.26f, fill)
-                    }
-                }
-                // play-to-download: play triangle + down arrow
-                "DOWNLOAD" -> {
-                    val tri = Path()
-                    tri.moveTo(cx - r * 0.75f, cy - r * 0.6f)
-                    tri.lineTo(cx - r * 0.05f, cy)
-                    tri.lineTo(cx - r * 0.75f, cy + r * 0.6f)
-                    tri.close()
-                    canvas.drawPath(tri, fill)
-                    canvas.drawLine(cx + r * 0.25f, cy - r * 0.75f, cx + r * 0.25f, cy + r * 0.35f, paint)
-                    val arrow = Path()
-                    arrow.moveTo(cx + r * 0.0f, cy + r * 0.1f)
-                    arrow.lineTo(cx + r * 0.25f, cy + r * 0.75f)
-                    arrow.lineTo(cx + r * 0.5f, cy + r * 0.1f)
-                    canvas.drawPath(arrow, paint)
-                }
-            }
+            val r = minOf(width, height) / 2f - width * 0.05f
+            ring.color = RED
+            ring.strokeWidth = r * 0.15f
+            canvas.drawCircle(cx, cy, r, ring)
+            fill.shader = LinearGradient(
+                cx - r, cy - r, cx + r, cy + r,
+                RED_BRIGHT, RED_DEEP, Shader.TileMode.CLAMP
+            )
+            val s = r * 0.6f
+            val tri = Path()
+            tri.moveTo(cx - s * 0.55f, cy - s)
+            tri.lineTo(cx - s * 0.55f, cy + s)
+            tri.lineTo(cx + s * 0.85f, cy)
+            tri.close()
+            canvas.drawPath(tri, fill)
         }
     }
 
-    // ── big list row factory (the list-form replacement of FLUMMOX tiles) ──
-    private fun bigListRow(
+    // ── small status pill used inside the hero card ──
+    private fun statusPill(ctx: Context, label: String, withDot: Boolean): LinearLayout {
+        val pill = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = shape(SURFACE, 20, ctx, 1, BORDER_HI)
+            setPadding(dp(ctx, 12), dp(ctx, 7), dp(ctx, 12), dp(ctx, 7))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { rightMargin = dp(ctx, 8) }
+        }
+        if (withDot) {
+            pill.addView(View(ctx).apply { background = shape(RED_BRIGHT, 4, ctx) },
+                LinearLayout.LayoutParams(dp(ctx, 7), dp(ctx, 7)).apply {
+                    rightMargin = dp(ctx, 7)
+                })
+        }
+        pill.addView(TextView(ctx).apply {
+            text = label; setTextColor(TEXT); textSize = 9.5f
+            setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.14f
+        })
+        return pill
+    }
+
+    // ── section header: red tick + caps title + fading divider ──
+    private fun sectionHeader(ctx: Context, title: String): LinearLayout {
+        val h = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        h.addView(View(ctx).apply { background = shape(RED, 2, ctx) },
+            LinearLayout.LayoutParams(dp(ctx, 18), dp(ctx, 3)).apply {
+                rightMargin = dp(ctx, 10)
+            })
+        h.addView(TextView(ctx).apply {
+            text = title; setTextColor(SUBTEXT); textSize = 11f
+            setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.18f
+        })
+        h.addView(View(ctx).apply { background = shape(BORDER, 1, ctx) },
+            LinearLayout.LayoutParams(0, dp(ctx, 1), 1f).apply { leftMargin = dp(ctx, 12) })
+        return h
+    }
+
+    // ── home big-list row: stretching accent bar + chevron chip ──
+    private fun homeRow(
         ctx: Context,
-        glyphKind: String,
-        label: String,
+        title: String,
         sub: String,
         onClick: () -> Unit
     ): LinearLayout {
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = shape(SURFACE, 18, ctx, 1, BORDER)
-            setPadding(dp(ctx, 18), dp(ctx, 20), dp(ctx, 18), dp(ctx, 20))
+            background = shape(SURFACE, 16, ctx, 1, BORDER)
+            setPadding(dp(ctx, 16), dp(ctx, 18), dp(ctx, 16), dp(ctx, 18))
             isClickable = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(ctx, 14) }
+            ).apply { bottomMargin = dp(ctx, 12) }
         }
 
-        // glyph chip
-        val chip = FrameLayout(ctx).apply {
-            background = shape(SURFACE_2, 16, ctx, 1, BORDER)
+        // red accent bar — rests at half height, stretches while pressed
+        val bar = View(ctx).apply {
+            background = shape(RED, 2, ctx)
+            scaleY = 0.55f
         }
-        val glyph = GlyphView(ctx, glyphKind)
-        chip.addView(glyph, FrameLayout.LayoutParams(dp(ctx, 34), dp(ctx, 34), Gravity.CENTER))
-        row.addView(chip, LinearLayout.LayoutParams(dp(ctx, 56), dp(ctx, 56)).apply {
-            rightMargin = dp(ctx, 16)
+        row.addView(bar, LinearLayout.LayoutParams(dp(ctx, 4), dp(ctx, 42)).apply {
+            rightMargin = dp(ctx, 15)
         })
 
         // text column
@@ -197,10 +218,10 @@ object JustPlaySettings {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         col.addView(TextView(ctx).apply {
-            text = label
-            setTextColor(TEXT); textSize = 18f
+            text = title
+            setTextColor(TEXT); textSize = 17f
             setTypeface(typeface, Typeface.BOLD)
-            letterSpacing = 0.04f
+            letterSpacing = 0.02f
         })
         col.addView(TextView(ctx).apply {
             text = sub
@@ -209,48 +230,32 @@ object JustPlaySettings {
         })
         row.addView(col)
 
-        // chevron
-        row.addView(TextView(ctx).apply {
-            text = "›"
-            setTextColor(RED); textSize = 30f
-            setTypeface(typeface, Typeface.BOLD)
-            gravity = Gravity.CENTER
-        })
-
-        // accent underline that grows on press
-        val underline = View(ctx).apply {
-            background = shape(RED, 2, ctx)
-            alpha = 0f
+        // chevron inside a bordered circle — nudges right while pressed
+        val chev = FrameLayout(ctx).apply {
+            background = shape(SURFACE_2, 17, ctx, 1, BORDER_HI)
         }
-        row.addView(underline, LinearLayout.LayoutParams(
-            dp(ctx, 28), dp(ctx, 2)
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
-            leftMargin = dp(ctx, 18); bottomMargin = dp(ctx, 8)
-        })
+        chev.addView(TextView(ctx).apply {
+            text = "›"; setTextColor(RED); textSize = 20f
+            setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
+        }, FrameLayout.LayoutParams(dp(ctx, 34), dp(ctx, 34)))
+        row.addView(chev)
 
-        // press animation — scale + glyph grow + underline expand
         row.setOnTouchListener { v, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    v.animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
-                    glyph.animate().scaleX(1.08f).scaleY(1.08f).setDuration(140).start()
-                    underline.animate().alpha(1f).setDuration(110).start()
-                    val lp = underline.layoutParams as LinearLayout.LayoutParams
-                    ValueAnimator.ofInt(dp(ctx, 28), dp(ctx, 76)).apply {
-                        duration = 180
-                        addUpdateListener {
-                            lp.width = it.animatedValue as Int
-                            underline.layoutParams = lp
-                        }
-                        start()
-                    }
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    v.animate().scaleX(0.985f).scaleY(0.985f).setDuration(110)
+                        .setInterpolator(DecelerateInterpolator()).start()
+                    bar.animate().scaleY(1f).setDuration(190)
+                        .setInterpolator(OvershootInterpolator()).start()
+                    chev.animate().translationX(dp(ctx, 3).toFloat()).setDuration(140).start()
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
-                    glyph.animate().scaleX(1f).scaleY(1f).setDuration(190).start()
-                    underline.animate().alpha(0f).setDuration(190).start()
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                    bar.animate().scaleY(0.55f).setDuration(230)
+                        .setInterpolator(DecelerateInterpolator()).start()
+                    chev.animate().translationX(0f).setDuration(200).start()
                     if (e.action == MotionEvent.ACTION_UP) v.performClick()
                     true
                 }
@@ -337,7 +342,7 @@ object JustPlaySettings {
         ).show()
     }
 
-    // ── sub window (FLUMMOX pattern) ──
+    // ── sub window ──
     private fun subWindow(
         ctx: Context,
         title: String,
@@ -395,10 +400,44 @@ object JustPlaySettings {
         dlg.show()
     }
 
+    // ── gradient SAVE & RESTART button (shared by both sub windows) ──
+    private fun saveAndRestartButton(ctx: Context, onSave: () -> Unit): Button =
+        Button(ctx).apply {
+            text = "SAVE & RESTART"; textSize = 15f
+            setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
+            letterSpacing = 0.03f
+            stateListAnimator = null
+            isAllCaps = false
+            background = GradientDrawable().apply {
+                orientation = GradientDrawable.Orientation.LEFT_RIGHT
+                colors = intArrayOf(RED_BRIGHT, RED_DEEP)
+                cornerRadius = dp(ctx, 16).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(ctx, 12) }
+            setPadding(0, dp(ctx, 15), 0, dp(ctx, 15))
+            setOnClickListener { onSave() }
+        }
+
+    // ── restart confirmation dialog (shared) ──
+    private fun confirmRestart(ctx: Context, message: String) {
+        AlertDialog.Builder(ctx)
+            .setTitle("Restart Required")
+            .setMessage(message)
+            .setPositiveButton("Restart") { _, _ -> restartApp(ctx) }
+            .setNegativeButton("Later") { _, _ ->
+                try {
+                    MainActivity.reloadHomeEvent.invoke(true)
+                } catch (_: Throwable) {}
+            }
+            .show()
+    }
+
     // ── root ──
     fun show(context: Context) {
-        var ctx = context
         // unwrap in case a ContextWrapper is handed over
+        var ctx = context
         var p = context
         while (p is android.content.ContextWrapper) {
             if (p is android.app.Activity) { ctx = p; break }
@@ -409,35 +448,68 @@ object JustPlaySettings {
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = shape(BG, 0, ctx)
-            setPadding(dp(ctx, 20), dp(ctx, 40), dp(ctx, 20), dp(ctx, 20))
+            setPadding(dp(ctx, 22), dp(ctx, 36), dp(ctx, 22), dp(ctx, 22))
         }
 
-        val title = TextView(ctx).apply {
-            text = "JUSTPLAY"
-            setTextColor(TEXT); textSize = 34f
-            setTypeface(typeface, Typeface.BOLD)
-            letterSpacing = 0.06f
+        // ── hero card: play mark + name + live status pills ──
+        val hero = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                orientation = GradientDrawable.Orientation.TL_BR
+                colors = intArrayOf(0xFF230A0E.toInt(), 0xFF110609.toInt())
+                cornerRadius = dp(ctx, 24).toFloat()
+                setStroke(dp(ctx, 1), RED_DEEP)
+            }
+            setPadding(dp(ctx, 20), dp(ctx, 22), dp(ctx, 20), dp(ctx, 18))
         }
-        root.addView(title)
-
-        val subtitle = TextView(ctx).apply {
-            text = "LADDU REPO · EXTENSION"
-            setTextColor(SUBTEXT); textSize = 10f
-            letterSpacing = 0.22f
-            setPadding(0, dp(ctx, 8), 0, dp(ctx, 28))
+        val heroTop = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        root.addView(subtitle)
+        heroTop.addView(LogoMark(ctx), LinearLayout.LayoutParams(
+            dp(ctx, 50), dp(ctx, 50)
+        ).apply { rightMargin = dp(ctx, 16) })
+        val heroCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        heroCol.addView(TextView(ctx).apply {
+            text = "JustPlay"; setTextColor(TEXT); textSize = 27f
+            setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.01f
+        })
+        heroCol.addView(TextView(ctx).apply {
+            text = "LADDU REPOSITORY"; setTextColor(SUBTEXT); textSize = 9.5f
+            letterSpacing = 0.24f; setPadding(0, dp(ctx, 5), 0, 0)
+        })
+        heroTop.addView(heroCol, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        hero.addView(heroTop)
 
-        val sitesRow = bigListRow(
-            ctx, "SITES", "SITES",
-            "7 sources · NetNaija, VegaMovies, HDHub4u…"
-        ) { openSites(ctx) }
+        val pills = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(ctx, 16), 0, 0)
+        }
+        pills.addView(statusPill(
+            ctx,
+            if (JustPlay.downloadOnlyEnabled()) "DOWNLOAD MODE" else "STREAM MODE",
+            withDot = true
+        ))
+        pills.addView(statusPill(
+            ctx,
+            "${JustPlay.sites.count { JustPlay.siteEnabled(it.id) }}/7 SITES ON",
+            withDot = false
+        ))
+        hero.addView(pills)
+        root.addView(hero)
+
+        // ── options section ──
+        val section = sectionHeader(ctx, "OPTIONS")
+        root.addView(section, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(ctx, 22); bottomMargin = dp(ctx, 6) })
+
+        val sitesRow = homeRow(ctx, "Sites", "Customize sources") { openSites(ctx) }
         root.addView(sitesRow)
 
-        val manageRow = bigListRow(
-            ctx, "MANAGE", "MANAGE SOURCES",
-            "Download-only & stream-only link modes"
-        ) { openManageSources(ctx) }
+        val manageRow = homeRow(ctx, "Manage Sources", "Link modes") { openManageSources(ctx) }
         root.addView(manageRow)
 
         root.addView(View(ctx), LinearLayout.LayoutParams(
@@ -460,6 +532,14 @@ object JustPlaySettings {
         }
         root.addView(close)
 
+        // hidden until shown — no first-frame flash
+        hero.alpha = 0f; hero.translationY = 28f
+        hero.scaleX = 0.94f; hero.scaleY = 0.94f
+        section.alpha = 0f; section.translationX = 70f
+        sitesRow.alpha = 0f; sitesRow.translationX = 70f
+        manageRow.alpha = 0f; manageRow.translationX = 70f
+        close.alpha = 0f
+
         dlg.setContentView(root)
         dlg.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -467,8 +547,13 @@ object JustPlaySettings {
         dlg.window?.setBackgroundDrawable(shape(BG, 0, ctx))
 
         dlg.setOnShowListener {
-            listOf(title, subtitle, sitesRow, manageRow, close)
-                .forEachIndexed { i, v -> stagger(v, i) }
+            hero.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
+                .setDuration(460).setInterpolator(DecelerateInterpolator()).start()
+            slideIn(section, 0)
+            slideIn(sitesRow, 1)
+            slideIn(manageRow, 2)
+            close.animate().alpha(1f).setStartDelay(320).setDuration(350)
+                .setInterpolator(DecelerateInterpolator()).start()
         }
         dlg.show()
     }
@@ -495,43 +580,17 @@ object JustPlaySettings {
             })
 
             // SAVE & RESTART
-            val save = Button(ctx).apply {
-                text = "SAVE & RESTART"; textSize = 15f
-                setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
-                letterSpacing = 0.03f
-                stateListAnimator = null
-                isAllCaps = false
-                background = GradientDrawable().apply {
-                    orientation = GradientDrawable.Orientation.LEFT_RIGHT
-                    colors = intArrayOf(RED_BRIGHT, RED_DEEP)
-                    cornerRadius = dp(ctx, 16).toFloat()
+            body.addView(saveAndRestartButton(ctx) {
+                JustPlay.sites.forEach { site ->
+                    try {
+                        CloudStreamApp.setKey(
+                            "JUSTPLAY_SITE_${site.id}",
+                            switches[site.id]?.isChecked ?: true
+                        )
+                    } catch (_: Exception) {}
                 }
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(ctx, 12) }
-                setPadding(0, dp(ctx, 15), 0, dp(ctx, 15))
-                setOnClickListener {
-                    JustPlay.sites.forEach { site ->
-                        try {
-                            CloudStreamApp.setKey(
-                                "JUSTPLAY_SITE_${site.id}",
-                                switches[site.id]?.isChecked ?: true
-                            )
-                        } catch (_: Exception) {}
-                    }
-                    AlertDialog.Builder(ctx)
-                        .setTitle("Restart Required")
-                        .setMessage("Sources saved. Restart CloudStream now to apply them?")
-                        .setPositiveButton("Restart") { _, _ -> restartApp(ctx) }
-                        .setNegativeButton("Later") { _, _ ->
-                            try {
-                                MainActivity.reloadHomeEvent.invoke(true)
-                            } catch (_: Throwable) {}
-                        }
-                        .show()
-                }
-            }
-            body.addView(save)
+                confirmRestart(ctx, "Sources saved. Restart CloudStream now to apply them?")
+            })
 
             body.addView(TextView(ctx).apply {
                 text = "Changes apply after the app restarts"
@@ -544,8 +603,7 @@ object JustPlaySettings {
     // ── MANAGE SOURCES window ──
     private fun openManageSources(ctx: Context) {
         subWindow(ctx, "MANAGE SOURCES") { body ->
-            body.addView(labelBlock(ctx, "Link modes",
-                "Choose which links load in the player. One mode is always active."))
+            body.addView(labelBlock(ctx, "Link modes", null))
 
             // refs resolved after the rows exist, so the change handlers can
             // reach the sibling switch/row without self-capture
@@ -564,18 +622,13 @@ object JustPlaySettings {
                         guard = true
                         bounceBackOn(ctx, row, sw)
                         guard = false
-                        return
                     }
-                    // stream mode is on, so download-only may go off
-                    JustPlay.setDownloadOnly(false)
                     return
                 }
-                // download-only wins -> stream-only flips off automatically
+                // download-only wins -> stream-only flips off in the UI
                 guard = true
                 streamSwitch?.isChecked = false
                 guard = false
-                JustPlay.setDownloadOnly(true)
-                JustPlay.setStreamOnly(false)
             }
 
             fun streamChanged(checked: Boolean) {
@@ -587,27 +640,18 @@ object JustPlaySettings {
                         guard = true
                         bounceBackOn(ctx, row, sw)
                         guard = false
-                        return
                     }
-                    JustPlay.setStreamOnly(false)
                     return
                 }
                 guard = true
                 dlSwitch?.isChecked = false
                 guard = false
-                JustPlay.setStreamOnly(true)
-                JustPlay.setDownloadOnly(false)
             }
 
             // Download-only row (OFF by default)
             val (rowDl, swDl) = toggleRow(
-                ctx,
-                "Download Only Sources",
-                "Only download-type links load — 10Gbps, GDflix Instant Download, " +
-                    "Instant Download, Download. Everything else stays hidden, and " +
-                    "the download links are tagged (DOWNLOAD ONLY).",
-                JustPlay.downloadOnlyEnabled(),
-                ::dlChanged
+                ctx, "Download Only Sources", null,
+                JustPlay.downloadOnlyEnabled(), ::dlChanged
             )
             dlSwitch = swDl
             downloadRow = rowDl
@@ -615,67 +659,23 @@ object JustPlaySettings {
 
             // Stream-only row (ON by default)
             val (rowSt, swSt) = toggleRow(
-                ctx,
-                "Stream Only Sources",
-                "Only streamable links load. Download-type links never appear " +
-                    "in the player at all.",
-                JustPlay.streamOnlyEnabled(),
-                ::streamChanged
+                ctx, "Stream Only Sources", null,
+                JustPlay.streamOnlyEnabled(), ::streamChanged
             )
             streamSwitch = swSt
             streamRow = rowSt
             body.addView(rowSt)
 
-            // info block: which names count as download-only
-            body.addView(labelBlock(ctx, "Counted as download-only",
-                "Matched by name on every link before it reaches the player"))
-            body.addView(infoRow(ctx, "10Gbps",
-                "Hub-Cloud & V-Drive fast download workers"))
-            body.addView(infoRow(ctx, "GDflix Instant Download",
-                "GDFlix instant-download server"))
-            body.addView(infoRow(ctx, "Instant Download",
-                "Hub-Cloud instant links"))
-            body.addView(infoRow(ctx, "Download",
-                "Download File and every other download-named link"))
-
-            body.addView(TextView(ctx).apply {
-                text = "Applies instantly — no restart needed"
-                textSize = 11f; setTextColor(SUBTEXT); gravity = Gravity.CENTER
-                setPadding(0, dp(ctx, 12), 0, 0)
+            // SAVE & RESTART — persists the pair shown in the UI
+            val dlRef = dlSwitch
+            val streamRef = streamSwitch
+            body.addView(saveAndRestartButton(ctx) {
+                JustPlay.setDownloadOnly(dlRef?.isChecked == true)
+                JustPlay.setStreamOnly(streamRef?.isChecked == true)
+                confirmRestart(ctx, "Link modes saved. Restart CloudStream now to apply them?")
             })
         }
     }
-
-    private fun infoRow(ctx: Context, title: String, desc: String): LinearLayout =
-        LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = shape(SURFACE_2, 12, ctx, 1, BORDER)
-            setPadding(dp(ctx, 14), dp(ctx, 11), dp(ctx, 14), dp(ctx, 11))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(ctx, 6) }
-            addView(TextView(ctx).apply {
-                text = "•"; setTextColor(RED); textSize = 16f
-                setTypeface(typeface, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { rightMargin = dp(ctx, 10) }
-            })
-            val col = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            col.addView(TextView(ctx).apply {
-                text = title; setTextColor(TEXT); textSize = 13f
-                setTypeface(typeface, Typeface.BOLD)
-            })
-            col.addView(TextView(ctx).apply {
-                text = desc; setTextColor(SUBTEXT); textSize = 10.5f
-                setPadding(0, dp(ctx, 2), 0, 0)
-            })
-            addView(col)
-        }
 
     private fun actionRow(
         ctx: Context, label: String, desc: String?,
