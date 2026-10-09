@@ -28,6 +28,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.nicehttp.NiceResponse
 import kotlinx.coroutines.delay
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -45,7 +46,7 @@ class AnimeTHProvider : MainAPI() {
 
     override var mainUrl = "https://anime-th.com"
     override var name = "AnimeTH"
-    override var lang = "en"
+    override var lang = "th"
     override val hasMainPage = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(
@@ -82,8 +83,30 @@ class AnimeTHProvider : MainAPI() {
         private const val MIN_COUNTERPART_SCORE = 0.55
 
         private val EP_ID_REGEX = Regex("""watch/([A-Za-z0-9]+)(?:\.html)?/?(?:[?#].*)?$""")
-        private val EP_NUM_REGEX = Regex("""ตอนที่\s*(\d+)""")
+
+        // Episode names sometimes join the number with an underscore
+        // (ตอนที่_1 on movie collections), not only a space.
+        private val EP_NUM_REGEX = Regex("""ตอนที่[\s_]*(\d+)""")
         private val FILE_ID_REGEX = Regex("""anime\.tonytonychopper\.net/v2/([A-Za-z0-9]+)""")
+        private val RX_PLAYBACK_SID = Regex("""playback/v/([A-Za-z0-9]+)/""")
+
+        private val CLEAN_WORDS = listOf(
+            "(Thai)", "อัพเดตตอนล่าสุด", "อัพเดตล่าสุด", "อัพเดตทุกตอน", "รวมทุกภาค", "ครบทุกตอน"
+        )
+
+        // Regexes are compiled once. Android's ICU engine rejects patterns that
+        // leave a closing ] or } unescaped while the opening one is escaped
+        // (PatternSyntaxException), so every closing bracket below is escaped.
+        private val RX_THAI_WORD = Regex("""thai""", RegexOption.IGNORE_CASE)
+        private val RX_GROUPS = Regex("""\([^)]*\)|\[[^\]]*\]|\{[^}]*\}""")
+        private val RX_ORDINAL_SEASON = Regex("""(\d+)(st|nd|rd|th)\s+season""", RegexOption.IGNORE_CASE)
+        private val RX_SEASON_EN = Regex("""season\s*(\d+)""", RegexOption.IGNORE_CASE)
+        private val RX_SEASON_TH = Regex("""ภาค\s*(\d+)""")
+        private val RX_SEASON_ALT_TH = Regex("""ซีซั่น\s*(\d+)(\s*-\s*\d+)?""")
+        private val RX_YEAR_TH = Regex("""ปี\s*(\d+)(\s*-\s*\d+)?""")
+        private val RX_PART_EN = Regex("""part\s*(\d+)""", RegexOption.IGNORE_CASE)
+        private val RX_DASH_BANG = Regex("""[-!]""")
+        private val RX_SEASON_TOKEN = Regex("""(?:^|\s)([sp]\d+)(?:$|\s)""")
 
         fun similarity(a: String, b: String): Double {
             val ta = a.split(" ").filter { it.isNotBlank() }.toSet()
@@ -94,25 +117,23 @@ class AnimeTHProvider : MainAPI() {
 
         /** First s/p season token of a cleaned title, e.g. "s2" from "... s2 ...". */
         fun seasonToken(cleaned: String): String? {
-            return Regex("""(?:^|\s)([sp]\d+)(?:$|\s)""").find(cleaned)?.groupValues?.get(1)
+            return RX_SEASON_TOKEN.find(cleaned)?.groupValues?.get(1)
         }
 
         /** Normalizes titles for comparison; season numbers are kept as s1/p1 tokens. */
         fun cleanTitle(raw: String): String {
             var t = raw
             for (w in NAME_SUFFIXES) t = t.replace(w, " ")
-            for (w in listOf("(Thai)", "อัพเดตตอนล่าสุด", "อัพเดตล่าสุด", "อัพเดตทุกตอน", "รวมทุกภาค", "ครบทุกตอน")) {
-                t = t.replace(w, " ")
-            }
-            t = t.replace(Regex("""thai""", RegexOption.IGNORE_CASE), " ")
-            t = t.replace(Regex("""\([^)]*\)|\[[^\]]]*]|\{[^}]*}"""), " ")
-            t = t.replace(Regex("""(\d+)(st|nd|rd|th)\s+season""", RegexOption.IGNORE_CASE), "s$1")
-            t = t.replace(Regex("""season\s*(\d+)""", RegexOption.IGNORE_CASE), "s$1")
-            t = t.replace(Regex("""ภาค\s*(\d+)"""), "s$1")
-            t = t.replace(Regex("""ซีซั่น\s*(\d+)(\s*-\s*\d+)?"""), "s$1")
-            t = t.replace(Regex("""ปี\s*(\d+)(\s*-\s*\d+)?"""), "p$1")
-            t = t.replace(Regex("""part\s*(\d+)""", RegexOption.IGNORE_CASE), "p$1")
-            t = t.replace(Regex("""[-!]"""), " ")
+            for (w in CLEAN_WORDS) t = t.replace(w, " ")
+            t = RX_THAI_WORD.replace(t, " ")
+            t = RX_GROUPS.replace(t, " ")
+            t = RX_ORDINAL_SEASON.replace(t, "s$1")
+            t = RX_SEASON_EN.replace(t, "s$1")
+            t = RX_SEASON_TH.replace(t, "s$1")
+            t = RX_SEASON_ALT_TH.replace(t, "s$1")
+            t = RX_YEAR_TH.replace(t, "p$1")
+            t = RX_PART_EN.replace(t, "p$1")
+            t = RX_DASH_BANG.replace(t, " ")
             return t.split(" ").filter { it.isNotBlank() }.joinToString(" ").lowercase()
         }
     }
@@ -146,14 +167,14 @@ class AnimeTHProvider : MainAPI() {
                 gridCards(
                     app.get(
                         "$mainUrl/category/${request.data.removePrefix("cat_")}/",
-                        headers = mapOf("User-Agent" to UA)
+                        headers = siteHeaders()
                     ).document
                 )
             request.data.startsWith("genre_") ->
                 gridCards(
                     app.get(
                         "$mainUrl/genre/${request.data.removePrefix("genre_")}/",
-                        headers = mapOf("User-Agent" to UA)
+                        headers = siteHeaders()
                     ).document
                 )
             else -> emptyList()
@@ -165,7 +186,7 @@ class AnimeTHProvider : MainAPI() {
 
     private suspend fun homeSection(which: String): List<SearchResponse> {
         val wanted = if (which == "home_latest") SECTION_LATEST else SECTION_REVIEWED
-        val doc = app.get(mainUrl, headers = mapOf("User-Agent" to UA)).document
+        val doc = app.get(mainUrl, headers = siteHeaders()).document
         for (section in doc.select("section.mb-10")) {
             if (section.selectFirst("h2")?.text()?.trim() != wanted) continue
             return (section.select("a.block") + section.select("a.flex"))
@@ -175,7 +196,7 @@ class AnimeTHProvider : MainAPI() {
     }
 
     private suspend fun scoreTop(): List<SearchResponse> {
-        val doc = app.get("$mainUrl/scoretop/", headers = mapOf("User-Agent" to UA)).document
+        val doc = app.get("$mainUrl/scoretop/", headers = siteHeaders()).document
         return doc.select("div.space-y-2 > a[href*=/anime/]").mapNotNull { cardFromAnchor(it) }
     }
 
@@ -196,6 +217,28 @@ class AnimeTHProvider : MainAPI() {
             ?: img?.attr("src")?.takeIf { it.startsWith("http") }
         val category = a.selectFirst(".cate-ribbon")?.text()?.trim()
         return searchResponse(title, slug, poster, category)
+    }
+
+    /** Site-wide request headers; the file2 master endpoint answers "null" without Accept. */
+    private fun siteHeaders(referer: String? = null, xhr: Boolean = false): Map<String, String> {
+        val h = linkedMapOf("User-Agent" to UA, "Accept" to "*/*")
+        if (xhr) h["X-Requested-With"] = "XMLHttpRequest"
+        if (referer != null) h["Referer"] = referer
+        return h
+    }
+
+    /**
+     * GET with one retry on network exceptions and 5xx responses; some mobile
+     * carriers briefly reset or intercept TLS connections and a single retry
+     * must not kill the whole request.
+     */
+    private suspend fun fetchPageRetry(url: String, referer: String? = null): NiceResponse? {
+        repeat(2) { attempt ->
+            val res = runCatching { app.get(url, headers = siteHeaders(referer)) }.getOrNull()
+            if (res != null && res.code < 500) return res
+            if (attempt == 0) delay(1200)
+        }
+        return null
     }
 
     private fun searchResponse(title: String, slug: String, poster: String?, category: String?): SearchResponse {
@@ -258,11 +301,7 @@ class AnimeTHProvider : MainAPI() {
     private suspend fun quickAjaxNodes(q: String): List<JsonNode> {
         val body = app.get(
             "$mainUrl/vendor/search-ajax.php?q=" + URLEncoder.encode(q, "UTF-8"),
-            headers = mapOf(
-                "User-Agent" to UA,
-                "X-Requested-With" to "XMLHttpRequest",
-                "Referer" to "$mainUrl/",
-            )
+            headers = siteHeaders("$mainUrl/", xhr = true)
         ).text
         val results = mapper.readTree(body).path("results")
         return (0 until results.size()).mapNotNull { results.get(it) }
@@ -272,11 +311,7 @@ class AnimeTHProvider : MainAPI() {
         val html = app.post(
             "$mainUrl/query/",
             data = mapOf("query" to q),
-            headers = mapOf(
-                "User-Agent" to UA,
-                "X-Requested-With" to "XMLHttpRequest",
-                "Referer" to "$mainUrl/search/",
-            )
+            headers = siteHeaders("$mainUrl/search/", xhr = true)
         ).text
         return gridCards(org.jsoup.Jsoup.parse(html))
     }
@@ -289,7 +324,10 @@ class AnimeTHProvider : MainAPI() {
         val slug = slugFromHref(url)
         if (slug.isBlank()) return null
 
-        val res = app.get("$mainUrl/anime/$slug/", headers = mapOf("User-Agent" to UA))
+        val res = fetchPageRetry("$mainUrl/anime/$slug/") ?: run {
+            Log.d(TAG, "load unreachable: $slug")
+            return null
+        }
         if (res.code >= 400) {
             Log.d(TAG, "load failed: $slug code=${res.code}")
             return null
@@ -461,17 +499,17 @@ class AnimeTHProvider : MainAPI() {
 
     private suspend fun loadCounterpartLang(slug: String): String? {
         return runCatching {
-            val res = app.get("$mainUrl/anime/$slug/", headers = mapOf("User-Agent" to UA))
+            val res = fetchPageRetry("$mainUrl/anime/$slug/") ?: return null
             if (res.code >= 400) return null
             detectLang(res.document.selectFirst("title")?.text()?.trim() ?: "", slug)
         }.getOrNull()
     }
 
     private suspend fun loadCounterpartEpisodes(slug: String): List<EpItem> {
+        val res = fetchPageRetry("$mainUrl/anime/$slug/") ?: return emptyList()
+        if (res.code >= 400) return emptyList()
         return runCatching {
-            app.get("$mainUrl/anime/$slug/", headers = mapOf("User-Agent" to UA))
-                .document.select("a.ep-item")
-                .mapNotNull { el -> epItemFromAnchor(el) }
+            res.document.select("a.ep-item").mapNotNull { el -> epItemFromAnchor(el) }
         }.getOrDefault(emptyList())
     }
 
@@ -534,14 +572,14 @@ class AnimeTHProvider : MainAPI() {
         return runCatching {
             val baseJs = app.get(
                 "$mainUrl/base/$epId/",
-                headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/watch/$epId.html")
+                headers = siteHeaders("$mainUrl/watch/$epId.html")
             ).text
-            val sid = Regex("""playback/v/([A-Za-z0-9]+)/""").find(baseJs)?.groupValues?.get(1)
+            val sid = RX_PLAYBACK_SID.find(baseJs)?.groupValues?.get(1)
                 ?: return@runCatching null
             delay(400)
             val page = app.get(
                 "$STREAM_BASE/playback/v/$sid/",
-                headers = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/")
+                headers = siteHeaders("$mainUrl/")
             ).text
             FILE_ID_REGEX.find(page)?.groupValues?.get(1)
         }.onFailure { Log.d(TAG, "resolve failed for $epId: ${it.message}") }.getOrNull()
@@ -551,11 +589,7 @@ class AnimeTHProvider : MainAPI() {
         return runCatching {
             app.get(
                 "$FILE_BASE/file2/$fileId/",
-                headers = mapOf(
-                    "User-Agent" to UA,
-                    "Accept" to "*/*",
-                    "Referer" to "$FILE_BASE/v2/$fileId",
-                ),
+                headers = siteHeaders("$FILE_BASE/v2/$fileId"),
                 timeout = 20_000L
             ).text
         }.getOrDefault("")
