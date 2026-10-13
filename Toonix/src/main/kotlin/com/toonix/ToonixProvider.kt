@@ -26,6 +26,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.net.URLEncoder
 import java.text.Normalizer
 
 class Toonix : MainAPI() {
@@ -271,6 +272,8 @@ class Toonix : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse>? {
         if (query.isBlank()) return null
+        siteSearch(query)?.let { return it }
+
         var cards = searchCatalog.load()
         if (cards.isEmpty()) {
             cards = try {
@@ -303,6 +306,25 @@ class Toonix : MainAPI() {
         ).map { it.second }
 
         return matches.mapNotNull { cardToSearch(it) }
+    }
+
+    private suspend fun siteSearch(query: String): List<SearchResponse>? {
+        val encoded = try {
+            URLEncoder.encode(query.trim(), "UTF-8")
+        } catch (e: Exception) {
+            return null
+        }
+        return try {
+            val (html, _) = ToonixApi.fetchPage("${ToonixApi.BASE}/search?q=$encoded", checkTitle = false)
+            ToonixApi.parseSearchResults(html)
+                .mapNotNull { cardToSearch(it) }
+                .ifEmpty { null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d("Toonix", "site search unavailable: ${e.message}")
+            null
+        }
     }
 
     override suspend fun load(url: String): LoadResponse? {

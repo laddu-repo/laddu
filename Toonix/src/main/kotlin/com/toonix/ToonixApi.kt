@@ -302,6 +302,38 @@ object ToonixApi {
         return parseCards(flight.substring(from, to))
     }
 
+    fun parseSearchResults(html: String): List<ToonixCard> {
+        val body = Jsoup.parse(html).body() ?: return emptyList()
+        val yearRegex = Regex("""(19|20)\d{2}""")
+        val out = LinkedHashMap<String, ToonixCard>()
+        for (el in body.getAllElements()) {
+            val tag = el.tagName()
+            if (tag == "h3" && el.ownText().equals("More like this", ignoreCase = true)) break
+            if (tag != "a") continue
+            val href = el.attr("href")
+            if (!href.startsWith("/show/") && !href.startsWith("/title/")) continue
+            if (out.containsKey(href)) continue
+            val img = el.selectFirst("img[src]")
+            val title = el.selectFirst("h3")?.text()?.takeIf { it.isNotBlank() }
+                ?: img?.attr("alt")?.takeIf { it.isNotBlank() }
+                ?: continue
+            out[href] = ToonixCard(
+                slug = href.substringAfterLast('/'),
+                href = href,
+                poster = img?.attr("src"),
+                title = title,
+                year = el.select("span")
+                    .firstOrNull { yearRegex.matches(it.text()) }
+                    ?.text()?.toIntOrNull(),
+                type = if (href.startsWith("/title/")) "MOVIE" else "SHOW",
+                category = el.select("span")
+                    .firstOrNull { it.text().equals("ANIME", ignoreCase = true) }
+                    ?.text()?.uppercase() ?: "CARTOON"
+            )
+        }
+        return out.values.toList()
+    }
+
     fun parsePlayer(flight: String): ToonixPlayer {
         val servers = mutableListOf<ToonixServerStream>()
         val key = "\"servers\":["
