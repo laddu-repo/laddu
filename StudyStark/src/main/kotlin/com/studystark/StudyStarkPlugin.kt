@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class StudyStarkPlugin : Plugin() {
     override fun load(context: android.content.Context) {
+        StarkApi.attach(context)
         registerMainAPI(StudyStarkProvider())
     }
 }

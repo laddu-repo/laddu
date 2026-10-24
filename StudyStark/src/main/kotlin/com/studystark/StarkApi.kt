@@ -1,5 +1,7 @@
 package com.studystark
 
+import android.content.Context
+import android.util.Log
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.app
@@ -13,8 +15,13 @@ private const val BASE = "https://vidcloud.eu.org"
 // while details/topics use the batch you actually opened
 private const val CONTENTS_BATCH = "634bd315ed7a360018558283"
 
+private const val TAG = "StudyStark"
+
 private val UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+private const val CATALOG_URL = "https://studystark.github.io/batches/batches.json"
+private const val CATALOG_DISK_TTL = 24L * 60 * 60 * 1000 // 24h
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CatalogBatch(
@@ -167,6 +174,44 @@ object StarkApi {
     private var catalogAt: Long = 0
     private val catalogMutex = Mutex()
 
+    // app context for the on-disk catalog cache, attached at plugin load
+    @Volatile
+    private var appContext: Context? = null
+
+    fun attach(context: Context) {
+        appContext = context
+    }
+
+    private fun catalogFile(): java.io.File? = runCatching {
+        appContext?.filesDir?.let { dir -> java.io.File(dir, "batches_catalog.json") }
+    }.getOrNull()
+
+    /** Serve the catalog from the disk copy if it is fresh enough. */
+    private fun loadDiskCatalog(maxAgeMs: Long): CatalogFile? {
+        val file = catalogFile() ?: return null
+        if (!file.isFile) return null
+        val age = System.currentTimeMillis() - file.lastModified()
+        if (age > maxAgeMs) return null
+        val text = runCatching { file.readText() }.getOrNull() ?: run {
+            Log.w(TAG, "disk catalog unreadable, falling back to network")
+            return null
+        }
+        val parsed = runCatching { parseJson<CatalogFile>(text) }.getOrNull() ?: run {
+            Log.w(TAG, "disk catalog no longer parses, refetching")
+            return null
+        }
+        Log.i(TAG, "catalog served from disk cache (${text.length / 1024}KB, ${age / 60000}min old)")
+        return parsed
+    }
+
+    private fun saveDiskCatalog(text: String) {
+        val file = catalogFile() ?: return
+        runCatching {
+            file.writeText(text)
+            Log.i(TAG, "catalog saved to disk cache")
+        }.onFailure { Log.w(TAG, "could not persist catalog: ${it.message}") }
+    }
+
     private fun baseHeaders(): Map<String, String> = mapOf(
         "User-Agent" to UA,
         "Accept" to "application/json, text/plain, */*",
@@ -183,6 +228,8 @@ object StarkApi {
     private fun authHeaders(): Map<String, String> {
         val h = baseHeaders().toMutableMap()
         token?.let { h["Authorization"] = "Bearer $it" }
+        // the browser sends all three of these on every api call (har verified)
+        h["Client-Version"] = "2.1.6"
         h["Client-Type"] = "WEB"
         h["Client-Id"] = "5eb393ee95fab7468a79d189"
         h["Origin"] = BASE
@@ -202,24 +249,39 @@ object StarkApi {
                     phpSession = Regex("PHPSESSID=([^;]+)").find(raw)?.groupValues?.get(1)
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "homepage session fetch failed (non-fatal): ${e.javaClass.simpleName}: ${e.message}")
         }
 
-        val res = app.get(
-            "$BASE/generate_token.php",
-            headers = baseHeaders() + mapOf("Cookie" to cookieHeader())
-        )
+        val res = try {
+            app.get(
+                "$BASE/generate_token.php",
+                headers = baseHeaders() + mapOf("Cookie" to cookieHeader())
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "token request failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw StarkBlocked(
+                "Could not reach vidcloud.eu.org (${e.javaClass.simpleName}). " +
+                    "Check your connection or try without VPN."
+            )
+        }
         if (res.code == 403) {
+            Log.e(TAG, "token request blocked with HTTP 403 by the host")
             throw StarkBlocked(
                 "vidcloud.eu.org refused the connection (403). " +
                     "Try without VPN, or wait a bit - the host blocks some networks."
             )
         }
+        if (res.code != 200) {
+            Log.e(TAG, "token request returned HTTP ${res.code}")
+        }
         val reply = runCatching { parseJson<TokenReply>(res.text) }.getOrNull()
         val tok = reply?.access_token
         if (tok.isNullOrBlank()) {
+            Log.e(TAG, "token reply unusable: HTTP ${res.code}, body: ${res.text.take(120)}")
             throw StarkBlocked("Could not fetch the site token, try again later.")
         }
+        Log.i(TAG, "token acquired (length ${tok.length})")
         token = tok
         tok
     }
@@ -242,20 +304,63 @@ object StarkApi {
         if (cached != null && System.currentTimeMillis() - catalogAt < 30 * 60 * 1000L) {
             return cached
         }
-        val res = app.get(
-            "https://studystark.github.io/batches/batches.json",
-            headers = mapOf(
-                "User-Agent" to UA,
-                "Accept" to "*/*",
-                "Referer" to "$BASE/",
+
+        // fresh disk copy? parse it instead of pulling 7MB again
+        if (cached == null) {
+            val disk = loadDiskCatalog(CATALOG_DISK_TTL)
+            if (disk != null && !disk.data.isNullOrEmpty()) {
+                catalogCache = disk.data
+                vidyapeethCache = disk.vidyapeeth_batches.orEmpty()
+                catalogAt = System.currentTimeMillis()
+                return disk.data
+            }
+        }
+
+        val started = System.currentTimeMillis()
+        val res = try {
+            app.get(
+                CATALOG_URL,
+                headers = mapOf(
+                    "User-Agent" to UA,
+                    "Accept" to "*/*",
+                    "Referer" to "$BASE/",
+                )
             )
-        )
+        } catch (e: Exception) {
+            Log.e(TAG, "catalog download failed after ${System.currentTimeMillis() - started}ms: ${e.javaClass.simpleName}: ${e.message}")
+            // stale disk copy is better than nothing
+            val stale = loadDiskCatalog(Long.MAX_VALUE)
+            if (stale != null && !stale.data.isNullOrEmpty()) {
+                Log.w(TAG, "using STALE disk catalog (network failed)")
+                catalogCache = stale.data
+                vidyapeethCache = stale.vidyapeeth_batches.orEmpty()
+                catalogAt = 0 // do not count this as fresh
+                return stale.data
+            }
+            throw e
+        }
+        Log.i(TAG, "catalog downloaded: HTTP ${res.code}, ${res.text.length / 1024}KB in ${System.currentTimeMillis() - started}ms")
+
         val parsed = runCatching { parseJson<CatalogFile>(res.text) }.getOrNull()
-        val list = parsed?.data.orEmpty()
-        if (list.isEmpty()) return cached.orEmpty()
+        val list = parsed?.data
+        if (list.isNullOrEmpty()) {
+            Log.e(TAG, "catalog parse produced no batches (HTTP ${res.code}, body starts: ${res.text.take(80)})")
+            // last resort: stale disk copy
+            val stale = loadDiskCatalog(Long.MAX_VALUE)
+            if (stale != null && !stale.data.isNullOrEmpty()) {
+                Log.w(TAG, "using STALE disk catalog (parse failed)")
+                catalogCache = stale.data
+                vidyapeethCache = stale.vidyapeeth_batches.orEmpty()
+                return stale.data
+            }
+            return cached.orEmpty()
+        }
         catalogCache = list
         vidyapeethCache = parsed?.vidyapeeth_batches.orEmpty()
         catalogAt = System.currentTimeMillis()
+        if (list.size > 1000) {
+            saveDiskCatalog(res.text)
+        }
         return list
     }
 
@@ -271,6 +376,7 @@ object StarkApi {
             headers = authHeaders()
         )
         if (res.code == 401 || res.code == 403) {
+            Log.w(TAG, "batch details HTTP ${res.code}, refreshing token once")
             invalidateToken()
             ensureToken()
             res = app.get(
@@ -279,6 +385,7 @@ object StarkApi {
             )
         }
         if (!res.text.trimStart().startsWith("{")) {
+            Log.e(TAG, "batch details blocked (HTTP ${res.code}, body: ${res.text.take(80)})")
             throw StarkBlocked("Batch details blocked by the host, retry without VPN.")
         }
         return runCatching { parseJson<DetailsReply>(res.text) }.getOrNull()?.data
@@ -301,6 +408,9 @@ object StarkApi {
                 "$BASE/api/v2/batches/$batchId/subject/$subjectId/topics?page=$page",
                 headers = authHeaders()
             )
+            if (res.code != 200) {
+                Log.e(TAG, "topics HTTP ${res.code} for subject $subjectId page $page: ${res.text.take(80)}")
+            }
             val reply = listReply<TopicItem>(res.text)
             val chunk = reply.data.orEmpty()
             out += chunk
@@ -326,6 +436,9 @@ object StarkApi {
                     "?tag=$topicId&contentType=$contentType&page=$page",
                 headers = authHeaders()
             )
+            if (res.code != 200) {
+                Log.e(TAG, "contents($contentType) HTTP ${res.code} for topic $topicId page $page: ${res.text.take(80)}")
+            }
             val reply = listReply<ContentItem>(res.text)
             val chunk = reply.data.orEmpty()
             out += chunk
@@ -351,6 +464,9 @@ object StarkApi {
                     "&batchId=$batchId&batchSubjectId=$subjectId&chapterId=$topicId",
                 headers = authHeaders()
             )
+            if (res.code != 200) {
+                Log.e(TAG, "dpp list HTTP ${res.code} page $page: ${res.text.take(80)}")
+            }
             val reply = runCatching { parseJson<DppListReply>(res.text) }.getOrNull() ?: break
             val chunk = reply.data.orEmpty()
             out += chunk
@@ -408,7 +524,10 @@ object StarkApi {
             )
         )
         val html = res.text
-        if (!html.contains("enc_video_url")) return null
+        if (!html.contains("enc_video_url")) {
+            Log.e(TAG, "play.php returned no video (HTTP ${res.code}, ${html.length} chars): ${html.take(120)}")
+            return null
+        }
 
         fun hidden(id: String): String =
             Regex("<input[^>]*id=\"$id\"[^>]*value=\"([^\"]*)\"").find(html)

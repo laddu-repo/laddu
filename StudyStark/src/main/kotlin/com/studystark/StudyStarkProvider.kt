@@ -56,6 +56,11 @@ class StudyStarkProvider : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Others, TvType.TvSeries)
 
+    // the catalog is one 7MB fetch + parse, give slow networks room
+    override val getMainPageTimeoutMs: Long? = 240_000L
+    override val searchTimeoutMs: Long? = 240_000L
+    override val loadTimeoutMs: Long? = 240_000L
+
     override val mainPage = mainPageOf(
         "all" to "All Batches",
         "IIT-JEE" to "IIT-JEE",
@@ -97,6 +102,13 @@ class StudyStarkProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val rows = rowsFor(request.data)
+        if (rows.isEmpty() && page == 1 && request.data == "all") {
+            // only a real failure makes the whole catalog empty - say so clearly
+            throw ErrorLoadingException(
+                "StudyStark catalog is empty - the download or the github.io catalog failed. " +
+                    "Check Settings > Logcat for lines tagged StudyStark."
+            )
+        }
         val from = (page - 1) * pageSize
         if (from >= rows.size) {
             return newHomePageResponse(request.name, emptyList(), false)
@@ -284,7 +296,7 @@ class StudyStarkProvider : MainAPI() {
                                 videoUrl = rawUrl,
                                 videoName = title,
                                 videoImage = item.videoDetails?.image,
-                                playType = if (item.isDPPVideos == true) "solutions" else "Lecture",
+                                playType = if (item.isDPPVideos == true) "DppVideos" else "Lecture",
                             )
                         }.getOrNull() ?: return@withPermit null
 
