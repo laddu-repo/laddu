@@ -19,10 +19,11 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.lagradost.cloudstream3.CommonActivity
+import com.lagradost.cloudstream3.CommonActivity.showToast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class StarkPdf(
+data class PdfEntry(
     val title: String,
     val url: String,
 )
@@ -36,9 +37,9 @@ object StarkPdf {
      * List the PDFs of a topic first, then open whichever one the user taps.
      * Download button next to every row for one click saves.
      */
-    suspend fun showPicker(title: String, pdfs: List<StarkPdf>) = withContext(Dispatchers.Main) {
-        val activity = CommonActivity.activity ?: return@withContext
-        if (activity.isFinishing || activity.isDestroyed) return@withContext
+    suspend fun showPicker(title: String, pdfs: List<PdfEntry>) = withContext(Dispatchers.Main) {
+        val activity = CommonActivity.activity ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
 
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -51,7 +52,7 @@ object StarkPdf {
             text = title
             textSize = 16f
             setTextColor(Color.WHITE)
-            setPadding(dp(activity, 18).toInt(), dp(activity, 16).toInt(), dp(activity, 18).toInt(), dp(activity, 12).toInt())
+            setPadding(dp(activity, 18f).toInt(), dp(activity, 16f).toInt(), dp(activity, 18f).toInt(), dp(activity, 12f).toInt())
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
         root.addView(header)
@@ -59,7 +60,7 @@ object StarkPdf {
         val scroll = ScrollView(activity).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
         val list = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(activity, 8).toInt(), 0, dp(activity, 8).toInt(), dp(activity, 8).toInt())
+            setPadding(dp(activity, 8f).toInt(), 0, dp(activity, 8f).toInt(), dp(activity, 8f).toInt())
         }
         scroll.addView(list)
 
@@ -67,13 +68,13 @@ object StarkPdf {
             val row = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(activity, 12).toInt(), dp(activity, 12).toInt(), dp(activity, 8).toInt(), dp(activity, 12).toInt())
+                setPadding(dp(activity, 12f).toInt(), dp(activity, 12f).toInt(), dp(activity, 8f).toInt(), dp(activity, 12f).toInt())
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#1F2129"))
-                    cornerRadius = dp(activity, 10)
+                    cornerRadius = dp(activity, 10f)
                 }
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                    setMargins(0, dp(activity, 6).toInt(), 0, 0)
+                    setMargins(0, dp(activity, 6f).toInt(), 0, 0)
                 }
             }
 
@@ -88,11 +89,11 @@ object StarkPdf {
             val open = TextView(activity).apply {
                 text = "Read"
                 textSize = 13f
-                setPadding(dp(activity, 14).toInt(), dp(activity, 8).toInt(), dp(activity, 14).toInt(), dp(activity, 8).toInt())
+                setPadding(dp(activity, 14f).toInt(), dp(activity, 8f).toInt(), dp(activity, 14f).toInt(), dp(activity, 8f).toInt())
                 setTextColor(Color.WHITE)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#4F6DF5"))
-                    cornerRadius = dp(activity, 8)
+                    cornerRadius = dp(activity, 8f)
                 }
                 setOnClickListener {
                     dialog.dismiss()
@@ -104,11 +105,11 @@ object StarkPdf {
             val down = TextView(activity).apply {
                 text = "Save"
                 textSize = 13f
-                setPadding(dp(activity, 14).toInt(), dp(activity, 8).toInt(), dp(activity, 14).toInt(), dp(activity, 8).toInt())
+                setPadding(dp(activity, 14f).toInt(), dp(activity, 8f).toInt(), dp(activity, 14f).toInt(), dp(activity, 8f).toInt())
                 setTextColor(Color.WHITE)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#2A9D4E"))
-                    cornerRadius = dp(activity, 8)
+                    cornerRadius = dp(activity, 8f)
                 }
                 setOnClickListener { downloadPdf(activity, pdf) }
             }
@@ -119,7 +120,7 @@ object StarkPdf {
             row.setOnFocusChangeListener { v, has ->
                 v.background = GradientDrawable().apply {
                     setColor(if (has) Color.parseColor("#2C3040") else Color.parseColor("#1F2129"))
-                    cornerRadius = dp(activity, 10)
+                    cornerRadius = dp(activity, 10f)
                 }
             }
             list.addView(row)
@@ -132,7 +133,7 @@ object StarkPdf {
             gravity = Gravity.CENTER
             textSize = 14f
             setTextColor(Color.WHITE)
-            setPadding(0, dp(activity, 14).toInt(), 0, dp(activity, 14).toInt())
+            setPadding(0, dp(activity, 14f).toInt(), 0, dp(activity, 14f).toInt())
             setOnClickListener { dialog.dismiss() }
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
@@ -146,10 +147,11 @@ object StarkPdf {
         dialog.show()
     }
 
-    /** Fullscreen pdf.js reader on the site's own viewer, with a save button up top. */
-    suspend fun showReader(title: String, pdfUrl: String) = withContext(Dispatchers.Main) {
-        val activity = CommonActivity.activity ?: return@withContext
-        if (activity.isFinishing || activity.isDestroyed) return@withContext
+    /** Fullscreen pdf.js reader on the site's own viewer, with a save button up top.
+     *  Runs from a click listener so the thread is already main. */
+    fun showReader(title: String, pdfUrl: String) {
+        val activity = CommonActivity.activity ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
 
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -163,7 +165,7 @@ object StarkPdf {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#1A1C22"))
-            setPadding(dp(activity, 12).toInt(), dp(activity, 8).toInt(), dp(activity, 12).toInt(), dp(activity, 8).toInt())
+            setPadding(dp(activity, 12f).toInt(), dp(activity, 8f).toInt(), dp(activity, 12f).toInt(), dp(activity, 8f).toInt())
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
 
@@ -179,20 +181,20 @@ object StarkPdf {
         val save = TextView(activity).apply {
             text = "Save PDF"
             textSize = 13f
-            setPadding(dp(activity, 12).toInt(), dp(activity, 6).toInt(), dp(activity, 12).toInt(), dp(activity, 6).toInt())
+            setPadding(dp(activity, 12f).toInt(), dp(activity, 6f).toInt(), dp(activity, 12f).toInt(), dp(activity, 6f).toInt())
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#2A9D4E"))
-                cornerRadius = dp(activity, 8)
+                cornerRadius = dp(activity, 8f)
             }
-            setOnClickListener { downloadPdf(activity, StarkPdf(title, pdfUrl)) }
+            setOnClickListener { downloadPdf(activity, PdfEntry(title, pdfUrl)) }
         }
         bar.addView(save)
 
         val close = TextView(activity).apply {
             text = "✕"
             textSize = 16f
-            setPadding(dp(activity, 14).toInt(), dp(activity, 6).toInt(), dp(activity, 6).toInt(), dp(activity, 6).toInt())
+            setPadding(dp(activity, 14f).toInt(), dp(activity, 6f).toInt(), dp(activity, 6f).toInt(), dp(activity, 6f).toInt())
             setTextColor(Color.WHITE)
             setOnClickListener { dialog.dismiss() }
         }
@@ -241,7 +243,7 @@ object StarkPdf {
     }
 
     /** Hand the pdf to the system download manager so it lands in Downloads as .pdf */
-    fun downloadPdf(ctx: Context, pdf: StarkPdf) {
+    fun downloadPdf(ctx: Context, pdf: PdfEntry) {
         runCatching {
             val name = pdf.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(120)
             val file = pdf.title.substringAfterLast('/')
@@ -255,7 +257,7 @@ object StarkPdf {
                 .addRequestHeader("Referer", StarkApi.baseUrl() + "/")
             val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
             dm.enqueue(request)
-            CommonActivity.showToast?.let { it("Saving $fileName", 0) }
+            showToast("Saving $fileName")
         }
     }
 }

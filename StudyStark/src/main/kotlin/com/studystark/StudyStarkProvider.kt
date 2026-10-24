@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.SeasonData
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.addSeasonNames
+import com.lagradost.cloudstream3.mainPageOf
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
@@ -357,14 +358,14 @@ class StudyStarkProvider : MainAPI() {
             StarkApi.contents(nav.subjectId, nav.topicId, "DppNotes")
         }.getOrDefault(emptyList())
 
-        val pdfs = mutableListOf<StarkPdf>()
+        val pdfs = mutableListOf<PdfEntry>()
         (notes + dppNotes).forEach { item ->
             val isDpp = item.topic?.contains("DPP", true) == true
             item.homeworkIds.orEmpty().forEach { hw ->
                 hw.attachmentIds.orEmpty().forEach { att ->
                     val pdfUrl = att.pdfUrl() ?: return@forEach
                     val title = att.name ?: hw.topic ?: "Notes.pdf"
-                    pdfs.add(StarkPdf(if (isDpp) "DPP · $title" else title, pdfUrl))
+                    pdfs.add(PdfEntry(if (isDpp) "DPP · $title" else title, pdfUrl))
                 }
             }
         }

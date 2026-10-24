@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.lagradost.cloudstream3.CommonActivity
+import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.ui.settings.Globals
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +41,7 @@ object StarkQuiz {
         var y: Float = 0f
     }
 
-    suspend fun showQuizList(title: String, quizzes: List<StarkApi.DppQuizDetails>) =
+    suspend fun showQuizList(title: String, quizzes: List<DppQuizDetails>) =
         withContext(Dispatchers.Main) {
             val activity = CommonActivity.activity ?: return@withContext
             if (activity.isFinishing || activity.isDestroyed) return@withContext
@@ -57,8 +58,8 @@ object StarkQuiz {
                 textSize = 16f
                 setTextColor(Color.WHITE)
                 setPadding(
-                    dp(activity, 18).toInt(), dp(activity, 16).toInt(),
-                    dp(activity, 18).toInt(), dp(activity, 12).toInt()
+                    dp(activity, 18f).toInt(), dp(activity, 16f).toInt(),
+                    dp(activity, 18f).toInt(), dp(activity, 12f).toInt()
                 )
                 layoutParams = LinearLayout.LayoutParams(-1, -2)
             })
@@ -68,7 +69,7 @@ object StarkQuiz {
             }
             val list = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(activity, 8).toInt(), 0, dp(activity, 8).toInt(), dp(activity, 8).toInt())
+                setPadding(dp(activity, 8f).toInt(), 0, dp(activity, 8f).toInt(), dp(activity, 8f).toInt())
             }
             scroll.addView(list)
 
@@ -77,22 +78,22 @@ object StarkQuiz {
                 val card = LinearLayout(activity).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(
-                        dp(activity, 14).toInt(), dp(activity, 12).toInt(),
-                        dp(activity, 14).toInt(), dp(activity, 12).toInt()
+                        dp(activity, 14f).toInt(), dp(activity, 12f).toInt(),
+                        dp(activity, 14f).toInt(), dp(activity, 12f).toInt()
                     )
                     background = GradientDrawable().apply {
                         setColor(Color.parseColor("#1F2129"))
-                        cornerRadius = dp(activity, 10)
+                        cornerRadius = dp(activity, 10f)
                     }
                     layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                        setMargins(0, dp(activity, 6).toInt(), 0, 0)
+                        setMargins(0, dp(activity, 6f).toInt(), 0, 0)
                     }
                     isFocusable = true
                     isFocusableInTouchMode = true
                     setOnFocusChangeListener { v, has ->
                         v.background = GradientDrawable().apply {
                             setColor(if (has) Color.parseColor("#2C3040") else Color.parseColor("#1F2129"))
-                            cornerRadius = dp(activity, 10)
+                            cornerRadius = dp(activity, 10f)
                         }
                     }
                     setOnClickListener {
@@ -126,7 +127,7 @@ object StarkQuiz {
                 gravity = Gravity.CENTER
                 textSize = 14f
                 setTextColor(Color.WHITE)
-                setPadding(0, dp(activity, 14).toInt(), 0, dp(activity, 14).toInt())
+                setPadding(0, dp(activity, 14f).toInt(), 0, dp(activity, 14f).toInt())
                 setOnClickListener { dialog.dismiss() }
                 layoutParams = LinearLayout.LayoutParams(-1, -2)
             })
@@ -142,13 +143,13 @@ object StarkQuiz {
             dialog.show()
         }
 
-    private suspend fun openQuiz(testId: String, quiz: StarkApi.DppQuizDetails) =
-        withContext(Dispatchers.Main) {
-            if (testId.isBlank()) return@withContext
-            val ctx = CommonActivity.activity ?: return@withContext
-            CommonActivity.showToast?.let { it("Opening quiz...", 0) }
-            showQuizPage(ctx, quiz.test?.name ?: "DPP Quiz", testId)
-        }
+    /** runs from a click listener, so we are already on the main thread */
+    private fun openQuiz(testId: String, quiz: DppQuizDetails) {
+        if (testId.isBlank()) return
+        val ctx = CommonActivity.activity ?: return
+        showToast("Opening quiz...")
+        showQuizPage(ctx, quiz.test?.name ?: "DPP Quiz", testId)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun showQuizPage(ctx: android.content.Context, title: String, testId: String) {
@@ -169,7 +170,7 @@ object StarkQuiz {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#1A1C22"))
-            setPadding(dp(ctx, 12).toInt(), dp(ctx, 8).toInt(), dp(ctx, 12).toInt(), dp(ctx, 8).toInt())
+            setPadding(dp(ctx, 12f).toInt(), dp(ctx, 8f).toInt(), dp(ctx, 12f).toInt(), dp(ctx, 8f).toInt())
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
         bar.addView(TextView(ctx).apply {
@@ -182,7 +183,7 @@ object StarkQuiz {
         bar.addView(TextView(ctx).apply {
             text = "✕"
             textSize = 16f
-            setPadding(dp(ctx, 14).toInt(), dp(ctx, 6).toInt(), dp(ctx, 6).toInt(), dp(ctx, 6).toInt())
+            setPadding(dp(ctx, 14f).toInt(), dp(ctx, 6f).toInt(), dp(ctx, 6f).toInt(), dp(ctx, 6f).toInt())
             setTextColor(Color.WHITE)
             setOnClickListener { dialog.dismiss() }
         })
@@ -229,13 +230,13 @@ object StarkQuiz {
         val isTv = runCatching { Globals.isLayout(TV) }.getOrDefault(false)
         var cursor: View? = null
         if (isTv) {
-            val size = dp(ctx, 22).toInt()
+            val size = dp(ctx, 22f).toInt()
             cursor = View(ctx).apply {
                 layoutParams = FrameLayout.LayoutParams(size, size)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(Color.argb(170, 255, 60, 60))
-                    setStroke(dp(ctx, 2).toInt(), Color.WHITE)
+                    setStroke(dp(ctx, 2f).toInt(), Color.WHITE)
                 }
                 elevation = 999f
             }
@@ -252,7 +253,7 @@ object StarkQuiz {
                 syncCursor()
             }
 
-            val step = dp(ctx, 24)
+            val step = dp(ctx, 24f)
             webHolder.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 when (keyCode) {

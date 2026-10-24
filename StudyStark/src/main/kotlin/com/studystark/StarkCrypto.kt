@@ -10,7 +10,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 object StarkCrypto {
 
-    private val KEY = "R7@kP4#xL9!mQ2$v".toByteArray(Charsets.UTF_8)
+    private val KEY = "R7@kP4#xL9!mQ2\$v".toByteArray(Charsets.UTF_8)
     private val IV = "T3!nW8\$qZ5@rK1#p".toByteArray(Charsets.UTF_8)
 
     fun decryptVideoUrl(b64: String): String? {
