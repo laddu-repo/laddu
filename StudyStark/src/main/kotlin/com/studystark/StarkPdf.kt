@@ -38,8 +38,8 @@ object StarkPdf {
      * Download button next to every row for one click saves.
      */
     suspend fun showPicker(title: String, pdfs: List<PdfEntry>) = withContext(Dispatchers.Main) {
-        val activity = CommonActivity.activity ?: return
-        if (activity.isFinishing || activity.isDestroyed) return
+        val activity = CommonActivity.activity ?: return@withContext
+        if (activity.isFinishing || activity.isDestroyed) return@withContext
 
         val dialog = Dialog(activity)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
