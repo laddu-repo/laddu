@@ -245,9 +245,8 @@ object StarkPdf {
     /** Hand the pdf to the system download manager so it lands in Downloads as .pdf */
     fun downloadPdf(ctx: Context, pdf: PdfEntry) {
         runCatching {
-            val name = pdf.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(120)
-            val file = pdf.title.substringAfterLast('/')
-            val fileName = if (file.endsWith(".pdf", true)) file else "$name.pdf"
+            val safe = pdf.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(120)
+            val fileName = if (safe.endsWith(".pdf", true)) safe else "$safe.pdf"
             val request = android.app.DownloadManager.Request(android.net.Uri.parse(pdf.url))
                 .setTitle(fileName)
                 .setDescription("StudyStark PDF")

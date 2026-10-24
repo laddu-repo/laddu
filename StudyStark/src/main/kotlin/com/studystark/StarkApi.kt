@@ -183,7 +183,8 @@ object StarkApi {
     private fun authHeaders(): Map<String, String> {
         val h = baseHeaders().toMutableMap()
         token?.let { h["Authorization"] = "Bearer $it" }
-        h["Client-Version"] = "2.1.6"
+        h["Client-Type"] = "WEB"
+        h["Client-Id"] = "5eb393ee95fab7468a79d189"
         h["Origin"] = BASE
         h["Cookie"] = cookieHeader()
         return h
@@ -204,7 +205,10 @@ object StarkApi {
         } catch (_: Exception) {
         }
 
-        val res = app.get("$BASE/generate_token.php", headers = baseHeaders())
+        val res = app.get(
+            "$BASE/generate_token.php",
+            headers = baseHeaders() + mapOf("Cookie" to cookieHeader())
+        )
         if (res.code == 403) {
             throw StarkBlocked(
                 "vidcloud.eu.org refused the connection (403). " +
@@ -281,6 +285,13 @@ object StarkApi {
             ?: throw StarkBlocked("Could not read batch details.")
     }
 
+    /** the contents endpoint keeps totalCount at zero, so a full page means there is another one */
+    private fun morePages(out: Int, chunk: Int, limit: Int, total: Int): Boolean {
+        if (chunk == 0 || chunk < limit) return false
+        if (total > 0 && out >= total) return false
+        return true
+    }
+
     suspend fun topics(batchId: String, subjectId: String): List<TopicItem> {
         ensureToken()
         val out = mutableListOf<TopicItem>()
@@ -293,8 +304,9 @@ object StarkApi {
             val reply = listReply<TopicItem>(res.text)
             val chunk = reply.data.orEmpty()
             out += chunk
-            val total = reply.paginate?.totalCount ?: chunk.size
-            if (chunk.isEmpty() || out.size >= total) break
+            val limit = reply.paginate?.limit ?: 20
+            val total = reply.paginate?.totalCount ?: -1
+            if (!morePages(out.size, chunk.size, limit, total)) break
             page++
         }
         return out
@@ -317,8 +329,9 @@ object StarkApi {
             val reply = listReply<ContentItem>(res.text)
             val chunk = reply.data.orEmpty()
             out += chunk
-            val total = reply.paginate?.totalCount ?: chunk.size
-            if (chunk.isEmpty() || out.size >= total) break
+            val limit = reply.paginate?.limit ?: 20
+            val total = reply.paginate?.totalCount ?: -1
+            if (!morePages(out.size, chunk.size, limit, total)) break
             page++
         }
         return out
@@ -330,12 +343,23 @@ object StarkApi {
         topicId: String,
     ): List<DppQuizDetails> {
         ensureToken()
-        val res = app.get(
-            "$BASE/api/v3/test-service/tests/new-dpp-list?page=1" +
-                "&batchId=$batchId&batchSubjectId=$subjectId&chapterId=$topicId",
-            headers = authHeaders()
-        )
-        return runCatching { parseJson<DppListReply>(res.text) }.getOrNull()?.data.orEmpty()
+        val out = mutableListOf<DppQuizDetails>()
+        var page = 1
+        while (page < 20) {
+            val res = app.get(
+                "$BASE/api/v3/test-service/tests/new-dpp-list?page=$page" +
+                    "&batchId=$batchId&batchSubjectId=$subjectId&chapterId=$topicId",
+                headers = authHeaders()
+            )
+            val reply = runCatching { parseJson<DppListReply>(res.text) }.getOrNull() ?: break
+            val chunk = reply.data.orEmpty()
+            out += chunk
+            val limit = reply.paginate?.limit ?: 20
+            val total = reply.paginate?.totalCount ?: -1
+            if (!morePages(out.size, chunk.size, limit, total)) break
+            page++
+        }
+        return out
     }
 
     data class PlayPage(
@@ -414,7 +438,14 @@ object StarkApi {
         batchId: String,
         subjectId: String,
         topicId: String,
-    ): String =
-        "$BASE/start-dpp-test/?test_id=$testId&batch_id=$batchId" +
-            "&subject_id=$subjectId&topic_id=$topicId"
+        subjectName: String,
+        topicName: String,
+        testName: String,
+    ): String {
+        fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+        return "$BASE/start-dpp-test/?test_id=$testId&batch_id=$batchId" +
+            "&subject_id=$subjectId&subject_name=${enc(subjectName)}" +
+            "&topic_id=$topicId&topic_name=${enc(topicName)}" +
+            "&test_name=${enc(testName)}"
+    }
 }

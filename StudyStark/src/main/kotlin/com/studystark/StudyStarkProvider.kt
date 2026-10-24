@@ -178,7 +178,7 @@ class StudyStarkProvider : MainAPI() {
                 if ((topic.notes ?: 0) > 0) {
                     episodes.add(
                         newEpisode(MAPPER.writeValueAsString(data.copy(kind = "n"))) {
-                            this.name = "\uD83D\uDCC4 Notes — $tName"
+                            this.name = "Notes — $tName"
                             this.season = sIndex + 1
                         }
                     )
@@ -186,7 +186,7 @@ class StudyStarkProvider : MainAPI() {
                 if ((topic.exercises ?: 0) > 0) {
                     episodes.add(
                         newEpisode(MAPPER.writeValueAsString(data.copy(kind = "q"))) {
-                            this.name = "\uD83D\uDCDD DPP Quiz — $tName"
+                            this.name = "DPP Quiz — $tName"
                             this.season = sIndex + 1
                         }
                     )
@@ -228,12 +228,14 @@ class StudyStarkProvider : MainAPI() {
         val topicId = ep.topic ?: return false
         val nav = Nav(batchId, subjectId, topicId, ep.topicName.orEmpty(), ep.subjectName.orEmpty())
 
-        // the quiz WebView needs this context at hand
+        // the quiz and pdf screens need this context at hand
         CommonActivity.activity?.getSharedPreferences("studystark_nav", android.content.Context.MODE_PRIVATE)
             ?.edit()
             ?.putString("batch_id", batchId)
             ?.putString("subject_id", subjectId)
             ?.putString("topic_id", topicId)
+            ?.putString("subject_name", ep.subjectName.orEmpty())
+            ?.putString("topic_name", ep.topicName.orEmpty())
             ?.apply()
 
         return when (ep.kind) {
@@ -282,7 +284,7 @@ class StudyStarkProvider : MainAPI() {
                                 videoUrl = rawUrl,
                                 videoName = title,
                                 videoImage = item.videoDetails?.image,
-                                playType = if (item.isDPPVideos == true) "DppVideos" else "Lecture",
+                                playType = if (item.isDPPVideos == true) "solutions" else "Lecture",
                             )
                         }.getOrNull() ?: return@withPermit null
 
@@ -325,6 +327,11 @@ class StudyStarkProvider : MainAPI() {
                 }
                 found = true
             }
+        }
+        if (!found) {
+            throw ErrorLoadingException(
+                "Could not resolve a stream for ${nav.topicName}. Try again in a moment."
+            )
         }
         return found
     }
@@ -372,19 +379,6 @@ class StudyStarkProvider : MainAPI() {
 
         if (pdfs.isEmpty()) {
             throw ErrorLoadingException("No notes PDFs found for ${nav.topicName}.")
-        }
-
-        pdfs.forEach { pdf ->
-            callback.invoke(
-                newExtractorLink(
-                    name,
-                    "\uD83D\uDCC4 ${pdf.title}",
-                    pdf.url,
-                    ExtractorLinkType.VIDEO,
-                ) {
-                    this.referer = "${StarkApi.baseUrl()}/"
-                }
-            )
         }
 
         StarkPdf.showPicker(

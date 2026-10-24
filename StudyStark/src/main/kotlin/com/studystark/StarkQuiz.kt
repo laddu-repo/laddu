@@ -160,6 +160,8 @@ object StarkQuiz {
         val batchId = data.getString("batch_id", "").orEmpty()
         val subjectId = data.getString("subject_id", "").orEmpty()
         val topicId = data.getString("topic_id", "").orEmpty()
+        val subjectName = data.getString("subject_name", "").orEmpty()
+        val topicName = data.getString("topic_name", "").orEmpty()
 
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -222,7 +224,17 @@ object StarkQuiz {
                 }
             }
             webChromeClient = WebChromeClient()
-            loadUrl(StarkApi.quizUrl(testId, batchId, subjectId, topicId))
+            loadUrl(
+                StarkApi.quizUrl(
+                    testId = testId,
+                    batchId = batchId,
+                    subjectId = subjectId,
+                    topicId = topicId,
+                    subjectName = subjectName,
+                    topicName = topicName,
+                    testName = title,
+                )
+            )
         }
         webHolder.addView(webView)
 
