@@ -1,0 +1,11 @@
+package com.studystark
+
+import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
+
+@CloudstreamPlugin
+class StudyStarkPlugin : Plugin() {
+    override fun load(context: android.content.Context) {
+        registerMainAPI(StudyStarkProvider())
+    }
+}
