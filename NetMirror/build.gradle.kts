@@ -1,16 +1,11 @@
-version = 13
-
-android {
-    buildFeatures {
-        buildConfig = true
-    }
-}
+version = 14
 
 cloudstream {
-    language = "hi"
-    description = "Netflix, PrimeVideo, Hotstar, Disney — multiple languages via netmirror"
-    authors = listOf("raghav")
+    language = "en"
+    description = "Movies & TV series from NetMirror - trending, multi-language (Hindi/Telugu/Tamil/Kannada/Malayalam/English), K-Drama, Turkish & Western series"
+    authors = listOf("KSHITIJ8473")
+
     status = 1
-    tvTypes = listOf("Movie", "TvSeries", "Anime", "AsianDrama")
-    iconUrl = "https://raw.githubusercontent.com/KSHITIJ8473/raghav/master/NetMirror/logo.jpeg"
+    tvTypes = listOf("Movie", "TvSeries", "AsianDrama")
+    iconUrl = "https://raw.githubusercontent.com/laddu-repo/laddu/master/NetMirror/logo.jpeg"
 }
